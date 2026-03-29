@@ -263,7 +263,6 @@ function initDatabase() {
         updated_by_username TEXT,
         updated_at INTEGER NOT NULL
     )`);
-
     const bootstrapUsers = getBootstrapUsersFromEnv();
     if (bootstrapUsers.length) {
         for (const u of bootstrapUsers) {
