@@ -1286,6 +1286,17 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ error: 'Слишком много попыток входа. Подождите 5 минут.' }));
         return;
     }
+
+    // Публичная конфигурация страницы авторизации (без секрета)
+    if (req.url === '/api/public-config' && req.method === 'GET') {
+        const supportUrl = String(process.env.AUTH_SUPPORT_URL || '').trim();
+        const supportLabel = String(process.env.AUTH_SUPPORT_LABEL || '').trim();
+        sendJson(res, 200, {
+            authSupportUrl: supportUrl || null,
+            authSupportLabel: supportLabel || null
+        });
+        return;
+    }
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', () => {

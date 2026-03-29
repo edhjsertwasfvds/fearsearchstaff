@@ -143,6 +143,48 @@ function migrateAllUserLauncherKeys() {
     }
 }
 
+/**
+ * Пользователи, которые должны существовать из env.
+ * Поддержка:
+ * 1) DEFAULT_USERS=username:password:level,...
+ * 2) ADMIN_USERNAME + ADMIN_PASSWORD (+ ADMIN_LEVEL, ADMIN_DISPLAY_NAME)
+ */
+function getBootstrapUsersFromEnv() {
+    const users = [];
+    const seen = new Set();
+    const rawUsers = process.env.DEFAULT_USERS || '';
+    if (rawUsers) {
+        for (const entry of rawUsers.split(',')) {
+            const parts = entry.trim().split(':');
+            if (parts.length < 2) continue;
+            const [usernameRaw, passwordRaw, levelStr] = parts;
+            const username = String(usernameRaw || '').trim();
+            const password = String(passwordRaw || '');
+            if (!username || !password) continue;
+            const level = Math.min(Math.max(parseInt(levelStr) || 1, 1), 5);
+            if (!seen.has(username)) {
+                users.push({ username, password, level, displayName: username });
+                seen.add(username);
+            }
+        }
+    }
+
+    const adminUsername = String(process.env.ADMIN_USERNAME || '').trim();
+    const adminPassword = String(process.env.ADMIN_PASSWORD || '');
+    if (adminUsername && adminPassword && !seen.has(adminUsername)) {
+        const adminLevel = Math.min(Math.max(parseInt(process.env.ADMIN_LEVEL || '5') || 5, 1), 5);
+        const adminDisplayName = String(process.env.ADMIN_DISPLAY_NAME || adminUsername).trim() || adminUsername;
+        users.push({
+            username: adminUsername,
+            password: adminPassword,
+            level: adminLevel,
+            displayName: adminDisplayName
+        });
+        seen.add(adminUsername);
+    }
+    return users;
+}
+
 function closeDatabase() {
     try {
         if (db) {
@@ -197,18 +239,14 @@ function initDatabase() {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_server_activity_hour ON server_activity(hour)`);
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`);
 
-    const rawUsers = process.env.DEFAULT_USERS || '';
-    if (rawUsers) {
-        for (const entry of rawUsers.split(',')) {
-            const parts = entry.trim().split(':');
-            if (parts.length < 2) continue;
-            const [username, password, levelStr] = parts;
-            const level = Math.min(Math.max(parseInt(levelStr) || 1, 1), 5);
-            const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    const bootstrapUsers = getBootstrapUsersFromEnv();
+    if (bootstrapUsers.length) {
+        for (const u of bootstrapUsers) {
+            const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(u.username);
             if (!exists) {
-                const hash = bcrypt.hashSync(password, 10);
-                db.prepare('INSERT INTO users (username, password_hash, display_name, level, created_at) VALUES (?, ?, ?, ?, ?)').run(username, hash, username, level, Date.now());
-                console.log(`[Auth] Пользователь "${username}" создан (level=${level})`);
+                const hash = bcrypt.hashSync(u.password, 10);
+                db.prepare('INSERT INTO users (username, password_hash, display_name, level, created_at) VALUES (?, ?, ?, ?, ?)').run(u.username, hash, u.displayName || u.username, u.level, Date.now());
+                console.log(`[Auth] Пользователь "${u.username}" создан (level=${u.level})`);
             }
         }
     }
@@ -391,20 +429,16 @@ function getUserCount() { return db.prepare('SELECT COUNT(*) as cnt FROM users')
 function deleteAllUsers() { db.prepare('DELETE FROM users').run(); }
 
 function restoreUsersFromEnv() {
-    const rawUsers = process.env.DEFAULT_USERS || '';
     let restored = 0;
-    if (!rawUsers) return restored;
-    for (const entry of rawUsers.split(',')) {
-        const parts = entry.trim().split(':');
-        if (parts.length < 2) continue;
-        const [username, password, levelStr] = parts;
-        const level = Math.min(Math.max(parseInt(levelStr) || 1, 1), 5);
-        const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    const users = getBootstrapUsersFromEnv();
+    if (!users.length) return restored;
+    for (const u of users) {
+        const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(u.username);
         if (!exists) {
-            const hash = bcrypt.hashSync(password, 10);
-            db.prepare('INSERT INTO users (username, password_hash, display_name, level, created_at) VALUES (?, ?, ?, ?, ?)').run(username, hash, username, level, Date.now());
+            const hash = bcrypt.hashSync(u.password, 10);
+            db.prepare('INSERT INTO users (username, password_hash, display_name, level, created_at) VALUES (?, ?, ?, ?, ?)').run(u.username, hash, u.displayName || u.username, u.level, Date.now());
             restored++;
-            console.log(`[Auth] Восстановлен пользователь "${username}" (level=${level})`);
+            console.log(`[Auth] Восстановлен пользователь "${u.username}" (level=${u.level})`);
         }
     }
     return restored;
