@@ -26,7 +26,99 @@ const {
     MAX_REQUEST_BODY_BYTES
 } = require('./config');
 
-const activeReportsApi = require(path.join(__dirname, '..', 'OverlayForCs2', 'activeReportsApi.js'));
+let activeReportsApi;
+try {
+    activeReportsApi = require(path.join(__dirname, '..', 'OverlayForCs2', 'activeReportsApi.js'));
+} catch (e) {
+    console.warn('[activeReportsApi] Overlay module not found, using server fallback:', e.message);
+    const REPORT_FLAG = {
+        NONE: 0,
+        AIMBOT: 1 << 0,
+        VISUALS: 1 << 1,
+        TRIGGER: 1 << 2,
+        MOVEMENT: 1 << 3,
+        GRIEFING: 1 << 4,
+        TOXIC: 1 << 5,
+        MULTIACCOUNT: 1 << 6,
+        OTHER: 1 << 7
+    };
+    const RULES = [
+        { id: 'aimbot', flag: REPORT_FLAG.AIMBOT, labelRu: 'Аим / RCS', re: [/aim/i, /аим/i, /aimbot/i, /rage/i] },
+        { id: 'visuals', flag: REPORT_FLAG.VISUALS, labelRu: 'WH / ESP', re: [/wall/i, /\bwh\b/i, /esp/i, /вх/i, /visual/i] },
+        { id: 'trigger', flag: REPORT_FLAG.TRIGGER, labelRu: 'Триггер', re: [/trigger/i, /триггер/i] },
+        { id: 'movement', flag: REPORT_FLAG.MOVEMENT, labelRu: 'Движение', re: [/bhop/i, /strafe/i, /speed/i, /движ/i] },
+        { id: 'griefing', flag: REPORT_FLAG.GRIEFING, labelRu: 'Гриф', re: [/grief/i, /гриф/i, /blocking/i, /саботаж/i] },
+        { id: 'toxic', flag: REPORT_FLAG.TOXIC, labelRu: 'Токсик', re: [/toxic/i, /токсик/i, /voice/i, /голос/i, /abuse/i] },
+        { id: 'multiaccount', flag: REPORT_FLAG.MULTIACCOUNT, labelRu: 'Мультиакк', re: [/multi/i, /мульти/i, /alt/i, /смурф/i, /smurf/i] }
+    ];
+    const emptyPayload = () => ({
+        schemaVersion: 1,
+        flags: REPORT_FLAG,
+        typeCatalog: RULES.map(({ id, flag, labelRu }) => ({ id, flag, labelRu })),
+        summary: { activeReportRows: 0, uniqueSuspects: 0 },
+        bySteamId: {},
+        active: []
+    });
+    const isActiveReport = (r) => !(r == null || typeof r !== 'object' || r.result != null || r.status === 'closed' || r.status === 'resolved' || r.closed === true);
+    const steamIdFrom = (r) => String(r?.intruder_steamid ?? r?.intruderSteamId ?? r?.target_steamid ?? r?.steam_id ?? r?.steamId ?? '').trim();
+    const typeStrFrom = (r) => [r?.type, r?.report_type, r?.reason, r?.category, r?.title, Array.isArray(r?.tags) ? r.tags.join(' ') : r?.tags, r?.description, r?.comment].filter(Boolean).map(String).join(' ');
+    const matchFlags = (s) => {
+        let bits = REPORT_FLAG.NONE;
+        const ids = [];
+        const labels = [];
+        for (const rule of RULES) {
+            if (rule.re.some((re) => re.test(s))) {
+                bits |= rule.flag;
+                if (!ids.includes(rule.id)) ids.push(rule.id);
+                if (!labels.includes(rule.labelRu)) labels.push(rule.labelRu);
+            }
+        }
+        if (bits === REPORT_FLAG.NONE && String(s || '').trim()) {
+            bits = REPORT_FLAG.OTHER;
+            ids.push('other');
+            labels.push('Прочее');
+        }
+        return { bits, ids, labels };
+    };
+    const buildPublicPayload = (rawArray) => {
+        const out = emptyPayload();
+        const list = Array.isArray(rawArray) ? rawArray : [];
+        const activeRows = list.filter(isActiveReport);
+        out.summary.activeReportRows = activeRows.length;
+        const bySteamId = Object.create(null);
+        for (const r of activeRows) {
+            const steamId = steamIdFrom(r);
+            if (!steamId) continue;
+            const typeRaw = typeStrFrom(r);
+            const m = matchFlags(typeRaw);
+            let agg = bySteamId[steamId];
+            if (!agg) {
+                agg = { steamId, activeReportCount: 0, flagBits: REPORT_FLAG.NONE, typeIds: [], labels: [], sampleTypeRaw: '' };
+                bySteamId[steamId] = agg;
+            }
+            agg.activeReportCount += 1;
+            agg.flagBits |= m.bits;
+            for (const t of m.ids) if (!agg.typeIds.includes(t)) agg.typeIds.push(t);
+            for (const l of m.labels) if (!agg.labels.includes(l)) agg.labels.push(l);
+            if (!agg.sampleTypeRaw && typeRaw) agg.sampleTypeRaw = typeRaw.slice(0, 240);
+            out.active.push({
+                id: r?.id ?? null,
+                steamId,
+                active: true,
+                typeRaw: typeRaw.slice(0, 240),
+                flagBits: m.bits,
+                typeIds: m.ids,
+                labels: m.labels,
+                serverId: r?.server_id ?? r?.serverId ?? null,
+                createdAt: r?.created_at ?? r?.createdAt ?? null
+            });
+        }
+        out.bySteamId = bySteamId;
+        out.summary.uniqueSuspects = Object.keys(bySteamId).length;
+        return out;
+    };
+    activeReportsApi = { REPORT_FLAG, emptyPayload, buildPublicPayload };
+}
 
 const http = require('http');
 const https = require('https');
