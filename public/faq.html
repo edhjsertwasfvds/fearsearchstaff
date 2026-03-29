@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fear Project FAQ</title>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #09090b;
+        }
+        .glass-panel {
+            background: rgba(22, 22, 26, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-[#09090b] text-white min-h-screen w-full">
+    <div class="fixed inset-0 pointer-events-none z-0">
+        <div class="absolute inset-0" style="background-image:
+            linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 32px 32px;"></div>
+    </div>
+
+    <main class="relative z-10 max-w-3xl mx-auto px-4 py-10">
+        <header class="mb-8 flex items-center justify-between">
+            <div>
+                <h1 class="text-2xl font-extrabold tracking-tight">FAQ по Fear Project Viewer</h1>
+                <p class="text-gray-400 text-sm mt-1">Краткие ответы для стафа и администраций.</p>
+            </div>
+            <a href="/" class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-gray-200">
+                <span class="ph ph-arrow-left"></span>
+                <span>Назад на главную</span>
+            </a>
+        </header>
+
+        <section class="glass-panel rounded-2xl p-6 space-y-8">
+            <div>
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">Общие</h2>
+                <div class="space-y-3 text-sm text-gray-200">
+                    <div>
+                        <p class="font-semibold text-white">Почему иногда «прыгают» данные или обнуляется список игроков?</p>
+                        <p class="text-gray-400 mt-1">Клиент держит постоянное WebSocket-соединение и периодически запрашивает свежие данные. Если соединение обрывается, оно переподключается и повторно запрашивает статистику. Теперь стоит экспоненциальный реконнект, поэтому переподключения происходят реже и мягче.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Что означают уровни доступа 1–5?</p>
+                        <p class="text-gray-400 mt-1">1–2 — просмотр, 3 — работа с whitelist и логами, 4 — админ-панель и настройки, 5 — суперадмин (сброс пользователей, инвайт-коды и т.п.). Конкретные права заданы на API, интерфейс их только отображает.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Почему некоторые данные догружаются не сразу?</p>
+                        <p class="text-gray-400 mt-1">Часть данных приходит отдельными пакетами: возраст аккаунта, Faceit-уровень, репорты и некоторые внешние проверки. Поэтому список сначала может открыться быстро, а детали подтянутся через долю секунды.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">Вкладка «Игроки»</h2>
+                <div class="space-y-3 text-sm text-gray-200">
+                    <div>
+                        <p class="font-semibold text-white">Что делает кнопка «Фильтры»?</p>
+                        <p class="text-gray-400 mt-1">Она открывает компактное меню со всеми настройками отбора игроков: шаблоны, скрытие, свои фильтры и сохранённые наборы. Меню закрывается по клику вне него или по клавише Esc.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Что такое шаблоны 3 / 2 / 1 уровень?</p>
+                        <p class="text-gray-400 mt-1">Это готовые пресеты. Они сразу выставляют несколько параметров: ограничение по Faceit, минимум по репортам, скрытие игроков без флагов и, для самого жёсткого варианта, показ «нулевых» профилей. Чем меньше номер, тем строже отбор.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Как работает блок «Скрытие»?</p>
+                        <p class="text-gray-400 mt-1">Поля Faceit ≥ / ≤, мин. репорты и «Без флагов» относятся именно к блоку скрытия. Эти параметры применяются только когда активирован переключатель «Скрытие вкл».</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Что значит фильтр «Нулевые»?</p>
+                        <p class="text-gray-400 mt-1">Это отдельный фильтр, не зависящий от блока скрытия. Он оставляет только ненастроенные профили: пустые или с дефолтной аватаркой, где профиль выглядит «сырым» или почти не оформленным.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Что такое «Свои фильтры»?</p>
+                        <p class="text-gray-400 mt-1">Это ручной отбор по игровым числам: K/D, килы и смерти. Они нужны, когда хочется быстро убрать шум и показать только необычные профили с нестандартной статистикой.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Как сохранить свои настройки фильтров?</p>
+                        <p class="text-gray-400 mt-1">В поле «Название набора» введи имя и нажми «Сохранить». Набор появится ниже и будет храниться в браузере. Его можно применить одной кнопкой или удалить крестиком.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Как работает сортировка по репортам и по дате акка?</p>
+                        <p class="text-gray-400 mt-1">«По репортам» поднимает вверх игроков с наибольшим количеством репортов. «По дате акка» ставит наверх самые новые аккаунты. Если возраст аккаунта ещё не загружен, список может чуть перестроиться после догрузки данных.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Как настроить фильтры по флагам (DXD, VAC, Yooma и др.)?</p>
+                        <p class="text-gray-400 mt-1">Клик правой кнопкой по кнопке «По флагам» открывает отдельное меню. Там можно включать и выключать конкретные источники, а также полностью сбрасывать их выбор.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Почему карточки K/D, HS% и т.п. больше не запускают обновление?</p>
+                        <p class="text-gray-400 mt-1">Чтобы исключить случайные перезапросы и лишние лаги. Карточки теперь только показывают данные, а отдельные действия запускаются через явные кнопки вроде «Карточка», «Проверка», «Steam», «FEAR».</p>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">Типичные проблемы</h2>
+                <div class="space-y-3 text-sm text-gray-200">
+                    <div>
+                        <p class="font-semibold text-white">Фильтр включён, но список не меняется</p>
+                        <p class="text-gray-400 mt-1">Проверь, что активирован сам переключатель блока: «Скрытие вкл» или «Свои фильтры вкл». Исключение: фильтр «Нулевые» работает отдельно и не зависит от скрытия.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">После применения фильтров игроков стало слишком мало</p>
+                        <p class="text-gray-400 mt-1">Скорее всего, одновременно включено несколько условий: Faceit, репорты, нулевые, без флагов и свои фильтры. Вверху списка отображаются чипы активных правил — по ним удобно понять, что сейчас реально работает.</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-white">Интерфейс всё ещё лагает</p>
+                        <p class="text-gray-400 mt-1">Чаще всего это связано с большим онлайном, догрузкой возраста аккаунтов и частыми обновлениями от WebSocket. Попробуй отключить тяжёлые фильтры, закрыть лишние модалки и перезагрузить страницу через Ctrl+F5.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">Техподдержка</h2>
+                <p class="text-sm text-gray-400">Если что-то ломается, кнопка не реагирует, значения выглядят странно или какой-то фильтр не даёт ожидаемый результат — сначала проверь активные чипы фильтров и обнови страницу. Если проблема повторяется, передай скрин и короткое описание того, что именно нажималось перед ошибкой.</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</body>
+</html>
+

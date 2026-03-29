@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/images/iconhtml.png" type="image/png">
+    <title>Логи действий - Fear Project</title>
+    <script>
+        (function () {
+            try {
+                var raw = localStorage.getItem('localUiSettings');
+                if (!raw) return;
+                var s = JSON.parse(raw);
+                var t = s && s.theme;
+                if (!t || t === 'dark') return;
+                document.documentElement.classList.add('theme-' + t);
+            } catch (_) {}
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #09090b; }
+        html.theme-midnight body { background-color: #05070d; }
+        html.theme-indigo body { background-color: #0b1020; }
+        html.theme-emerald body { background-color: #07120f; }
+        html.theme-crimson body { background-color: #160b10; }
+        html.theme-graphite body { background-color: #0f1116; }
+        .glass-panel {
+            background: rgba(22, 22, 26, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        html.theme-midnight .glass-panel { background: rgba(14, 16, 24, 0.92); border-color: rgba(148,163,184,.16); }
+        html.theme-indigo .glass-panel { background: rgba(21, 29, 56, 0.9); border-color: rgba(99,102,241,.22); }
+        html.theme-emerald .glass-panel { background: rgba(14, 30, 25, 0.9); border-color: rgba(16,185,129,.22); }
+        html.theme-crimson .glass-panel { background: rgba(36, 18, 24, 0.9); border-color: rgba(244,63,94,.2); }
+        html.theme-graphite .glass-panel { background: rgba(23, 24, 28, 0.9); border-color: rgba(161,161,170,.18); }
+        .grid-bg {
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 32px 32px;
+            mask-image: radial-gradient(circle at 0 0, black 40%, transparent 80%);
+            -webkit-mask-image: radial-gradient(circle at 0 0, black 40%, transparent 80%);
+        }
+        body { scrollbar-width: none; -ms-overflow-style: none; }
+        body::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="bg-[#09090b] text-white min-h-screen w-full relative overflow-x-hidden selection:bg-[#5865F2] selection:text-white">
+
+    <div class="fixed inset-0 pointer-events-none z-0">
+        <div class="absolute inset-0 grid-bg"></div>
+        <div class="absolute -top-[200px] -left-[200px] w-[600px] h-[600px] bg-[#5865F2] rounded-full blur-[120px] opacity-[0.07]"></div>
+        <div class="absolute top-[20%] left-[10%] w-[300px] h-[300px] bg-indigo-500 rounded-full blur-[100px] opacity-[0.05]"></div>
+    </div>
+
+    <a href="/" class="fixed top-12 right-12 z-50 glass-panel px-6 py-3 rounded-xl flex items-center gap-3 hover:bg-white/[0.05] transition-colors">
+        <i class="ph ph-arrow-left text-xl"></i>
+        <span class="text-white font-semibold">Назад</span>
+    </a>
+
+    <main class="relative z-10 container mx-auto px-8 py-12 max-w-[1600px]">
+        <header class="mb-8">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-12 h-12 bg-[#5865F2] rounded-xl flex items-center justify-center">
+                    <i class="ph-fill ph-list-bullets text-white text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold">Логи действий</h1>
+                    <p class="text-gray-400 text-sm">История всех действий пользователей</p>
+                </div>
+            </div>
+        </header>
+
+        <section class="glass-panel rounded-2xl p-6 mb-6" aria-label="Фильтры">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label for="filterType" class="block text-sm font-semibold mb-2 text-gray-300">Тип действия</label>
+                    <select id="filterType" class="w-full bg-white/[0.05] border border-white/[0.1] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#5865F2]">
+                        <option value="">Все действия</option>
+                        <option value="add_to_whitelist">Добавление в whitelist</option>
+                        <option value="remove_from_whitelist">Удаление из whitelist</option>
+                        <option value="view_bans">Просмотр банов</option>
+                        <option value="add_comment">Добавление комментария</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filterUser" class="block text-sm font-semibold mb-2 text-gray-300">Пользователь</label>
+                    <input type="text" id="filterUser" placeholder="Имя пользователя" class="w-full bg-white/[0.05] border border-white/[0.1] rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-[#5865F2]">
+                </div>
+                <div>
+                    <label for="filterSteamId" class="block text-sm font-semibold mb-2 text-gray-300">SteamID</label>
+                    <input type="text" id="filterSteamId" placeholder="76561..." class="w-full bg-white/[0.05] border border-white/[0.1] rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-[#5865F2]">
+                </div>
+            </div>
+            <div class="mt-4 flex gap-3">
+                <button type="button" onclick="applyFilters()" class="px-6 py-3 bg-[#5865F2] hover:bg-[#4752C4] rounded-xl font-semibold transition-colors">
+                    Применить фильтры
+                </button>
+                <button type="button" onclick="resetFilters()" class="px-6 py-3 bg-white/[0.05] hover:bg-white/[0.1] rounded-xl font-semibold transition-colors">
+                    Сбросить
+                </button>
+            </div>
+        </section>
+
+        <section class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6" aria-label="Статистика">
+            <div class="glass-panel rounded-2xl p-6">
+                <div class="text-gray-400 text-sm mb-2">Всего действий</div>
+                <div id="totalActions" class="text-3xl font-bold">0</div>
+            </div>
+            <div class="glass-panel rounded-2xl p-6">
+                <div class="text-gray-400 text-sm mb-2">Добавлено в whitelist</div>
+                <div id="whitelistAdded" class="text-3xl font-bold text-green-400">0</div>
+            </div>
+            <div class="glass-panel rounded-2xl p-6">
+                <div class="text-gray-400 text-sm mb-2">Просмотров банов</div>
+                <div id="viewsCount" class="text-3xl font-bold text-blue-400">0</div>
+            </div>
+            <div class="glass-panel rounded-2xl p-6">
+                <div class="text-gray-400 text-sm mb-2">Уникальных пользователей</div>
+                <div id="uniqueUsers" class="text-3xl font-bold text-purple-400">0</div>
+            </div>
+        </section>
+
+        <section class="glass-panel rounded-2xl overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-white/[0.03]">
+                        <tr>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Время</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Пользователь</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Действие</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Цель</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Детали</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTable">
+                        <tr>
+                            <td colspan="5" class="py-12 text-center text-gray-400">
+                                <i class="ph ph-spinner text-4xl animate-spin mb-2"></i>
+                                <div>Загрузка логов...</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <nav class="mt-6 flex justify-center gap-2" id="pagination" aria-label="Пагинация"></nav>
+    </main>
+
+    <script>
+        let currentPage = 1;
+        const logsPerPage = 50;
+        let allLogs = [];
+        let filteredLogs = [];
+
+        (async () => {
+            try {
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                if (!u.sessionToken) { window.location.href = '/auth'; return; }
+                const res = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                if (!res.ok) { window.location.href = '/auth'; return; }
+                const data = await res.json();
+                if ((data.level || 0) < 3) { window.location.href = '/'; return; }
+            } catch (_) { window.location.href = '/auth'; return; }
+            loadLogs();
+        })();
+
+        async function loadLogs() {
+            try {
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                const response = await fetch('/api/logs', {
+                    headers: { 'Authorization': 'Bearer ' + (u.sessionToken || '') }
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    if (response.status === 403) { window.location.href = '/'; return; }
+                    throw new Error(data.error || 'Ошибка');
+                }
+                allLogs = data.logs || [];
+                filteredLogs = allLogs;
+                updateStatistics();
+                renderLogs();
+            } catch (err) {
+                console.error('Ошибка загрузки логов:', err);
+                document.getElementById('logsTable').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="py-8 text-center text-red-400">Ошибка загрузки логов</td>
+                    </tr>
+                `;
+            }
+        }
+
+        function updateStatistics() {
+            document.getElementById('totalActions').textContent = filteredLogs.length;
+            document.getElementById('whitelistAdded').textContent = filteredLogs.filter(log => log.action_type === 'add_to_whitelist').length;
+            document.getElementById('viewsCount').textContent = filteredLogs.filter(log => log.action_type === 'view_bans').length;
+            document.getElementById('uniqueUsers').textContent = new Set(filteredLogs.map(log => log.user_name)).size;
+        }
+
+        function renderLogs() {
+            const start = (currentPage - 1) * logsPerPage;
+            const end = start + logsPerPage;
+            const logsToShow = filteredLogs.slice(start, end);
+            const actionNames = {
+                'add_to_whitelist': '✅ Добавление в whitelist',
+                'remove_from_whitelist': '❌ Удаление из whitelist',
+                'view_bans': '👁️ Просмотр банов',
+                'add_comment': '💬 Комментарий'
+            };
+
+            if (logsToShow.length === 0) {
+                document.getElementById('logsTable').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="py-8 text-center text-gray-400">Нет логов для отображения</td>
+                    </tr>
+                `;
+                renderPagination();
+                return;
+            }
+
+            document.getElementById('logsTable').innerHTML = logsToShow.map(log => {
+                const timeStr = new Date(log.timestamp).toLocaleString('ru-RU');
+                const actionName = actionNames[log.action_type] || log.action_type;
+                return `
+                    <tr class="border-t border-white/[0.05] hover:bg-white/[0.02] transition-colors">
+                        <td class="py-4 px-6 text-sm text-gray-400 whitespace-nowrap">${timeStr}</td>
+                        <td class="py-4 px-6 text-sm">
+                            <div class="font-semibold">${log.user_name}</div>
+                        </td>
+                        <td class="py-4 px-6 text-sm">${actionName}</td>
+                        <td class="py-4 px-6 text-sm">
+                            ${log.target_name ? `
+                                <div class="font-semibold">${log.target_name}</div>
+                                <div class="text-xs text-gray-500 font-mono">${log.target_steam_id || ''}</div>
+                            ` : '<span class="text-gray-500">—</span>'}
+                        </td>
+                        <td class="py-4 px-6 text-sm text-gray-400">${log.details || '—'}</td>
+                    </tr>
+                `;
+            }).join('');
+            renderPagination();
+        }
+
+        function renderPagination() {
+            const totalPages = Math.ceil(filteredLogs.length / logsPerPage);
+            const pagination = document.getElementById('pagination');
+            if (totalPages <= 1) { pagination.innerHTML = ''; return; }
+            let html = '';
+            if (currentPage > 1) html += `<button type="button" onclick="changePage(${currentPage - 1})" class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] rounded-xl transition-colors">←</button>`;
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === currentPage) html += `<button type="button" class="px-4 py-2 bg-[#5865F2] rounded-xl font-semibold">${i}</button>`;
+                else if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) html += `<button type="button" onclick="changePage(${i})" class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] rounded-xl transition-colors">${i}</button>`;
+                else if (i === currentPage - 3 || i === currentPage + 3) html += `<span class="px-2 text-gray-500">...</span>`;
+            }
+            if (currentPage < totalPages) html += `<button type="button" onclick="changePage(${currentPage + 1})" class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] rounded-xl transition-colors">→</button>`;
+            pagination.innerHTML = html;
+        }
+
+        function changePage(page) {
+            currentPage = page;
+            renderLogs();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function applyFilters() {
+            const filterType = document.getElementById('filterType').value;
+            const filterUser = document.getElementById('filterUser').value.toLowerCase();
+            const filterSteamId = document.getElementById('filterSteamId').value;
+            filteredLogs = allLogs.filter(log => {
+                if (filterType && log.action_type !== filterType) return false;
+                if (filterUser && !log.user_name.toLowerCase().includes(filterUser)) return false;
+                if (filterSteamId && (!log.target_steam_id || !log.target_steam_id.includes(filterSteamId))) return false;
+                return true;
+            });
+            currentPage = 1;
+            updateStatistics();
+            renderLogs();
+        }
+
+        function resetFilters() {
+            document.getElementById('filterType').value = '';
+            document.getElementById('filterUser').value = '';
+            document.getElementById('filterSteamId').value = '';
+            filteredLogs = allLogs;
+            currentPage = 1;
+            updateStatistics();
+            renderLogs();
+        }
+
+        setInterval(loadLogs, 30000);
+    </script>
+    <script>
+        (async function() {
+            try {
+                try {
+                    const u = JSON.parse(localStorage.getItem('user') || '{}');
+                    if ((u.level || 0) >= 5) return;
+                    if (u.sessionToken) {
+                        const meRes = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                        if (meRes.ok) {
+                            const me = await meRes.json();
+                            if ((me.level || 0) >= 5) return;
+                        }
+                    }
+                } catch (_) {}
+                const u2 = JSON.parse(localStorage.getItem('user') || '{}');
+                const r = await fetch('/api/maintenance', { headers: u2.sessionToken ? { 'Authorization': 'Bearer ' + u2.sessionToken } : {} });
+                const { active, message } = await r.json();
+                if (!active) return;
+                const el = document.createElement('div');
+                el.id = 'maintenanceBanner';
+                el.className = 'fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40';
+                const txt = (message || 'Проводятся технические работы.').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                el.innerHTML = '<div class="bg-[#1a1a1e] border border-amber-500/30 rounded-2xl p-6 max-w-md shadow-2xl text-center"><div class="text-amber-400 text-2xl mb-3"><i class="ph ph-wrench"></i></div><p class="text-amber-400 font-bold text-lg mb-2">ТЕХ. РАБОТЫ</p><p class="text-gray-300 text-sm">' + txt + '</p></div>';
+                document.body.appendChild(el);
+            } catch (_) {}
+        })();
+    </script>
+</body>
+</html>

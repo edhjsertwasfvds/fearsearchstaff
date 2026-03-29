@@ -1,0 +1,23 @@
+{
+  "name": "fear-project-players",
+  "version": "1.0.0",
+  "description": "Fear Project Players Viewer",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "check-deploy": "node check-deploy-ready.js",
+    "smoke": "node scripts/smoke.js",
+    "check-friends-faceit": "node scripts/check-friends-faceit.js"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.3.1",
+    "sql.js": "^1.14.0",
+    "ws": "^8.19.0"
+  }
+}

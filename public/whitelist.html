@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/images/iconhtml.png" type="image/png">
+    <title>Список чистых - FEAR Project</title>
+    <script>
+        (function () {
+            try {
+                var raw = localStorage.getItem('localUiSettings');
+                if (!raw) return;
+                var s = JSON.parse(raw);
+                var t = s && s.theme;
+                if (!t || t === 'dark') return;
+                document.documentElement.classList.add('theme-' + t);
+            } catch (_) {}
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #09090b;
+        }
+        html.theme-midnight body { background-color: #05070d; }
+        html.theme-indigo body { background-color: #0b1020; }
+        html.theme-emerald body { background-color: #07120f; }
+        html.theme-crimson body { background-color: #160b10; }
+        html.theme-graphite body { background-color: #0f1116; }
+        .glass-panel {
+            background: rgba(22, 22, 26, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        html.theme-midnight .glass-panel { background: rgba(14, 16, 24, 0.92); border-color: rgba(148,163,184,.16); }
+        html.theme-indigo .glass-panel { background: rgba(21, 29, 56, 0.9); border-color: rgba(99,102,241,.22); }
+        html.theme-emerald .glass-panel { background: rgba(14, 30, 25, 0.9); border-color: rgba(16,185,129,.22); }
+        html.theme-crimson .glass-panel { background: rgba(36, 18, 24, 0.9); border-color: rgba(244,63,94,.2); }
+        html.theme-graphite .glass-panel { background: rgba(23, 24, 28, 0.9); border-color: rgba(161,161,170,.18); }
+        .grid-bg {
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 32px 32px;
+            mask-image: radial-gradient(circle at 0 0, black 40%, transparent 80%);
+            -webkit-mask-image: radial-gradient(circle at 0 0, black 40%, transparent 80%);
+        }
+        body {
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        body::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-[#09090b] text-white min-h-screen w-full relative overflow-x-hidden selection:bg-[#5865F2] selection:text-white">
+
+    <div class="fixed inset-0 pointer-events-none z-0">
+        <div class="absolute inset-0 grid-bg"></div>
+        <div class="absolute -top-[200px] -left-[200px] w-[600px] h-[600px] bg-[#5865F2] rounded-full blur-[120px] opacity-[0.07]"></div>
+        <div class="absolute top-[20%] left-[10%] w-[300px] h-[300px] bg-indigo-500 rounded-full blur-[100px] opacity-[0.05]"></div>
+    </div>
+
+    <a href="/" class="fixed top-12 right-12 z-50 glass-panel px-6 py-3 rounded-xl flex items-center gap-3 hover:bg-white/[0.05] transition-colors">
+        <i class="ph ph-arrow-left text-xl"></i>
+        <span class="text-white font-semibold">Назад</span>
+    </a>
+
+    <main class="relative z-10 container mx-auto px-8 py-12 max-w-[1600px]">
+        <header class="mb-8">
+            <div class="flex items-center gap-3 mb-3">
+                <div class="w-12 h-12 bg-green-500 rounded-xl flex items-center justify-center">
+                    <i class="ph-fill ph-check-circle text-white text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold">Список чистых игроков</h1>
+                    <p class="text-gray-400 text-sm">Игроки, отмеченные как проверенные</p>
+                </div>
+            </div>
+        </header>
+
+        <section class="glass-panel rounded-2xl p-6 mb-6" aria-label="Поиск">
+            <div class="flex gap-4">
+                <label for="searchInput" class="sr-only">Поиск</label>
+                <input type="text" id="searchInput" placeholder="Поиск по нику или SteamID..." 
+                       class="flex-1 bg-white/[0.05] border border-white/[0.1] rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-[#5865F2]"
+                       oninput="filterWhitelist()">
+                <button onclick="resetSearch()" class="px-6 py-3 bg-white/[0.05] hover:bg-white/[0.1] rounded-xl font-semibold transition-colors">
+                    Сбросить
+                </button>
+            </div>
+        </section>
+
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6" aria-label="Статистика">
+            <div class="glass-panel rounded-2xl p-6">
+                <div class="text-gray-400 text-sm mb-2">Всего в whitelist</div>
+                <div class="text-3xl font-bold text-green-400" id="totalWhitelist">0</div>
+            </div>
+            <div class="glass-panel rounded-2xl p-6">
+                <div class="text-gray-400 text-sm mb-2">Добавлено сегодня</div>
+                <div class="text-3xl font-bold text-blue-400" id="addedToday">0</div>
+            </div>
+            <div class="glass-panel rounded-2xl p-6">
+                <div class="text-gray-400 text-sm mb-2">Добавлено за неделю</div>
+                <div class="text-3xl font-bold text-purple-400" id="addedWeek">0</div>
+            </div>
+        </section>
+
+        <section class="glass-panel rounded-2xl overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-white/[0.03]">
+                        <tr>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">№</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Игрок</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">SteamID</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Добавил</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Дата</th>
+                            <th class="py-4 px-6 text-left text-sm font-semibold text-gray-300">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="whitelistTable">
+                        <tr>
+                            <td colspan="6" class="py-12 text-center text-gray-400">
+                                <i class="ph ph-spinner text-4xl animate-spin mb-2"></i>
+                                <div>Загрузка списка...</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <nav class="mt-6 flex justify-center gap-2" id="pagination" aria-label="Пагинация"></nav>
+    </main>
+
+    <script>
+        let currentPage = 1;
+        const itemsPerPage = 50;
+        let allWhitelist = [];
+        let filteredWhitelist = [];
+        let ws = null;
+        let pageUserLevel = 0;
+        let pageUserId = null;
+
+        (async () => {
+            try {
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                if (!u.sessionToken) { window.location.href = '/auth'; return; }
+                const res = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                if (!res.ok) { window.location.href = '/auth'; return; }
+                const data = await res.json();
+                pageUserLevel = data.level || 0;
+                pageUserId = data.id != null ? String(data.id) : null;
+                if (pageUserLevel < 1) { window.location.href = '/'; return; }
+            } catch (_) { window.location.href = '/auth'; return; }
+            connectWebSocket();
+            loadWhitelist();
+        })();
+
+        // Подключение к WebSocket
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('WebSocket подключен');
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket отключен, переподключение через 3 секунды...');
+                setTimeout(connectWebSocket, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket ошибка:', error);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    
+                    if (message.type === 'whitelist_removed' || message.type === 'whitelist_added') {
+                        loadWhitelist();
+                    }
+                } catch (err) {
+                    console.error('Ошибка обработки сообщения:', err);
+                }
+            };
+        }
+
+        // Загрузка whitelist
+        async function loadWhitelist() {
+            try {
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                const response = await fetch('/api/whitelist', {
+                    headers: { 'Authorization': 'Bearer ' + (u.sessionToken || '') }
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    if (response.status === 401) { window.location.href = '/auth'; return; }
+                    throw new Error(data.error || 'Ошибка');
+                }
+                allWhitelist = data.whitelist || [];
+                filteredWhitelist = allWhitelist;
+                updateStatistics();
+                renderWhitelist();
+            } catch (err) {
+                console.error('Ошибка загрузки whitelist:', err);
+                document.getElementById('whitelistTable').innerHTML = `
+                    <tr>
+                        <td colspan="6" class="py-8 text-center text-red-400">
+                            Ошибка загрузки списка
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        // Обновление статистики
+        function updateStatistics() {
+            document.getElementById('totalWhitelist').textContent = filteredWhitelist.length;
+            
+            const now = Date.now();
+            const oneDayAgo = now - (24 * 60 * 60 * 1000);
+            const oneWeekAgo = now - (7 * 24 * 60 * 60 * 1000);
+            
+            const addedToday = filteredWhitelist.filter(item => item.added_at > oneDayAgo).length;
+            document.getElementById('addedToday').textContent = addedToday;
+            
+            const addedWeek = filteredWhitelist.filter(item => item.added_at > oneWeekAgo).length;
+            document.getElementById('addedWeek').textContent = addedWeek;
+        }
+
+        // Отображение whitelist
+        function renderWhitelist() {
+            const start = (currentPage - 1) * itemsPerPage;
+            const end = start + itemsPerPage;
+            const itemsToShow = filteredWhitelist.slice(start, end);
+
+            if (itemsToShow.length === 0) {
+                document.getElementById('whitelistTable').innerHTML = `
+                    <tr>
+                        <td colspan="6" class="py-8 text-center text-gray-400">
+                            ${allWhitelist.length === 0 ? 'Whitelist пуст' : 'Ничего не найдено'}
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            document.getElementById('whitelistTable').innerHTML = itemsToShow.map((item, index) => {
+                const date = new Date(item.added_at);
+                const timeStr = date.toLocaleString('ru-RU');
+                const globalIndex = start + index + 1;
+
+                return `
+                    <tr class="border-t border-white/[0.05] hover:bg-white/[0.02] transition-colors">
+                        <td class="py-4 px-6 text-sm text-gray-400">${globalIndex}</td>
+                        <td class="py-4 px-6 text-sm">
+                            <div class="flex items-center gap-3">
+                                <img src="https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg" 
+                                     class="w-10 h-10 rounded-lg border border-white/[0.1]" 
+                                     onerror="this.src='https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg'">
+                                <span class="font-semibold">${item.nickname}</span>
+                            </div>
+                        </td>
+                        <td class="py-4 px-6 text-sm font-mono text-gray-400">${item.steam_id}</td>
+                        <td class="py-4 px-6 text-sm">
+                            <div class="font-semibold">${item.added_by_name}</div>
+                        </td>
+                        <td class="py-4 px-6 text-sm text-gray-400 whitespace-nowrap">${timeStr}</td>
+                        <td class="py-4 px-6 text-sm">
+                            <div class="flex gap-2">
+                                <a href="https://fearproject.ru/profile/${item.steam_id}" target="_blank"
+                                   class="px-3 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 rounded-lg text-xs font-semibold transition-colors">
+                                    FEAR
+                                </a>
+                                <a href="https://steamcommunity.com/profiles/${item.steam_id}" target="_blank"
+                                   class="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded-lg text-xs font-semibold transition-colors">
+                                    Steam
+                                </a>
+                                ${(pageUserLevel >= 3 || (item.added_by_discord_id != null && String(item.added_by_discord_id) === pageUserId)) ? `<button onclick="removeFromWhitelist('${item.steam_id}', '${item.nickname}')"
+                                        class="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-xs font-semibold transition-colors">
+                                    Удалить
+                                </button>` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            renderPagination();
+        }
+
+        // Пагинация
+        function renderPagination() {
+            const totalPages = Math.ceil(filteredWhitelist.length / itemsPerPage);
+            const pagination = document.getElementById('pagination');
+
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            
+            if (currentPage > 1) {
+                html += `<button onclick="changePage(${currentPage - 1})" class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] rounded-xl transition-colors">←</button>`;
+            }
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === currentPage) {
+                    html += `<button class="px-4 py-2 bg-[#5865F2] rounded-xl font-semibold">${i}</button>`;
+                } else if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                    html += `<button onclick="changePage(${i})" class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] rounded-xl transition-colors">${i}</button>`;
+                } else if (i === currentPage - 3 || i === currentPage + 3) {
+                    html += `<span class="px-2 text-gray-500">...</span>`;
+                }
+            }
+
+            if (currentPage < totalPages) {
+                html += `<button onclick="changePage(${currentPage + 1})" class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] rounded-xl transition-colors">→</button>`;
+            }
+
+            pagination.innerHTML = html;
+        }
+
+        function changePage(page) {
+            currentPage = page;
+            renderWhitelist();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Поиск
+        function filterWhitelist() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            
+            if (!search) {
+                filteredWhitelist = allWhitelist;
+            } else {
+                filteredWhitelist = allWhitelist.filter(item => 
+                    item.nickname.toLowerCase().includes(search) ||
+                    item.steam_id.includes(search) ||
+                    item.added_by_name.toLowerCase().includes(search)
+                );
+            }
+
+            currentPage = 1;
+            updateStatistics();
+            renderWhitelist();
+        }
+
+        function resetSearch() {
+            document.getElementById('searchInput').value = '';
+            filteredWhitelist = allWhitelist;
+            currentPage = 1;
+            updateStatistics();
+            renderWhitelist();
+        }
+
+        // Удаление из whitelist
+        function removeFromWhitelist(steamId, nickname) {
+            if (!confirm(`Удалить ${nickname} из whitelist?`)) {
+                return;
+            }
+
+            let sessionToken = '';
+            try {
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                sessionToken = u.sessionToken || '';
+            } catch (_) {}
+
+            if (ws && ws.readyState === WebSocket.OPEN && sessionToken) {
+                ws.send(JSON.stringify({
+                    type: 'remove_from_whitelist',
+                    steamId: steamId,
+                    nickname: nickname,
+                    sessionToken: sessionToken
+                }));
+                
+                console.log(`❌ Игрок ${nickname} удален из whitelist`);
+            } else {
+                alert('Ошибка: нет подключения к серверу или не авторизован');
+            }
+        }
+
+        // Автообновление каждые 30 секунд
+        setInterval(loadWhitelist, 30000);
+    </script>
+    <script>
+        (async function() {
+            try {
+                try {
+                    const u = JSON.parse(localStorage.getItem('user') || '{}');
+                    if ((u.level || 0) >= 5) return;
+                    if (u.sessionToken) {
+                        const meRes = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                        if (meRes.ok) {
+                            const me = await meRes.json();
+                            if ((me.level || 0) >= 5) return;
+                        }
+                    }
+                } catch (_) {}
+                const u2 = JSON.parse(localStorage.getItem('user') || '{}');
+                const r = await fetch('/api/maintenance', { headers: u2.sessionToken ? { 'Authorization': 'Bearer ' + u2.sessionToken } : {} });
+                const { active, message } = await r.json();
+                if (!active) return;
+                const el = document.createElement('div');
+                el.id = 'maintenanceBanner';
+                el.className = 'fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40';
+                const txt = (message || 'Проводятся технические работы.').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                el.innerHTML = '<div class="bg-[#1a1a1e] border border-amber-500/30 rounded-2xl p-6 max-w-md shadow-2xl text-center"><div class="text-amber-400 text-2xl mb-3"><i class="ph ph-wrench"></i></div><p class="text-amber-400 font-bold text-lg mb-2">ТЕХ. РАБОТЫ</p><p class="text-gray-300 text-sm">' + txt + '</p></div>';
+                document.body.appendChild(el);
+            } catch (_) {}
+        })();
+    </script>
+</body>
+</html>

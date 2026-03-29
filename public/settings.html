@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/images/iconhtml.png" type="image/png">
+    <title>Настройки - Fear Project</title>
+    <script>
+        (function () {
+            try {
+                var raw = localStorage.getItem('localUiSettings');
+                if (!raw) return;
+                var s = JSON.parse(raw);
+                var t = s && s.theme;
+                if (!t || t === 'dark') return;
+                document.documentElement.classList.add('theme-' + t);
+            } catch (_) {}
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #09090b;
+        }
+        html.theme-midnight body { background-color: #05070d; }
+        html.theme-indigo body { background-color: #0b1020; }
+        html.theme-emerald body { background-color: #07120f; }
+        html.theme-crimson body { background-color: #160b10; }
+        html.theme-graphite body { background-color: #0f1116; }
+        .glass-panel {
+            background: rgba(22, 22, 26, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        html.theme-midnight .glass-panel { background: rgba(14, 16, 24, 0.85); border-color: rgba(148,163,184,.16); }
+        html.theme-indigo .glass-panel { background: rgba(21, 29, 56, 0.82); border-color: rgba(99,102,241,.22); }
+        html.theme-emerald .glass-panel { background: rgba(14, 30, 25, 0.84); border-color: rgba(16,185,129,.22); }
+        html.theme-crimson .glass-panel { background: rgba(36, 18, 24, 0.84); border-color: rgba(244,63,94,.2); }
+        html.theme-graphite .glass-panel { background: rgba(23, 24, 28, 0.84); border-color: rgba(161,161,170,.18); }
+        .grid-bg {
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+        select, select option {
+            background-color: #1a1a1e;
+            color: #fff;
+        }
+        select option:checked {
+            background-color: #5865F2;
+        }
+        .level-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+        .hide-scrollbar {
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .custom-scroll {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(99, 102, 241, 0.45) rgba(255, 255, 255, 0.03);
+        }
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.03); border-radius: 999px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.5); border-radius: 999px; }
+    </style>
+</head>
+<body class="bg-[#09090b] text-white min-h-screen">
+    
+    <div class="fixed inset-0 pointer-events-none z-0">
+        <div class="absolute inset-0 grid-bg"></div>
+        <div class="absolute -top-[200px] -left-[200px] w-[600px] h-[600px] bg-[#5865F2] rounded-full blur-[120px] opacity-[0.07]"></div>
+    </div>
+
+    <main class="relative z-10 container mx-auto px-6 py-12">
+        <header class="flex items-center justify-between mb-8">
+            <div class="flex items-center gap-4">
+                <a href="/" class="w-12 h-12 glass-panel rounded-xl flex items-center justify-center hover:bg-white/[0.05] transition-colors">
+                    <i class="ph ph-arrow-left text-white text-xl"></i>
+                </a>
+                <div>
+                    <h1 class="text-3xl font-bold text-white">Настройки</h1>
+                    <p class="text-gray-400 text-sm">Панель управления системой</p>
+                </div>
+            </div>
+            <div id="userInfo" class="glass-panel px-4 py-2 rounded-xl flex items-center gap-3">
+                <span id="userName" class="text-white font-semibold"></span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <section class="glass-panel p-6 rounded-2xl">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 bg-[#5865F2]/10 rounded-xl flex items-center justify-center">
+                        <i class="ph ph-chart-line text-[#5865F2] text-xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-white">Активность серверов</h2>
+                    <button type="button" id="toggleActivityPanelBtn" onclick="toggleCollapsiblePanel('activity')" class="ml-auto px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors bg-white/5 text-gray-300 hover:bg-white/10">Открыть</button>
+                </div>
+                <div id="activityPanelBody" class="hidden">
+                <div class="flex items-center gap-2 mb-4 flex-wrap">
+                    <button type="button" onclick="setActivityRange('day')" id="activityRangeDay" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors bg-emerald-500/30 text-emerald-300">День</button>
+                    <button type="button" onclick="setActivityRange('week')" id="activityRangeWeek" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors bg-white/5 text-gray-400 hover:bg-white/10">Неделя</button>
+                    <button type="button" onclick="setActivityRange('all')" id="activityRangeAll" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors bg-white/5 text-gray-400 hover:bg-white/10">За всё время</button>
+                </div>
+                <div id="activityChart" class="h-40 flex items-end gap-[2px] px-1"></div>
+                </div>
+            </section>
+
+            <section class="glass-panel p-6 rounded-2xl min-h-[420px] flex flex-col">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 bg-cyan-500/10 rounded-xl flex items-center justify-center">
+                        <i class="ph ph-user-check text-cyan-400 text-xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-white">Staff</h2>
+                    <button type="button" id="toggleStaffPanelBtn" onclick="toggleCollapsiblePanel('staff')" class="ml-auto px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors bg-white/5 text-gray-300 hover:bg-white/10">Открыть</button>
+                </div>
+                <div id="staffPanelBody" class="hidden">
+                <div class="flex items-center gap-2 mb-3 flex-wrap">
+                    <div class="text-gray-400 text-sm">Фильтр: <span class="text-white font-semibold" id="staffFilterLabel">Quasar + модераторы</span></div>
+                </div>
+                <div class="text-gray-500 text-xs mb-3" id="staffLastUpdated">Загрузка...</div>
+                <div id="staffList" class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 custom-scroll"></div>
+                </div>
+            </section>
+
+            <section class="glass-panel p-6 rounded-2xl">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
+                        <i class="ph ph-shield-check text-amber-400 text-xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-white">Уровни доступа</h2>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
+                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
+                        <span class="level-badge bg-gray-500/20 text-gray-400">1</span>
+                        <span class="text-gray-500 text-xs">Мл. модер</span>
+                    </div>
+                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
+                        <span class="level-badge bg-gray-500/20 text-gray-400">2</span>
+                        <span class="text-gray-500 text-xs">Модер</span>
+                    </div>
+                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
+                        <span class="level-badge bg-indigo-500/20 text-indigo-400">3</span>
+                        <span class="text-gray-500 text-xs">СТМ / СТА</span>
+                    </div>
+                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
+                        <span class="level-badge bg-amber-500/20 text-amber-400">4</span>
+                        <span class="text-gray-500 text-xs">ГА</span>
+                    </div>
+                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
+                        <span class="level-badge bg-rose-500/20 text-rose-400">5</span>
+                        <span class="text-gray-500 text-xs">Суперадмин</span>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <div class="flex gap-2 flex-wrap">
+                        <input type="text" id="newUsername" placeholder="Логин" class="flex-1 min-w-[100px] bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm">
+                        <input type="password" id="newPassword" placeholder="Пароль" class="flex-1 min-w-[100px] bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm">
+                        <select id="newUserLevel" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 appearance-none cursor-pointer min-w-[72px] text-center">
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                        </select>
+                        <button onclick="addUser()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 rounded-lg font-semibold transition-colors text-sm">Добавить</button>
+                    </div>
+                </div>
+                <div id="resetUsersBlock" class="mt-4 pt-4 border-t border-white/[0.06] hidden space-y-3">
+                    <div class="flex gap-2 flex-wrap items-center">
+                        <button onclick="restoreFromEnv()" class="px-4 py-2 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg font-semibold text-sm transition-colors">Восстановить из .env</button>
+                        <span class="text-gray-500 text-xs">Добавит пользователей из DEFAULT_USERS в .env (если их нет)</span>
+                    </div>
+                    <div class="flex gap-2 flex-wrap items-center">
+                        <button onclick="resetAllUsers()" class="px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 rounded-lg font-semibold text-sm transition-colors">Сбросить всех пользователей</button>
+                        <span class="text-gray-500 text-xs">Опасная операция. Потребуется ввести подтверждение.</span>
+                    </div>
+                </div>
+                <div id="usersList" class="space-y-2 mt-4"></div>
+            </section>
+
+            <section id="inviteCodesSection" class="glass-panel p-6 rounded-2xl hidden">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center">
+                        <i class="ph ph-ticket text-green-400 text-xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-white">Пригласительные коды</h2>
+                </div>
+                <p class="text-gray-400 text-sm mb-4">Создайте одноразовый код для регистрации с определённым уровнем доступа</p>
+                <div class="flex gap-2 flex-wrap mb-4">
+                    <select id="inviteLevel" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 min-w-[140px]">
+                        <option value="1">1 — Мл. модер</option>
+                        <option value="2">2 — Модер</option>
+                        <option value="3">3 — СТМ / СТА</option>
+                        <option value="4">4 — ГА</option>
+                        <option value="5">5 — Суперадмин</option>
+                    </select>
+                    <button onclick="generateInvite()" class="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg font-semibold text-sm transition-colors">Сгенерировать код</button>
+                </div>
+                <div id="generatedCode" class="hidden mb-4 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
+                    <span class="text-gray-400 text-sm">Код для уровня <strong id="generatedCodeLevel" class="text-green-400"></strong>: </span>
+                    <code id="inviteCodeDisplay" class="text-green-400 font-mono font-bold"></code>
+                    <button onclick="copyInviteCode()" class="ml-2 px-2 py-1 bg-white/5 rounded text-xs hover:bg-white/10">Копировать</button>
+                    <p class="text-gray-500 text-xs mt-1">Ссылка: <a id="inviteLink" href="#" class="text-indigo-400 hover:underline break-all" target="_blank"></a></p>
+                </div>
+                <div id="inviteCodesList" class="space-y-2 text-sm"></div>
+            </section>
+
+            <section id="updateNoticeSection" class="glass-panel p-6 rounded-2xl hidden">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 bg-cyan-500/10 rounded-xl flex items-center justify-center">
+                        <i class="ph ph-megaphone text-cyan-400 text-xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-white">Уведомление об обновлении</h2>
+                </div>
+                <p class="text-gray-400 text-sm mb-3">Показывается пользователям 1 раз в правом нижнем углу</p>
+                <textarea id="updateNoticeMessage" rows="3" placeholder="Например: Добавили новую проверку банов и ускорили загрузку панели" class="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-cyan-500 resize-y"></textarea>
+                <div class="flex items-center gap-2 mt-3">
+                    <button onclick="publishUpdateNotice()" class="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 rounded-lg font-semibold text-sm transition-colors">Сообщить об обновлении</button>
+                    <button onclick="clearUpdateNotice()" class="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg font-semibold text-sm transition-colors text-gray-300">Сбросить</button>
+                </div>
+            </section>
+
+            <section class="glass-panel p-6 rounded-2xl">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
+                        <i class="ph ph-wrench text-amber-400 text-xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-white">ТЕХ. РАБОТЫ</h2>
+                </div>
+                <p class="text-gray-400 text-sm mb-4">Показывает пользователям табличку с уведомлением о техработах</p>
+                <div class="space-y-3">
+                    <label class="block text-gray-400 text-sm">Сообщение (опционально)</label>
+                    <input type="text" id="maintenanceMessage" placeholder="Проводятся технические работы. Приносим извинения." class="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white text-sm focus:outline-none focus:border-amber-500" />
+                    <button id="maintenanceBtn" onclick="toggleMaintenance()" class="px-4 py-2 rounded-lg font-semibold text-sm transition-colors bg-amber-500/20 text-amber-400 hover:bg-amber-500/30">
+                        Включить
+                    </button>
+                </div>
+            </section>
+
+            <section class="glass-panel p-6 rounded-2xl">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 bg-gray-500/10 rounded-xl flex items-center justify-center">
+                        <i class="ph ph-info text-gray-400 text-xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-white">Система</h2>
+                </div>
+                <div class="space-y-2 text-sm text-gray-400">
+                    <div class="flex justify-between"><span>Версия</span><span class="text-white font-semibold">1.0.0</span></div>
+                    <div class="flex justify-between"><span>Обновление данных</span><span class="text-white font-semibold">каждые 5 мин</span></div>
+                    <div class="flex justify-between"><span>Кэш проверок</span><span class="text-white font-semibold">30 мин</span></div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        let currentUserLevel = 0;
+        let sessionToken = '';
+        let activityRange = 'week';
+        const panelVisibilityState = { activity: false, staff: false };
+
+        function authHeaders() {
+            return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sessionToken };
+        }
+        function esc(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function syncActivityRangeButtons() {
+            const mk = (id, active) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.className = active
+                    ? 'px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors bg-emerald-500/30 text-emerald-300'
+                    : 'px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors bg-white/5 text-gray-400 hover:bg-white/10';
+            };
+            mk('activityRangeDay', activityRange === 'day');
+            mk('activityRangeWeek', activityRange === 'week');
+            mk('activityRangeAll', activityRange === 'all');
+        }
+
+        function setActivityRange(r) {
+            activityRange = r === 'day' || r === 'week' || r === 'all' ? r : 'day';
+            syncActivityRangeButtons();
+            loadActivityChart();
+        }
+
+        function applyPanelVisibility(name) {
+            const isOpen = !!panelVisibilityState[name];
+            const bodyEl = document.getElementById(name === 'activity' ? 'activityPanelBody' : 'staffPanelBody');
+            const btnEl = document.getElementById(name === 'activity' ? 'toggleActivityPanelBtn' : 'toggleStaffPanelBtn');
+            if (bodyEl) bodyEl.classList.toggle('hidden', !isOpen);
+            if (btnEl) btnEl.textContent = isOpen ? 'Скрыть' : 'Открыть';
+        }
+
+        function toggleCollapsiblePanel(name) {
+            if (name !== 'activity' && name !== 'staff') return;
+            panelVisibilityState[name] = !panelVisibilityState[name];
+            applyPanelVisibility(name);
+        }
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            const stored = localStorage.getItem('user');
+            if (!stored) { window.location.href = '/auth'; return; }
+            const user = JSON.parse(stored);
+            sessionToken = user.sessionToken || '';
+            if (!sessionToken) { window.location.href = '/auth'; return; }
+
+            try {
+                const res = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + sessionToken } });
+                if (!res.ok) { window.location.href = '/auth'; return; }
+                const data = await res.json();
+                currentUserLevel = data.level || 0;
+            } catch (_) { window.location.href = '/auth'; return; }
+
+            if (currentUserLevel < 4) { window.location.href = '/'; return; }
+            const isLevel5 = currentUserLevel >= 5;
+
+            document.getElementById('userName').textContent = user.displayName || user.username;
+            if (currentUserLevel >= 5) {
+                document.getElementById('resetUsersBlock').classList.remove('hidden');
+                document.getElementById('inviteCodesSection').classList.remove('hidden');
+                document.getElementById('updateNoticeSection').classList.remove('hidden');
+                loadInviteCodes();
+                loadUpdateNotice();
+            }
+            syncActivityRangeButtons();
+            applyPanelVisibility('activity');
+            applyPanelVisibility('staff');
+            loadActivityChart();
+            loadStaff();
+            loadUsers();
+            loadMaintenanceStatus();
+        });
+
+        async function loadMaintenanceStatus() {
+            try {
+                const res = await fetch('/api/maintenance');
+                const { active, message } = await res.json();
+                const btn = document.getElementById('maintenanceBtn');
+                const msg = document.getElementById('maintenanceMessage');
+                if (btn) btn.textContent = active ? 'Выключить' : 'Включить';
+                if (btn) btn.className = active ? 'px-4 py-2 rounded-lg font-semibold text-sm transition-colors bg-rose-500/20 text-rose-400 hover:bg-rose-500/30' : 'px-4 py-2 rounded-lg font-semibold text-sm transition-colors bg-amber-500/20 text-amber-400 hover:bg-amber-500/30';
+                if (msg && message) msg.value = message;
+            } catch (_) {}
+        }
+
+        async function toggleMaintenance() {
+            try {
+                const res = await fetch('/api/maintenance');
+                const { active } = await res.json();
+                const msg = document.getElementById('maintenanceMessage').value.trim();
+                const newActive = !active;
+                await fetch('/api/maintenance', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ active: newActive, message: msg || undefined })
+                });
+                loadMaintenanceStatus();
+                alert(newActive ? 'Уведомление о техработах включено' : 'Уведомление выключено');
+            } catch (_) { alert('Ошибка'); }
+        }
+
+        let lastGeneratedCode = '';
+
+        async function resetAllUsers() {
+            const confirmText = prompt('Для подтверждения удаления ВСЕХ пользователей введите: СБРОСИТЬ');
+            if (confirmText !== 'СБРОСИТЬ') {
+                if (confirmText !== null) alert('Неверное подтверждение. Отменено.');
+                return;
+            }
+            try {
+                const res = await fetch('/api/users/reset', { method: 'DELETE', headers: authHeaders() });
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                alert('Все пользователи удалены. Добавьте пользователя в DEFAULT_USERS в .env и перезапустите сервер.');
+                localStorage.removeItem('user');
+                window.location.href = '/auth';
+            } catch (_) { alert('Ошибка'); }
+        }
+
+        async function restoreFromEnv() {
+            try {
+                const res = await fetch('/api/users/restore-env', { method: 'POST', headers: authHeaders() });
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                alert(data.restored ? `Восстановлено пользователей: ${data.restored}` : 'Все пользователи из .env уже существуют.');
+                loadUsers();
+            } catch (_) { alert('Ошибка'); }
+        }
+
+        async function loadInviteCodes() {
+            try {
+                const res = await fetch('/api/invites?used=1', { headers: authHeaders() });
+                const { codes } = await res.json();
+                const el = document.getElementById('inviteCodesList');
+                if (!codes || codes.length === 0) { el.innerHTML = '<p class="text-gray-500">Нет кодов</p>'; return; }
+                const lNames = { 1: 'Мл. модер', 2: 'Модер', 3: 'СТМ/СТА', 4: 'ГА', 5: 'Суперадмин' };
+                el.innerHTML = codes.slice(0, 20).map(c => `
+                    <div class="flex justify-between items-center p-2 bg-white/[0.03] rounded-lg gap-2">
+                        <div class="min-w-0 flex-1">
+                            <code class="text-green-400 font-mono text-xs truncate">${esc(c.code)}</code>
+                            <span class="text-gray-400 text-xs whitespace-nowrap">уровень ${c.level} (${lNames[c.level] || ''}) ${c.used_at ? '— использован' : ''}</span>
+                        </div>
+                        <button onclick="deleteInviteCode('${esc(c.code)}')" class="px-2 h-7 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[11px] transition-colors" title="Удалить код">Удалить</button>
+                    </div>
+                `).join('');
+            } catch (_) {}
+        }
+
+        async function deleteInviteCode(code) {
+            const cleanCode = String(code || '').trim();
+            if (!cleanCode) return;
+            if (!confirm(`Удалить пригласительный код "${cleanCode}"?`)) return;
+            try {
+                const res = await fetch('/api/invites/' + encodeURIComponent(cleanCode), {
+                    method: 'DELETE',
+                    headers: authHeaders()
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || data.error) {
+                    alert(data.error || 'Не удалось удалить код');
+                    return;
+                }
+                loadInviteCodes();
+            } catch (_) {
+                alert('Ошибка удаления кода');
+            }
+        }
+
+        const levelNames = { 1: 'Мл. модер', 2: 'Модер', 3: 'СТМ/СТА', 4: 'ГА', 5: 'Суперадмин' };
+        async function generateInvite() {
+            const level = parseInt(document.getElementById('inviteLevel').value);
+            try {
+                const res = await fetch('/api/invites/generate', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ level })
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                lastGeneratedCode = data.code;
+                document.getElementById('generatedCodeLevel').textContent = level + ' (' + (levelNames[level] || '') + ')';
+                document.getElementById('inviteCodeDisplay').textContent = data.code;
+                document.getElementById('inviteLink').href = window.location.origin + '/auth?invite=' + encodeURIComponent(data.code);
+                document.getElementById('inviteLink').textContent = window.location.origin + '/auth?invite=' + data.code;
+                document.getElementById('generatedCode').classList.remove('hidden');
+                loadInviteCodes();
+            } catch (_) { alert('Ошибка'); }
+        }
+
+        function copyInviteCode() {
+            navigator.clipboard.writeText(lastGeneratedCode).then(() => alert('Скопировано'));
+        }
+
+        async function loadUsers() {
+            try {
+                const res = await fetch('/api/users', { headers: authHeaders() });
+                if (!res.ok) {
+                    document.getElementById('usersList').innerHTML = '<p class="text-gray-500 text-sm">Ошибка загрузки</p>';
+                    return;
+                }
+                const { users } = await res.json();
+                const container = document.getElementById('usersList');
+                if (!users || users.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-sm">Нет пользователей</p>';
+                    return;
+                }
+                const badgeStyles = {
+                    1: 'bg-gray-500/20 text-gray-400',
+                    2: 'bg-gray-500/20 text-gray-400',
+                    3: 'bg-indigo-500/20 text-indigo-400',
+                    4: 'bg-amber-500/20 text-amber-400',
+                    5: 'bg-rose-500/20 text-rose-400'
+                };
+                const levelNames = { 1: 'Мл. модер', 2: 'Модер', 3: 'СТМ/СТА', 4: 'ГА', 5: 'Суперадмин' };
+                const myUser = JSON.parse(localStorage.getItem('user') || '{}');
+                const canBindSteamId = currentUserLevel >= 5;
+                container.innerHTML = users.map(u => {
+                    const isMe = u.id === myUser.id;
+                    const canEdit = currentUserLevel >= 5 ? true : (!isMe && u.level < currentUserLevel);
+                    const canDelete = canEdit && !isMe;
+                    const levelOpts = [1,2,3,4,5].filter(l => l <= currentUserLevel).map(l =>
+                        `<option value="${l}" ${l === u.level ? 'selected' : ''}>${l}</option>`
+                    ).join('');
+                    return `
+                    <div class="flex items-center justify-between p-3 bg-white/[0.03] hover:bg-white/[0.06] rounded-xl transition-colors">
+                        <div class="flex items-center gap-3">
+                            <span class="level-badge ${badgeStyles[u.level] || badgeStyles[1]}">${u.level}</span>
+                            <div>
+                                <span class="text-white text-sm font-semibold">${esc(u.displayName || u.username)}</span>
+                                ${isMe ? '<span class="text-amber-400 text-[10px] ml-1">(вы)</span>' : ''}
+                                <div class="text-gray-500 text-xs">${levelNames[u.level] || 'Уровень ' + u.level}</div>
+                                ${canBindSteamId ? `<div class="text-gray-500 text-[10px] font-mono">SteamID: ${esc(u.steamId || 'не привязан')}</div>` : ''}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            ${canEdit ? `
+                                <select onchange="changeLevel(${u.id}, this.value)" class="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                    ${levelOpts}
+                                </select>
+                                ${canBindSteamId ? `<button onclick="promptSteamId(${u.id}, '${esc(u.username)}', '${esc(u.steamId || '')}')" class="px-2 h-8 rounded-lg hover:bg-cyan-500/10 text-cyan-400/70 hover:text-cyan-300 text-[11px] transition-colors" title="Привязать SteamID">SteamID</button>` : ''}
+                                <button onclick="promptPassword(${u.id}, '${esc(u.username)}')" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-indigo-500/10 text-indigo-400/60 hover:text-indigo-400 transition-colors" title="Сменить пароль"><i class="ph ph-key text-base"></i></button>
+                                ${canDelete ? `<button onclick="deleteUser(${u.id}, '${esc(u.username)}')" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-rose-500/10 text-rose-400/60 hover:text-rose-400 transition-colors" title="Удалить"><i class="ph ph-trash text-base"></i></button>` : ''}
+                            ` : ''}
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                console.error('loadUsers error:', e);
+                document.getElementById('usersList').innerHTML = '<p class="text-gray-500 text-sm">Ошибка загрузки</p>';
+            }
+        }
+
+        async function addUser() {
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newPassword').value;
+            const level = parseInt(document.getElementById('newUserLevel').value);
+            if (!username || !password) { alert('Введите логин и пароль'); return; }
+            try {
+                const res = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ username, password, displayName: username, level })
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+            } catch (_) { alert('Ошибка создания пользователя'); return; }
+            document.getElementById('newUsername').value = '';
+            document.getElementById('newPassword').value = '';
+            loadUsers();
+        }
+
+        async function changeLevel(id, newLevel) {
+            try {
+                const res = await fetch(`/api/users/${id}`, {
+                    method: 'PUT',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ level: parseInt(newLevel) })
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.error); loadUsers(); return; }
+                loadUsers();
+            } catch (_) { alert('Ошибка изменения уровня'); }
+        }
+
+        async function promptPassword(id, username) {
+            const newPass = prompt(`Новый пароль для "${username}":`);
+            if (!newPass) return;
+            try {
+                const res = await fetch(`/api/users/${id}`, {
+                    method: 'PUT',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ password: newPass })
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                alert('Пароль изменён');
+            } catch (_) { alert('Ошибка смены пароля'); }
+        }
+
+        async function promptSteamId(id, username, currentSteamId) {
+            const current = String(currentSteamId || '').trim();
+            const next = prompt(`SteamID для "${username}" (пусто = снять привязку):`, current);
+            if (next === null) return;
+            const steamId = String(next || '').trim();
+            if (steamId && !/^\d{5,}$/.test(steamId)) {
+                alert('Некорректный SteamID');
+                return;
+            }
+            try {
+                const res = await fetch(`/api/users/${id}`, {
+                    method: 'PUT',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ steamId })
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                loadUsers();
+            } catch (_) {
+                alert('Ошибка привязки SteamID');
+            }
+        }
+
+        async function deleteUser(id, username) {
+            if (!confirm(`Удалить пользователя "${username}"?`)) return;
+            const res = await fetch(`/api/users/${id}`, { method: 'DELETE', headers: authHeaders() });
+            const data = await res.json();
+            if (data.error) { alert(data.error); return; }
+            loadUsers();
+        }
+
+        async function loadStaff() {
+            const staffLast = document.getElementById('staffLastUpdated');
+            const staffList = document.getElementById('staffList');
+            const defaultAvatar = 'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
+            if (staffLast) staffLast.textContent = 'Загрузка...';
+            if (staffList) staffList.innerHTML = '';
+
+            try {
+                const res = await fetch('/api/staff', { headers: authHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                const list = Array.isArray(data.staffList) ? data.staffList : [];
+                const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated).toLocaleString('ru') : '—';
+                if (staffLast) staffLast.textContent = `Обновлено: ${lastUpdated} (${list.length} чел.)`;
+
+                if (!staffList) return;
+                if (list.length === 0) {
+                    staffList.innerHTML = '<div class="text-gray-500 text-sm">Нет данных</div>';
+                    return;
+                }
+
+                staffList.innerHTML = list.map(s => {
+                    const avatar = (s.avatar_full || defaultAvatar).replace(/^http:\/\//i, 'https://');
+                    return `
+                        <div class="flex items-center gap-3 p-2 bg-white/[0.03] rounded-lg">
+                            <img src="${avatar}" class="w-9 h-9 rounded-full" onerror="this.src='${defaultAvatar}'">
+                            <div class="min-w-0">
+                                <div class="text-white text-sm font-semibold truncate">${esc(s.name || '—')}</div>
+                                <div class="text-gray-500 text-xs font-mono">${esc(s.steamid || '')}</div>
+                                <div class="text-gray-400 text-xs">${esc(s.group_display_name || '')}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (_) {
+                if (staffLast) staffLast.textContent = 'Ошибка загрузки';
+            }
+        }
+
+        async function loadActivityChart() {
+            try {
+                const res = await fetch('/api/activity?range=' + encodeURIComponent(activityRange), { headers: authHeaders() });
+                if (!res.ok) return;
+                const { activity } = await res.json();
+                const chart = document.getElementById('activityChart');
+                if (!activity || activity.length === 0) { chart.innerHTML = '<p class="text-gray-500 text-sm m-auto">Нет данных</p>'; return; }
+                const sorted = [...activity].sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+                const maxBars = activityRange === 'day' ? 24 : (activityRange === 'week' ? 28 : 48);
+                const step = Math.max(1, Math.ceil(sorted.length / maxBars));
+                const sampled = sorted.filter((_, idx) => idx % step === 0).slice(-maxBars);
+                const max = Math.max(...sampled.map(a => Number(a.total_players) || 0), 1);
+                chart.innerHTML = sampled.map((a, idx) => {
+                    const h = Math.max(4, (a.total_players / max) * 100);
+                    const d = new Date(a.timestamp);
+                    const time = activityRange === 'day'
+                        ? d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
+                        : d.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+                    const showLabel = sampled.length <= 14 || idx % Math.ceil(sampled.length / 8) === 0;
+                    return `
+                        <div class="flex-1 min-w-[6px] rounded-t bg-indigo-500/70 hover:bg-indigo-400 transition-colors relative group overflow-visible" style="height:${h}%" title="${time}: ${a.total_players} игроков">
+                            <span class="absolute top-1 left-1/2 -translate-x-1/2 text-[10px] leading-none font-semibold text-white/90 pointer-events-none">${a.total_players}</span>
+                            ${showLabel ? `<span class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[9px] text-gray-500 whitespace-nowrap">${time}</span>` : ''}
+                        </div>
+                    `;
+                }).join('');
+            } catch (_) {}
+        }
+
+        async function loadUpdateNotice() {
+            try {
+                const res = await fetch('/api/update-notice', { headers: authHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                const area = document.getElementById('updateNoticeMessage');
+                if (!area) return;
+                area.value = data.active ? (data.message || '') : '';
+            } catch (_) {}
+        }
+
+        async function publishUpdateNotice() {
+            const area = document.getElementById('updateNoticeMessage');
+            const message = (area?.value || '').trim();
+            if (!message) { alert('Введите текст уведомления'); return; }
+            try {
+                const res = await fetch('/api/update-notice', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ message })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    alert(data.error || 'Не удалось отправить уведомление');
+                    return;
+                }
+                alert('Уведомление отправлено. Пользователи увидят его один раз.');
+            } catch (_) {
+                alert('Ошибка отправки уведомления');
+            }
+        }
+
+        async function clearUpdateNotice() {
+            try {
+                const res = await fetch('/api/update-notice', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ message: '' })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    alert(data.error || 'Не удалось сбросить уведомление');
+                    return;
+                }
+                const area = document.getElementById('updateNoticeMessage');
+                if (area) area.value = '';
+                alert('Уведомление сброшено');
+            } catch (_) {
+                alert('Ошибка сброса');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Database — содержимое data/ не коммитим (БД, сессии, whitelist)
+# Используй DATABASE_PATH в .env вне папки проекта (вне OneDrive) для сохранности
+data/*
+!data/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+test-*.js
+
+# Build
+dist/
+build/
+
+# Overlay launcher (Electron)
+OverlayForCs2/
