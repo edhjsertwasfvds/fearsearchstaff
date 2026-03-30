@@ -1,5 +1,10 @@
 // Приватный модуль для расчёта статистики/выплат стаффа.
 // Должен раздаваться сервером только для пользователей level >= 3.
+//
+// СТАРАЯ — punishmentsInPeriodForOldTable + computeStaffStatsRowsOld: только дата.
+//   Все строки API в периоде: любые статусы (в т.ч. снятый/разбан), любые причины.
+// НОВАЯ — punishmentsInPeriodForNewTable + computeStaffStatsRowsSecure: дата + newTablePunishmentIncluded
+//   (только активные 1 и истёкшие 4; без «напиши тикет в дс» и аналогов). Ветки не смешивать.
 (function () {
     'use strict';
 
@@ -19,9 +24,32 @@
         return String(r || '').trim().toLowerCase();
     }
 
+    /** Единый текст причины из разных полей ответа API. */
+    function punishmentReasonText(p) {
+        if (!p || typeof p !== 'object') return '';
+        const raw = p.reason ?? p.ban_reason ?? p.message ?? p.comment ?? p.desc ?? p.punish_reason ?? p.text ?? '';
+        return String(raw || '').trim();
+    }
+
+    /** Статус наказания (разбанен = 2 и т.д.). */
+    function punishmentStatus(p) {
+        if (!p || typeof p !== 'object') return -1;
+        const keys = ['status', 'ban_status', 'state', 'punishment_status'];
+        for (let i = 0; i < keys.length; i++) {
+            const n = toInt(p[keys[i]], NaN);
+            if (Number.isFinite(n)) return n;
+        }
+        return -1;
+    }
+
     function isExcludedReason(reason) {
         const r = normalizeReason(reason);
         if (!r) return false;
+        const compact = r.replace(/\s+/g, ' ').trim();
+        const noSpace = compact.replace(/\s/g, '');
+        // Явная фраза (регистр уже в r — lower)
+        if (compact.includes('напиши тикет в дс')) return true;
+        if (noSpace.includes('напишитикетвдс')) return true;
         const hasTicket = r.includes('тикет') || r.includes('ticket');
         const hasDs = r.includes('дс') || r.includes('ds') || r.includes('discord') || r.includes('дискорд');
         const hasWrite = r.includes('напиши') || r.includes('пиши') || r.includes('напишите');
@@ -66,13 +94,26 @@
         return ym === sel;
     }
 
-    function isCountedPunishment(p) {
-        // "снятые не учитываются" -> status=2 не считаем
-        // считаем только активные/истекшие (как у вас уже было: 1 и 4)
-        const st = toInt(p && p.status, -1);
+    /** Только для НОВОЙ таблицы: активные/истёкшие (1, 4), без снятых (2), без причин «тикет в дс» и т.п. */
+    function newTablePunishmentIncluded(p) {
+        const st = punishmentStatus(p);
         if (!(st === 1 || st === 4)) return false;
-        if (isExcludedReason(p && p.reason)) return false;
+        if (isExcludedReason(punishmentReasonText(p))) return false;
         return true;
+    }
+
+    /** СТАРАЯ: только срез по дате. Не вызывать newTablePunishmentIncluded. */
+    function punishmentsInPeriodForOldTable(arr, selectedPeriod) {
+        const raw = Array.isArray(arr) ? arr : [];
+        if (!selectedPeriod) return raw.slice();
+        return raw.filter(p => inSelectedPeriod(p, selectedPeriod));
+    }
+
+    /** НОВАЯ: дата + фильтры статуса/причины. */
+    function punishmentsInPeriodForNewTable(arr, selectedPeriod) {
+        const raw = Array.isArray(arr) ? arr : [];
+        const timeScoped = selectedPeriod ? raw.filter(p => inSelectedPeriod(p, selectedPeriod)) : raw;
+        return timeScoped.filter(newTablePunishmentIncluded);
     }
 
     function computeStaffStatsRowsSecure(staffList, statsDataBySid, selectedPeriod) {
@@ -80,8 +121,7 @@
         return list.map((s) => {
             const sid = String(s && s.steamid || '');
             const arr = Array.isArray(statsDataBySid && statsDataBySid[sid]) ? statsDataBySid[sid] : [];
-            const scoped = selectedPeriod ? arr.filter(p => inSelectedPeriod(p, selectedPeriod)) : arr;
-            const counted = scoped.filter(isCountedPunishment);
+            const counted = punishmentsInPeriodForNewTable(arr, selectedPeriod);
             const bans = counted.filter(p => toInt(p && p.type, 0) === 1).length;
             const mutes = counted.filter(p => toInt(p && p.type, 0) === 2).length;
             return {
@@ -96,17 +136,15 @@
         }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
     }
 
-    // "Старая таблица": считаем ВСЕ наказания, включая снятые (status=2).
-    // Здесь НЕТ фильтра по причине: учитываем и "напиши тикет в дс" и т.п.
     function computeStaffStatsRowsOld(staffList, statsDataBySid, selectedPeriod) {
         const list = Array.isArray(staffList) ? staffList : [];
         return list.map((s) => {
             const sid = String(s && s.steamid || '');
             const arr = Array.isArray(statsDataBySid && statsDataBySid[sid]) ? statsDataBySid[sid] : [];
-            const scoped = selectedPeriod ? arr.filter(p => inSelectedPeriod(p, selectedPeriod)) : arr;
+            const scoped = punishmentsInPeriodForOldTable(arr, selectedPeriod);
             const bans = scoped.filter(p => toInt(p && p.type, 0) === 1).length;
             const mutes = scoped.filter(p => toInt(p && p.type, 0) === 2).length;
-            const removed = scoped.filter(p => toInt(p && p.status, -1) === 2).length;
+            const sum = scoped.length;
             return {
                 admin_steamid: sid,
                 admin: (s && s.name) || '—',
@@ -114,8 +152,7 @@
                 group: (s && s.group_display_name) || '',
                 bans,
                 mutes,
-                sum: bans + mutes,
-                removed
+                sum
             };
         }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
     }

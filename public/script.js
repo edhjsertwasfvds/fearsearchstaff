@@ -203,18 +203,71 @@ function sleep(ms) {
 }
 
 function getPunishmentCreatedTs(p) {
-    const raw = p.created ?? p.created_at ?? p.date ?? p.timestamp;
+    const raw = p && (p.created ?? p.created_at ?? p.date ?? p.timestamp ?? p.time ?? p.punish_time ?? p.ban_time ?? p.issue_time ?? p.start_time);
     if (raw == null || raw === '') return null;
     if (typeof raw === 'number') return raw > 1e12 ? Math.floor(raw / 1000) : raw;
     if (typeof raw === 'string') {
         const trimmed = raw.trim();
         const asNum = parseInt(trimmed, 10);
         if (Number.isFinite(asNum)) return asNum > 1e12 ? Math.floor(asNum / 1000) : asNum;
-        const iso = trimmed.replace(' ', 'T');
-        const ms = Date.parse(iso);
+        const ms = Date.parse(trimmed.replace(' ', 'T'));
         if (!Number.isNaN(ms)) return Math.floor(ms / 1000);
     }
     return null;
+}
+
+function punishmentInSelectedPeriod(p, selectedPeriod) {
+    const sel = String(selectedPeriod || '').trim();
+    if (!sel) return true;
+    const ts = getPunishmentCreatedTs(p);
+    if (ts == null) return false;
+    const d = new Date(ts * 1000);
+    if (sel.startsWith('week:')) {
+        const startStr = sel.slice(5).trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startStr)) return false;
+        const start = new Date(startStr + 'T00:00:00');
+        if (Number.isNaN(start.getTime())) return false;
+        const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+        return d >= start && d < end;
+    }
+    const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    return ym === sel;
+}
+
+/** Должно совпадать с логикой в staff-stats-secure.js (новая таблица). */
+function isStaffStatsExcludedReason(reason) {
+    const r = String(reason || '').trim().toLowerCase();
+    if (!r) return false;
+    const compact = r.replace(/\s+/g, ' ').trim();
+    const noSpace = compact.replace(/\s/g, '');
+    if (compact.includes('напиши тикет в дс')) return true;
+    if (noSpace.includes('напишитикетвдс')) return true;
+    const hasTicket = r.includes('тикет') || r.includes('ticket');
+    const hasDs = r.includes('дс') || r.includes('ds') || r.includes('discord') || r.includes('дискорд');
+    const hasWrite = r.includes('напиши') || r.includes('пиши') || r.includes('напишите');
+    if (hasTicket && hasDs) return true;
+    if (hasWrite && hasDs) return true;
+    if (/напиши.*(тикет|ticket).*(дс|ds|discord|дискорд)/i.test(r)) return true;
+    if (/(тикет|ticket).*(дс|ds|discord|дискорд)/i.test(r)) return true;
+    return false;
+}
+
+function staffStatsPunishmentReason(p) {
+    if (!p || typeof p !== 'object') return '';
+    const raw = p.reason ?? p.ban_reason ?? p.message ?? p.comment ?? p.desc ?? p.punish_reason ?? p.text ?? '';
+    return String(raw || '').trim();
+}
+
+function staffStatsPunishmentStatus(p) {
+    if (!p || typeof p !== 'object') return -1;
+    const keys = ['status', 'ban_status', 'state', 'punishment_status'];
+    for (let i = 0; i < keys.length; i++) {
+        const c = p[keys[i]];
+        if (c == null || c === '') continue;
+        const n = parseInt(c, 10);
+        if (Number.isFinite(n)) return n;
+    }
+    return -1;
 }
 
 // ——— WebSocket ———
@@ -617,6 +670,11 @@ function renderPanel() {
             : list;
         const filteredList = monthScopedList.filter(isVisibleStatus);
         const unbannedList = monthScopedList.filter(isUnbannedStatus);
+        /** Список наказаний: активные + истёкшие + разбанен (одна таблица, без отдельного счётчика «снято»). */
+        const displayList = monthScopedList.filter((p) => {
+            const s = Number(p?.status);
+            return s === 1 || s === 2 || s === 4;
+        });
         const visibleReasons = buildReasonStats(filteredList);
         const unbannedReasons = buildReasonStats(unbannedList);
         const canViewStaffStats = getUserLevel() >= 3;
@@ -667,7 +725,41 @@ function renderPanel() {
             </div>`;
 
         if (effectiveView === 'stats') {
+            const isOldTable = staffTableMode === 'old';
             const staffList = Array.isArray(state.punishments.staffList) ? state.punishments.staffList : [];
+            const rolesMap = state.punishments.staffRolesBySid || {};
+            const inferRoleFromGroup = (groupRaw) => {
+                const g = String(groupRaw || '').trim().toLowerCase();
+                if (!g) return '';
+                if (g.includes('мл. модер')) return 'ML';
+                if (g.includes('модератор')) return 'M';
+                if (g.includes('ст. модер')) return 'STM';
+                return '';
+            };
+            const resolveRoleCode = (row) => {
+                const sid = String(row?.admin_steamid || '').trim();
+                const explicit = String(rolesMap[sid] || '').trim().toUpperCase();
+                if (explicit && explicit !== 'AUTO') return explicit;
+                return inferRoleFromGroup(row?.group);
+            };
+            const roleLabelRu = (code) => {
+                const c = String(code || '').trim().toUpperCase();
+                if (c === 'GA') return 'ГА';
+                if (c === 'STA') return 'СТА';
+                if (c === 'STM') return 'СТМ';
+                if (c === 'M') return 'М';
+                if (c === 'ML') return 'МЛ';
+                return '—';
+            };
+            const roleRank = (roleRaw) => {
+                const r = String(roleRaw || '').trim().toUpperCase();
+                if (r === 'GA') return 0;
+                if (r === 'STA') return 1;
+                if (r === 'STM') return 2;
+                if (r === 'M') return 3;
+                if (r === 'ML') return 4;
+                return 9;
+            };
             const baseRows = staffList.map(s => ({
                 admin_steamid: String(s.steamid || ''),
                 admin: s.name || '—',
@@ -677,14 +769,19 @@ function renderPanel() {
                 mutes: 0,
                 sum: 0
             }));
-            const statsRows = (Array.isArray(state.punishments.staffStatsRows) ? state.punishments.staffStatsRows : baseRows).sort((a, b) => b.sum - a.sum);
+            const statsRows = (Array.isArray(state.punishments.staffStatsRows) ? state.punishments.staffStatsRows : baseRows)
+                .sort((a, b) => {
+                    const ra = roleRank(resolveRoleCode(a));
+                    const rb = roleRank(resolveRoleCode(b));
+                    if (ra !== rb) return ra - rb;
+                    return (b.sum || 0) - (a.sum || 0);
+                });
             const totalBans = statsRows.reduce((s, r) => s + r.bans, 0);
             const totalMutes = statsRows.reduce((s, r) => s + r.mutes, 0);
-            const totalSum = totalBans + totalMutes;
+            // Старая таблица: r.sum = все записи периода (не только бан+мут), итог по колонке «Сумма».
+            const totalSum = statsRows.reduce((s, r) => s + (Number(r.sum) || 0), 0);
             const secure = !!(window.StaffStatsSecure && typeof window.StaffStatsSecure.computePayoutRow === 'function');
-            const isOldTable = staffTableMode === 'old';
             const ticketsMap = state.punishments.staffTicketsBySid || {};
-            const rolesMap = state.punishments.staffRolesBySid || {};
             const payoutRows = secure
                 ? statsRows.map(r => window.StaffStatsSecure.computePayoutRow(
                     r,
@@ -696,6 +793,9 @@ function renderPanel() {
             const totalPay = secure ? payoutRows.reduce((s, r) => s + (r.pay?.total || 0), 0) : 0;
 
             content.innerHTML = punishmentsInputHtml + monthSelectHtml + `
+                <p class="text-xs text-gray-500 mb-3 max-w-3xl leading-relaxed">${isOldTable
+                    ? 'Старая таблица: в период входят <span class="text-gray-400">все наказания</span> — активные и снятые (разбан), любые причины.'
+                    : 'Новая таблица: только <span class="text-gray-400">активные и истёкшие</span> наказания; снятые (разбан) и причины вроде «напиши тикет в дс» не входят в сумму и выплаты.'}</p>
                 <div class="flex gap-4 mb-4 flex-wrap">
                     <div class="flex-1 min-w-[100px] bg-rose-500/10 border border-rose-500/20 rounded-lg px-4 py-3 text-center">
                         <div class="text-rose-400 font-bold text-xl">${totalBans}</div>
@@ -707,7 +807,7 @@ function renderPanel() {
                     </div>
                     <div class="flex-1 min-w-[100px] bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3 text-center">
                         <div class="text-emerald-400 font-bold text-xl">${totalSum}</div>
-                        <div class="text-gray-500 text-xs mt-0.5">Всего (активно/истек)</div>
+                        <div class="text-gray-500 text-xs mt-0.5">${isOldTable ? 'Все наказания (все статусы)' : 'Всего (активно/истек)'}</div>
                     </div>
                     ${secure ? `
                     <div class="flex-1 min-w-[100px] bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-4 py-3 text-center">
@@ -737,13 +837,12 @@ function renderPanel() {
                                 <th class="py-3 px-2 font-semibold text-rose-400">Баны</th>
                                 <th class="py-3 px-2 font-semibold text-amber-400">Муты</th>
                                 <th class="py-3 px-2 font-semibold text-emerald-400">Сумма</th>
-                                ${isOldTable ? '<th class="py-3 px-2 font-semibold text-blue-400">Снято</th>' : ''}
                                 ${secure && !isOldTable ? '<th class="py-3 px-2 font-semibold text-indigo-300">Тикеты</th><th class="py-3 px-2 font-semibold text-white">Выплата</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
                             ${statsRows.length === 0
-                                ? `<tr><td colspan="${secure && !isOldTable ? 8 : (isOldTable ? 7 : 6)}" class="py-6 text-center text-gray-500">Список стафа загружается...</td></tr>`
+                                ? `<tr><td colspan="${secure && !isOldTable ? 8 : 6}" class="py-6 text-center text-gray-500">Список стафа загружается...</td></tr>`
                                 : statsRows.map((r, i) => `
                                 <tr class="border-b border-white/5 hover:bg-white/[0.03] row-new">
                                     <td class="py-3 px-2 text-gray-500 font-mono">${i + 1}</td>
@@ -756,11 +855,10 @@ function renderPanel() {
                                             </div>
                                         </div>
                                     </td>
-                                    <td class="py-3 px-2 text-gray-400 text-xs">${escapeHtml(r.group)}</td>
+                                    <td class="py-3 px-2 text-gray-300 text-xs font-semibold">${escapeHtml(roleLabelRu(resolveRoleCode(r)))}</td>
                                     <td class="py-3 px-2 text-rose-400 font-semibold">${r.bans || '<span class="text-gray-600">0</span>'}</td>
                                     <td class="py-3 px-2 text-amber-400 font-semibold">${r.mutes || '<span class="text-gray-600">0</span>'}</td>
                                     <td class="py-3 px-2 ${r.sum > 0 ? 'text-emerald-400 font-bold' : 'text-gray-600'}">${r.sum}</td>
-                                    ${isOldTable ? `<td class="py-3 px-2 text-blue-400 font-semibold">${r.removed || '<span class="text-gray-600">0</span>'}</td>` : ''}
                                     ${secure && !isOldTable ? (() => {
                                         const sid = String(r.admin_steamid || '');
                                         const cur = (ticketsMap && ticketsMap[sid] != null) ? ticketsMap[sid] : 0;
@@ -785,9 +883,8 @@ function renderPanel() {
                     </table>
                 </div>`;
         } else {
-            const listBans = filteredList.filter(p => p.type === 1).length;
-            const listMutes = filteredList.filter(p => p.type === 2).length;
-            const totalRemoved = unbannedList.length;
+            const listBans = displayList.filter(p => p.type === 1).length;
+            const listMutes = displayList.filter(p => p.type === 2).length;
             content.innerHTML = punishmentsInputHtml + monthSelectHtml + `
                 <div class="flex gap-3 mb-4 flex-wrap">
                     <div class="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
@@ -799,12 +896,8 @@ function renderPanel() {
                         <span class="text-gray-500 text-xs">мутов</span>
                     </div>
                     <div class="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-                        <span class="text-white font-bold">${filteredList.length}</span>
-                        <span class="text-gray-500 text-xs">всего (активно/истек)</span>
-                    </div>
-                    <div class="flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2">
-                        <span class="text-blue-400 font-bold">${totalRemoved}</span>
-                        <span class="text-gray-500 text-xs">снято</span>
+                        <span class="text-white font-bold">${displayList.length}</span>
+                        <span class="text-gray-500 text-xs">всего за период</span>
                     </div>
                 </div>
                 <div class="mb-4">
@@ -838,9 +931,9 @@ function renderPanel() {
                             </tr>
                         </thead>
                         <tbody>
-                            ${filteredList.length === 0
+                            ${displayList.length === 0
                                 ? `<tr><td colspan="8" class="py-6 text-center ${punishmentsError ? 'text-rose-400' : 'text-gray-500'}">${loading ? 'Загрузка наказаний...' : (punishmentsError ? escapeHtml(punishmentsError) : (ownSteamMode ? 'Введите ваш SteamID или SteamID админа и нажмите «Обновить»' : 'Введите SteamID админа и нажмите «Загрузить»'))}</td></tr>`
-                                : filteredList.map(p => {
+                                : displayList.map(p => {
                                 const st = statusLabel(p.status);
                                 return `
                                 <tr class="border-b border-white/5 hover:bg-white/[0.03] row-new">
@@ -1147,6 +1240,13 @@ function setStaffStatsTableMode(mode) {
     const m = mode === 'old' ? 'old' : 'new';
     state.punishments.staffTableMode = m;
     if (state.openCategory === 'Наказания' && state.punishments.view === 'stats') {
+        if (Array.isArray(state.punishments.staffList) && Object.keys(state.punishments.staffStatsData || {}).length > 0) {
+            state.punishments.staffStatsRows = computeStaffStatsRows(
+                state.punishments.staffList,
+                state.punishments.staffStatsData,
+                state.punishments.selectedMonth
+            );
+        }
         scheduleRenderPanel();
     }
 }
@@ -1198,35 +1298,50 @@ async function loadPunishmentsStaffList() {
 }
 
 function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
+    const isOldTable = state?.punishments?.staffTableMode === 'old';
+    // Один и тот же период (месяц или неделя) для обеих таблиц; отличаются только фильтры строк.
     const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
         ? ('week:' + String(state.punishments.selectedWeekStart))
         : selectedMonth;
-    // Старая таблица: включаем снятые (status=2) в общий счёт
-    if (state?.punishments?.staffTableMode === 'old' && window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsOld === 'function') {
+    // Старая: все записи в периоде — любой статус, любая причина (computeStaffStatsRowsOld).
+    // Новая: только 1/4 и без «тикет в дс» и т.п. (computeStaffStatsRowsSecure).
+    if (isOldTable && window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsOld === 'function') {
         return window.StaffStatsSecure.computeStaffStatsRowsOld(staffList, statsDataBySid, period);
     }
     if (window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsSecure === 'function') {
         return window.StaffStatsSecure.computeStaffStatsRowsSecure(staffList, statsDataBySid, period);
     }
-    const inSelectedMonth = (p) => {
-        if (!selectedMonth) return true;
-        const ts = getPunishmentCreatedTs(p);
-        if (ts == null) return false;
-        const d = new Date(ts * 1000);
-        const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-        return ym === selectedMonth;
-    };
-    return (Array.isArray(staffList) ? staffList : []).map(s => {
+    const list = Array.isArray(staffList) ? staffList : [];
+    if (isOldTable) {
+        return list.map((s) => {
+            const sid = String(s.steamid || '');
+            const arr = Array.isArray(statsDataBySid?.[sid]) ? statsDataBySid[sid] : [];
+            const scoped = period ? arr.filter((p) => punishmentInSelectedPeriod(p, period)) : arr;
+            const bans = scoped.filter((p) => Number(p?.type) === 1).length;
+            const mutes = scoped.filter((p) => Number(p?.type) === 2).length;
+            return {
+                admin_steamid: sid,
+                admin: s.name || '—',
+                admin_avatar: s.avatar_full || '',
+                group: s.group_display_name || '',
+                bans,
+                mutes,
+                sum: scoped.length
+            };
+        }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
+    }
+    return list.map((s) => {
         const sid = String(s.steamid || '');
-        const list = Array.isArray(statsDataBySid?.[sid]) ? statsDataBySid[sid] : [];
-        const scoped = list.filter(inSelectedMonth);
-        const activeOrExpired = scoped.filter(p => {
-            const st = Number(p?.status);
-            return st === 1 || st === 4;
+        const arr = Array.isArray(statsDataBySid?.[sid]) ? statsDataBySid[sid] : [];
+        const scoped = period ? arr.filter((p) => punishmentInSelectedPeriod(p, period)) : arr;
+        const counted = scoped.filter((p) => {
+            const st = staffStatsPunishmentStatus(p);
+            if (!(st === 1 || st === 4)) return false;
+            if (isStaffStatsExcludedReason(staffStatsPunishmentReason(p))) return false;
+            return true;
         });
-        const unbanned = scoped.filter(p => Number(p?.status) === 2);
-        const bans = activeOrExpired.filter(p => p.type === 1).length;
-        const mutes = activeOrExpired.filter(p => p.type === 2).length;
+        const bans = counted.filter((p) => Number(p?.type) === 1).length;
+        const mutes = counted.filter((p) => Number(p?.type) === 2).length;
         return {
             admin_steamid: sid,
             admin: s.name || '—',
@@ -1234,10 +1349,9 @@ function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
             group: s.group_display_name || '',
             bans,
             mutes,
-            sum: bans + mutes,
-            removed: unbanned.length
+            sum: bans + mutes
         };
-    }).sort((a, b) => b.sum - a.sum);
+    }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
 }
 
 async function loadStaffBansStats() {
