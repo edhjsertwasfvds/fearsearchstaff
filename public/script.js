@@ -17,7 +17,7 @@ const state = {
     customFiltersOpen: false,
     filtersMenuOpen: false,
     columnsMenuOpen: false,
-    punishments: { count: 0, list: [], loading: false, lastSteamId: '', selectedMonth: null, view: 'list', staffList: null, staffStatsRows: null, staffStatsLoading: false, staffStatsData: {}, staffStatsProgress: null, staffTicketsYm: null, staffTicketsBySid: {}, staffTicketsLoading: false, secureLoaded: false, staffTableMode: 'new', lastLoadedAt: 0, lastSource: '' }
+    punishments: { count: 0, list: [], loading: false, lastSteamId: '', selectedMonth: null, view: 'list', staffList: null, staffStatsRows: null, staffStatsLoading: false, staffStatsData: {}, staffStatsProgress: null, staffTicketsYm: null, staffTicketsBySid: {}, staffTicketsLoading: false, staffRolesBySid: {}, staffRolesLoading: false, secureLoaded: false, staffTableMode: 'new', lastLoadedAt: 0, lastSource: '' }
 };
 
 let ws = null;
@@ -621,7 +621,7 @@ function renderPanel() {
                         ${monthDropdownItems}
                     </div>
                 </div>
-                <div class="flex gap-2 ml-auto">
+                <div class="flex flex-wrap gap-2 ml-auto justify-end">
                     <button type="button" onclick="setPunishmentsView(\'list\')" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${effectiveView === 'list' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Список наказаний</button>
                     ${canViewStaffStats
                         ? `<button type="button" onclick="setPunishmentsView('stats')" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${effectiveView === 'stats' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Статистика стафа</button>
@@ -651,7 +651,14 @@ function renderPanel() {
             const secure = !!(window.StaffStatsSecure && typeof window.StaffStatsSecure.computePayoutRow === 'function');
             const isOldTable = staffTableMode === 'old';
             const ticketsMap = state.punishments.staffTicketsBySid || {};
-            const payoutRows = secure ? statsRows.map(r => window.StaffStatsSecure.computePayoutRow(r, ticketsMap[String(r.admin_steamid)] || 0)) : [];
+            const rolesMap = state.punishments.staffRolesBySid || {};
+            const payoutRows = secure
+                ? statsRows.map(r => window.StaffStatsSecure.computePayoutRow(
+                    r,
+                    ticketsMap[String(r.admin_steamid)] || 0,
+                    rolesMap[String(r.admin_steamid)] || 'AUTO'
+                ))
+                : [];
             const totalTickets = secure ? payoutRows.reduce((s, r) => s + (r.tickets || 0), 0) : 0;
             const totalPay = secure ? payoutRows.reduce((s, r) => s + (r.pay?.total || 0), 0) : 0;
 
@@ -697,12 +704,13 @@ function renderPanel() {
                                 <th class="py-3 px-2 font-semibold text-rose-400">Баны</th>
                                 <th class="py-3 px-2 font-semibold text-amber-400">Муты</th>
                                 <th class="py-3 px-2 font-semibold text-emerald-400">Сумма</th>
+                                ${isOldTable ? '<th class="py-3 px-2 font-semibold text-blue-400">Снято</th>' : ''}
                                 ${secure && !isOldTable ? '<th class="py-3 px-2 font-semibold text-indigo-300">Тикеты</th><th class="py-3 px-2 font-semibold text-white">Выплата</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
                             ${statsRows.length === 0
-                                ? `<tr><td colspan="${secure && !isOldTable ? 8 : 6}" class="py-6 text-center text-gray-500">Список стафа загружается...</td></tr>`
+                                ? `<tr><td colspan="${secure && !isOldTable ? 8 : (isOldTable ? 7 : 6)}" class="py-6 text-center text-gray-500">Список стафа загружается...</td></tr>`
                                 : statsRows.map((r, i) => `
                                 <tr class="border-b border-white/5 hover:bg-white/[0.03] row-new">
                                     <td class="py-3 px-2 text-gray-500 font-mono">${i + 1}</td>
@@ -719,10 +727,12 @@ function renderPanel() {
                                     <td class="py-3 px-2 text-rose-400 font-semibold">${r.bans || '<span class="text-gray-600">0</span>'}</td>
                                     <td class="py-3 px-2 text-amber-400 font-semibold">${r.mutes || '<span class="text-gray-600">0</span>'}</td>
                                     <td class="py-3 px-2 ${r.sum > 0 ? 'text-emerald-400 font-bold' : 'text-gray-600'}">${r.sum}</td>
+                                    ${isOldTable ? `<td class="py-3 px-2 text-blue-400 font-semibold">${r.removed || '<span class="text-gray-600">0</span>'}</td>` : ''}
                                     ${secure && !isOldTable ? (() => {
                                         const sid = String(r.admin_steamid || '');
                                         const cur = (ticketsMap && ticketsMap[sid] != null) ? ticketsMap[sid] : 0;
-                                        const pr = window.StaffStatsSecure.computePayoutRow(r, cur);
+                                        const pr = window.StaffStatsSecure.computePayoutRow(r, cur, rolesMap[String(r.admin_steamid)] || 'AUTO');
+                                        const fixed = pr.pay.fixed || 0;
                                         return `
                                         <td class="py-3 px-2">
                                             <div class="flex items-center gap-2">
@@ -733,7 +743,7 @@ function renderPanel() {
                                         </td>
                                         <td class="py-3 px-2 text-white font-semibold">
                                             ${pr.pay.total}
-                                            <div class="text-[10px] text-gray-600 mt-1">б:${pr.pay.bans} м:${pr.pay.mutes} т:${pr.pay.tickets}</div>
+                                            <div class="text-[10px] text-gray-600 mt-1">б:${pr.pay.bans} м:${pr.pay.mutes} т:${pr.pay.tickets}${fixed ? ` +фикс:${fixed}` : ''}</div>
                                         </td>`;
                                     })() : ''}
                                 </tr>
@@ -947,6 +957,7 @@ function setPunishmentsView(view) {
     if (view === 'stats') {
         ensureStaffSecureLoaded().then(() => {
             loadStaffStatsFromServer();
+            loadStaffRoles();
             loadStaffTicketsForSelectedMonth();
         });
     }
@@ -999,6 +1010,29 @@ async function loadStaffTicketsForSelectedMonth() {
     }
 }
 
+async function loadStaffRoles() {
+    if (getUserLevel() < 3) return;
+    if (state.punishments.staffRolesLoading) return;
+    state.punishments.staffRolesLoading = true;
+    try {
+        const res = await fetch('/api/staff-roles', { headers: apiAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        const map = {};
+        (Array.isArray(data.roles) ? data.roles : []).forEach(r => {
+            const sid = String(r.steam_id || '').trim();
+            const role = String(r.role || '').trim().toUpperCase();
+            if (sid && role) map[sid] = role;
+        });
+        state.punishments.staffRolesBySid = map;
+    } catch (_) {
+        state.punishments.staffRolesBySid = {};
+    } finally {
+        state.punishments.staffRolesLoading = false;
+        if (state.openCategory === 'Наказания') scheduleRenderPanel();
+    }
+}
+
 async function saveStaffTickets(steamId, tickets) {
     if (getUserLevel() < 3) return;
     const ym = getEffectiveYm(state.punishments.selectedMonth);
@@ -1026,7 +1060,12 @@ function exportStaffStatsCsv() {
     if (!(window.StaffStatsSecure && typeof window.StaffStatsSecure.toCsv === 'function')) return;
     const rows = Array.isArray(state.punishments.staffStatsRows) ? state.punishments.staffStatsRows : [];
     const map = state.punishments.staffTicketsBySid || {};
-    const payout = rows.map(r => window.StaffStatsSecure.computePayoutRow(r, map[String(r.admin_steamid)] || 0));
+    const roles = state.punishments.staffRolesBySid || {};
+    const payout = rows.map(r => window.StaffStatsSecure.computePayoutRow(
+        r,
+        map[String(r.admin_steamid)] || 0,
+        roles[String(r.admin_steamid)] || 'AUTO'
+    ));
     const ym = getEffectiveYm(state.punishments.selectedMonth);
     const csv = window.StaffStatsSecure.toCsv(payout);
     window.StaffStatsSecure.downloadCsv(`staff-stats-${ym}.csv`, csv);
@@ -1087,6 +1126,10 @@ async function loadPunishmentsStaffList() {
 }
 
 function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
+    // Старая таблица: включаем снятые (status=2) в общий счёт
+    if (state?.punishments?.staffTableMode === 'old' && window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsOld === 'function') {
+        return window.StaffStatsSecure.computeStaffStatsRowsOld(staffList, statsDataBySid, selectedMonth);
+    }
     if (window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsSecure === 'function') {
         return window.StaffStatsSecure.computeStaffStatsRowsSecure(staffList, statsDataBySid, selectedMonth);
     }
@@ -1106,6 +1149,7 @@ function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
             const st = Number(p?.status);
             return st === 1 || st === 4;
         });
+        const unbanned = scoped.filter(p => Number(p?.status) === 2);
         const bans = activeOrExpired.filter(p => p.type === 1).length;
         const mutes = activeOrExpired.filter(p => p.type === 2).length;
         return {
@@ -1115,7 +1159,8 @@ function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
             group: s.group_display_name || '',
             bans,
             mutes,
-            sum: bans + mutes
+            sum: bans + mutes,
+            removed: unbanned.length
         };
     }).sort((a, b) => b.sum - a.sum);
 }

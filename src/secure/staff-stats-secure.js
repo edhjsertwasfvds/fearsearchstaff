@@ -79,6 +79,30 @@
         }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
     }
 
+    // "Старая таблица": считаем ВСЕ наказания, включая снятые (status=2).
+    // Здесь НЕТ фильтра по причине: учитываем и "напиши тикет в дс" и т.п.
+    function computeStaffStatsRowsOld(staffList, statsDataBySid, selectedMonth) {
+        const list = Array.isArray(staffList) ? staffList : [];
+        return list.map((s) => {
+            const sid = String(s && s.steamid || '');
+            const arr = Array.isArray(statsDataBySid && statsDataBySid[sid]) ? statsDataBySid[sid] : [];
+            const scoped = selectedMonth ? arr.filter(p => inSelectedMonth(p, selectedMonth)) : arr;
+            const bans = scoped.filter(p => toInt(p && p.type, 0) === 1).length;
+            const mutes = scoped.filter(p => toInt(p && p.type, 0) === 2).length;
+            const removed = scoped.filter(p => toInt(p && p.status, -1) === 2).length;
+            return {
+                admin_steamid: sid,
+                admin: (s && s.name) || '—',
+                admin_avatar: (s && s.avatar_full) || '',
+                group: (s && s.group_display_name) || '',
+                bans,
+                mutes,
+                sum: bans + mutes,
+                removed
+            };
+        }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
+    }
+
     function banRateByCount(bans) {
         const b = toInt(bans, 0);
         if (b >= 500) return 3;
@@ -96,21 +120,61 @@
         return 10;
     }
 
-    function computePayoutRow(row, ticketsCount) {
+    function normalizeRole(roleRaw) {
+        const r = String(roleRaw || '').trim().toUpperCase();
+        return r || 'AUTO';
+    }
+
+    function roleFixedPay(role) {
+        const r = normalizeRole(role);
+        if (r === 'STM') return 1000;
+        if (r === 'STA') return 3000;
+        if (r === 'GA') return 6000;
+        return 0;
+    }
+
+    // Месячные нормы (минимум). Считаем наказания = bans+mutes, тикеты = вручную.
+    // Снятые и "напиши тикет в дс" уже исключены из bans/mutes в secure-расчёте.
+    function roleMonthlyNorms(role) {
+        const r = normalizeRole(role);
+        if (r === 'ML') return { punish: 100, tickets: 0 };
+        if (r === 'M') return { punish: 150, tickets: 0 };
+        if (r === 'STM') return { punish: 80, tickets: 150 };
+        if (r === 'STA') return { punish: 50, tickets: 150 };
+        if (r === 'GA') return { punish: 0, tickets: 0 };
+        return { punish: 0, tickets: 0 };
+    }
+
+    function computePayoutRow(row, ticketsCount, roleRaw) {
         const bans = toInt(row && row.bans, 0);
         const mutes = toInt(row && row.mutes, 0);
         const tickets = toInt(ticketsCount, 0);
+        const role = normalizeRole(roleRaw);
         const banRate = banRateByCount(bans);
         const ticketRate = ticketRateByCount(tickets);
         const muteRate = 4;
         const payBans = bans * banRate;
         const payMutes = mutes * muteRate;
         const payTickets = tickets * ticketRate;
+        const fixed = roleFixedPay(role);
+        const norms = roleMonthlyNorms(role);
+        const punishCount = bans + mutes;
+        const meetsPunish = punishCount >= (norms.punish || 0);
+        const meetsTickets = tickets >= (norms.tickets || 0);
+        const fixedPaid = (fixed > 0 && meetsPunish && meetsTickets) ? fixed : 0;
         return {
             ...row,
             tickets,
+            role,
+            norms: { punish: norms.punish, tickets: norms.tickets },
             rates: { banRate, muteRate, ticketRate },
-            pay: { bans: payBans, mutes: payMutes, tickets: payTickets, total: payBans + payMutes + payTickets }
+            pay: {
+                bans: payBans,
+                mutes: payMutes,
+                tickets: payTickets,
+                fixed: fixedPaid,
+                total: payBans + payMutes + payTickets + fixedPaid
+            }
         };
     }
 
@@ -124,6 +188,7 @@
             'steamid',
             'name',
             'group',
+            'role',
             'bans',
             'mutes',
             'tickets',
@@ -133,6 +198,7 @@
             'pay_bans',
             'pay_mutes',
             'pay_tickets',
+            'pay_fixed',
             'pay_total'
         ];
         const lines = [header.join(';')];
@@ -141,6 +207,7 @@
                 escape(r.admin_steamid),
                 escape(r.admin),
                 escape(r.group),
+                escape(r.role || ''),
                 escape(toInt(r.bans, 0)),
                 escape(toInt(r.mutes, 0)),
                 escape(toInt(r.tickets, 0)),
@@ -150,6 +217,7 @@
                 escape(toInt(r.pay?.bans, 0)),
                 escape(toInt(r.pay?.mutes, 0)),
                 escape(toInt(r.pay?.tickets, 0)),
+                escape(toInt(r.pay?.fixed, 0)),
                 escape(toInt(r.pay?.total, 0))
             ].join(';'));
         });
@@ -171,6 +239,7 @@
 
     window.StaffStatsSecure = {
         computeStaffStatsRowsSecure,
+        computeStaffStatsRowsOld,
         computePayoutRow,
         toCsv,
         downloadCsv
