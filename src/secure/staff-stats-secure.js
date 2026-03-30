@@ -3,6 +3,13 @@
 (function () {
     'use strict';
 
+    const PAY_CONFIG = {
+        norms: {
+            month: { punish: 0, tickets: 0 },
+            week: { punish: 0, tickets: 0 }
+        }
+    };
+
     function toInt(x, def = 0) {
         const n = parseInt(x, 10);
         return Number.isFinite(n) ? n : def;
@@ -40,13 +47,23 @@
         return null;
     }
 
-    function inSelectedMonth(p, selectedMonth) {
-        if (!selectedMonth) return true;
+    function inSelectedPeriod(p, selectedPeriod) {
+        const sel = String(selectedPeriod || '').trim();
+        if (!sel) return true;
         const ts = getPunishmentCreatedTs(p);
         if (ts == null) return false;
         const d = new Date(ts * 1000);
+        if (sel.startsWith('week:')) {
+            const startStr = sel.slice(5).trim(); // YYYY-MM-DD
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(startStr)) return false;
+            const start = new Date(startStr + 'T00:00:00');
+            if (Number.isNaN(start.getTime())) return false;
+            const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+            return d >= start && d < end;
+        }
+        // YYYY-MM
         const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-        return ym === selectedMonth;
+        return ym === sel;
     }
 
     function isCountedPunishment(p) {
@@ -58,12 +75,12 @@
         return true;
     }
 
-    function computeStaffStatsRowsSecure(staffList, statsDataBySid, selectedMonth) {
+    function computeStaffStatsRowsSecure(staffList, statsDataBySid, selectedPeriod) {
         const list = Array.isArray(staffList) ? staffList : [];
         return list.map((s) => {
             const sid = String(s && s.steamid || '');
             const arr = Array.isArray(statsDataBySid && statsDataBySid[sid]) ? statsDataBySid[sid] : [];
-            const scoped = selectedMonth ? arr.filter(p => inSelectedMonth(p, selectedMonth)) : arr;
+            const scoped = selectedPeriod ? arr.filter(p => inSelectedPeriod(p, selectedPeriod)) : arr;
             const counted = scoped.filter(isCountedPunishment);
             const bans = counted.filter(p => toInt(p && p.type, 0) === 1).length;
             const mutes = counted.filter(p => toInt(p && p.type, 0) === 2).length;
@@ -81,12 +98,12 @@
 
     // "Старая таблица": считаем ВСЕ наказания, включая снятые (status=2).
     // Здесь НЕТ фильтра по причине: учитываем и "напиши тикет в дс" и т.п.
-    function computeStaffStatsRowsOld(staffList, statsDataBySid, selectedMonth) {
+    function computeStaffStatsRowsOld(staffList, statsDataBySid, selectedPeriod) {
         const list = Array.isArray(staffList) ? staffList : [];
         return list.map((s) => {
             const sid = String(s && s.steamid || '');
             const arr = Array.isArray(statsDataBySid && statsDataBySid[sid]) ? statsDataBySid[sid] : [];
-            const scoped = selectedMonth ? arr.filter(p => inSelectedMonth(p, selectedMonth)) : arr;
+            const scoped = selectedPeriod ? arr.filter(p => inSelectedPeriod(p, selectedPeriod)) : arr;
             const bans = scoped.filter(p => toInt(p && p.type, 0) === 1).length;
             const mutes = scoped.filter(p => toInt(p && p.type, 0) === 2).length;
             const removed = scoped.filter(p => toInt(p && p.status, -1) === 2).length;
@@ -103,21 +120,52 @@
         }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
     }
 
-    function banRateByCount(bans) {
-        const b = toInt(bans, 0);
-        if (b >= 500) return 3;
-        if (b >= 350) return 4;
-        if (b >= 250) return 5;
-        if (b >= 150) return 6;
-        return 7;
+    function progressivePay(count, tiers) {
+        const c = Math.max(0, toInt(count, 0));
+        let pay = 0;
+        for (const t of tiers) {
+            const from = Math.max(0, toInt(t.from, 0));
+            const to = t.to == null ? Infinity : Math.max(from, toInt(t.to, 0));
+            const rate = Number(t.rate) || 0;
+            if (c <= from) continue;
+            const units = Math.min(c, to) - from;
+            if (units > 0) pay += units * rate;
+        }
+        return pay;
     }
 
-    function ticketRateByCount(tickets) {
-        const t = toInt(tickets, 0);
-        if (t >= 500) return 6;
-        if (t >= 250) return 7;
-        if (t >= 100) return 8;
-        return 10;
+    function marginalRate(count, tiers) {
+        const c = Math.max(0, toInt(count, 0));
+        let last = Number(tiers?.[0]?.rate) || 0;
+        for (const t of tiers) {
+            const from = Math.max(0, toInt(t.from, 0));
+            const to = t.to == null ? Infinity : Math.max(from, toInt(t.to, 0));
+            const rate = Number(t.rate) || 0;
+            if (c >= from && c < to) return rate;
+            last = rate;
+        }
+        return last;
+    }
+
+    const TICKET_TIERS = [
+        { from: 0, to: 100, rate: 10 },
+        { from: 100, to: 250, rate: 8 },
+        { from: 250, to: 500, rate: 7 },
+        { from: 500, to: null, rate: 6 }
+    ];
+    const BAN_TIERS = [
+        { from: 0, to: 150, rate: 7 },
+        { from: 150, to: 250, rate: 6 },
+        { from: 250, to: 350, rate: 5 },
+        { from: 350, to: 500, rate: 4 },
+        { from: 500, to: null, rate: 3 }
+    ];
+
+    function payTicketsByCount(tickets) {
+        return progressivePay(tickets, TICKET_TIERS);
+    }
+    function payBansByCount(bans) {
+        return progressivePay(bans, BAN_TIERS);
     }
 
     function normalizeRole(roleRaw) {
@@ -150,23 +198,40 @@
         const mutes = toInt(row && row.mutes, 0);
         const tickets = toInt(ticketsCount, 0);
         const role = normalizeRole(roleRaw);
-        const banRate = banRateByCount(bans);
-        const ticketRate = ticketRateByCount(tickets);
+        const banRate = marginalRate(bans, BAN_TIERS);
+        const ticketRate = marginalRate(tickets, TICKET_TIERS);
         const muteRate = 4;
-        const payBans = bans * banRate;
+        const payBans = payBansByCount(bans);
         const payMutes = mutes * muteRate;
-        const payTickets = tickets * ticketRate;
+        const payTickets = payTicketsByCount(tickets);
+
+        // Деньги у младших не считаются.
+        if (role === 'ML') {
+            return {
+                ...row,
+                tickets,
+                role,
+                norms: { punish: 0, tickets: 0 },
+                rates: { banRate, muteRate, ticketRate },
+                pay: { bans: 0, mutes: 0, tickets: 0, fixed: 0, total: 0 }
+            };
+        }
+
         const fixed = roleFixedPay(role);
         const norms = roleMonthlyNorms(role);
+        const overrideMonthPunish = toInt(PAY_CONFIG?.norms?.month?.punish, 0);
+        const overrideMonthTickets = toInt(PAY_CONFIG?.norms?.month?.tickets, 0);
+        const effectiveNormPunish = overrideMonthPunish > 0 ? overrideMonthPunish : (norms.punish || 0);
+        const effectiveNormTickets = overrideMonthTickets > 0 ? overrideMonthTickets : (norms.tickets || 0);
         const punishCount = bans + mutes;
-        const meetsPunish = punishCount >= (norms.punish || 0);
-        const meetsTickets = tickets >= (norms.tickets || 0);
+        const meetsPunish = punishCount >= effectiveNormPunish;
+        const meetsTickets = tickets >= effectiveNormTickets;
         const fixedPaid = (fixed > 0 && meetsPunish && meetsTickets) ? fixed : 0;
         return {
             ...row,
             tickets,
             role,
-            norms: { punish: norms.punish, tickets: norms.tickets },
+            norms: { punish: effectiveNormPunish, tickets: effectiveNormTickets },
             rates: { banRate, muteRate, ticketRate },
             pay: {
                 bans: payBans,
@@ -238,6 +303,18 @@
     }
 
     window.StaffStatsSecure = {
+        setConfig: (cfg) => {
+            try {
+                const c = cfg && typeof cfg === 'object' ? cfg : {};
+                const nm = c.norms && typeof c.norms === 'object' ? c.norms : {};
+                const month = nm.month && typeof nm.month === 'object' ? nm.month : {};
+                const week = nm.week && typeof nm.week === 'object' ? nm.week : {};
+                PAY_CONFIG.norms.month.punish = toInt(month.punish, 0);
+                PAY_CONFIG.norms.month.tickets = toInt(month.tickets, 0);
+                PAY_CONFIG.norms.week.punish = toInt(week.punish, 0);
+                PAY_CONFIG.norms.week.tickets = toInt(week.tickets, 0);
+            } catch (_) {}
+        },
         computeStaffStatsRowsSecure,
         computeStaffStatsRowsOld,
         computePayoutRow,

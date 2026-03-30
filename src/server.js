@@ -1929,6 +1929,26 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // --- Staff payroll config (norms) for staff stats (level >= 3) ---
+    if (req.url === '/api/staff-pay-config' && req.method === 'GET') {
+        const session = getSessionFromReq(req);
+        if (!session || session.level < USER_LEVEL_WHITELIST) {
+            sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав');
+            return;
+        }
+        const monthPunish = Number(db.getSetting('staff_norm_month_punish', '0') || 0) || 0;
+        const monthTickets = Number(db.getSetting('staff_norm_month_tickets', '0') || 0) || 0;
+        const weekPunish = Number(db.getSetting('staff_norm_week_punish', '0') || 0) || 0;
+        const weekTickets = Number(db.getSetting('staff_norm_week_tickets', '0') || 0) || 0;
+        sendJson(res, 200, {
+            norms: {
+                month: { punish: monthPunish, tickets: monthTickets },
+                week: { punish: weekPunish, tickets: weekTickets }
+            }
+        });
+        return;
+    }
+
     // --- Получение уровня текущего пользователя по сессии ---
     if (req.url === '/api/me' && req.method === 'GET') {
         const session = requireSession(req, res, 0);

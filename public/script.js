@@ -17,7 +17,7 @@ const state = {
     customFiltersOpen: false,
     filtersMenuOpen: false,
     columnsMenuOpen: false,
-    punishments: { count: 0, list: [], loading: false, lastSteamId: '', selectedMonth: null, view: 'list', staffList: null, staffStatsRows: null, staffStatsLoading: false, staffStatsData: {}, staffStatsProgress: null, staffTicketsYm: null, staffTicketsBySid: {}, staffTicketsLoading: false, staffRolesBySid: {}, staffRolesLoading: false, secureLoaded: false, staffTableMode: 'new', lastLoadedAt: 0, lastSource: '' }
+    punishments: { count: 0, list: [], loading: false, lastSteamId: '', selectedMonth: null, view: 'list', staffList: null, staffStatsRows: null, staffStatsLoading: false, staffStatsData: {}, staffStatsProgress: null, staffTicketsYm: null, staffTicketsBySid: {}, staffTicketsLoading: false, staffRolesBySid: {}, staffRolesLoading: false, staffPayConfig: {}, secureLoaded: false, staffTableMode: 'new', statsPeriodMode: 'month', selectedWeekStart: null, lastLoadedAt: 0, lastSource: '' }
 };
 
 let ws = null;
@@ -579,6 +579,33 @@ function renderPanel() {
             return { all: { value: '', label: 'Все время' }, months: labels };
         })();
 
+        const weekOptions = (() => {
+            const starts = new Set();
+            const addTs = (ts) => {
+                if (!ts || ts <= 0) return;
+                const d = new Date(ts * 1000);
+                // Monday-start week
+                const day = (d.getDay() + 6) % 7; // Mon=0..Sun=6
+                const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day);
+                const ymd = start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0');
+                starts.add(ymd);
+            };
+            list.forEach(p => addTs(getCreatedTs(p)));
+            const statsData = state.punishments.staffStatsData || {};
+            Object.values(statsData).forEach(arr => {
+                if (!Array.isArray(arr)) return;
+                arr.forEach(p => addTs(getCreatedTs(p)));
+            });
+            const arr = Array.from(starts).sort().reverse().slice(0, 12);
+            const labels = arr.map(ymd => {
+                const start = new Date(ymd + 'T00:00:00');
+                const end = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
+                const label = start.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' }) + ' — ' + end.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+                return { value: ymd, label };
+            });
+            return labels;
+        })();
+
         const monthScopedList = selectedMonth
             ? list.filter(p => {
                 const ts = getCreatedTs(p);
@@ -598,15 +625,19 @@ function renderPanel() {
         }
         const effectiveView = (view === 'stats' && !canViewStaffStats) ? 'list' : view;
 
-        const currentMonthLabel = selectedMonth
-            ? (monthOptions.months.find(m => m.value === selectedMonth)?.label || selectedMonth)
-            : monthOptions.all.label;
+        const isWeekMode = state.punishments.statsPeriodMode === 'week' && !!state.punishments.selectedWeekStart;
+        const currentPeriodLabel = isWeekMode
+            ? (weekOptions.find(w => w.value === state.punishments.selectedWeekStart)?.label || state.punishments.selectedWeekStart)
+            : (selectedMonth ? (monthOptions.months.find(m => m.value === selectedMonth)?.label || selectedMonth) : monthOptions.all.label);
         const monthDropdownItems = [
             `<div class="px-3 py-2 text-sm cursor-pointer rounded transition-colors ${!selectedMonth ? 'text-emerald-400 bg-emerald-500/10' : 'text-gray-300 hover:bg-white/10'}" onclick="setPunishmentsMonth('')">${monthOptions.all.label}</div>`,
             ...monthOptions.months.map(m =>
                 `<div class="px-3 py-2 text-sm cursor-pointer rounded transition-colors ${selectedMonth === m.value ? 'text-emerald-400 bg-emerald-500/10' : 'text-gray-300 hover:bg-white/10'}" onclick="setPunishmentsMonth('${escapeHtml(m.value)}')">${escapeHtml(m.label)}</div>`
             )
         ].join('');
+        const weekDropdownItems = weekOptions.map(w =>
+            `<div class="px-3 py-2 text-sm cursor-pointer rounded transition-colors ${(state.punishments.selectedWeekStart === w.value && isWeekMode) ? 'text-indigo-300 bg-indigo-500/10' : 'text-gray-300 hover:bg-white/10'}" onclick="setPunishmentsWeekStart('${escapeHtml(w.value)}')">Неделя: ${escapeHtml(w.label)}</div>`
+        ).join('');
 
         const staffTableMode = state.punishments.staffTableMode === 'old' ? 'old' : 'new';
         const monthSelectHtml = `
@@ -614,11 +645,13 @@ function renderPanel() {
                 <div class="relative" id="monthDropdownWrap">
                     <button type="button" onclick="toggleMonthDropdown()" class="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm hover:bg-white/10 transition-colors">
                         <i class="ph ph-calendar-blank text-emerald-400"></i>
-                        <span id="monthDropdownLabel">${escapeHtml(currentMonthLabel)}</span>
+                        <span id="monthDropdownLabel">${escapeHtml(currentPeriodLabel)}</span>
                         <i class="ph ph-caret-down text-gray-500 text-xs"></i>
                     </button>
                     <div id="monthDropdownList" class="hidden absolute left-0 top-full mt-1 z-50 w-52 max-h-64 overflow-y-auto bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl p-1" style="scrollbar-width:thin;scrollbar-color:#333 transparent">
                         ${monthDropdownItems}
+                        ${weekOptions.length ? '<div class="my-1 border-t border-white/10"></div>' : ''}
+                        ${weekDropdownItems}
                     </div>
                 </div>
                 <div class="flex flex-wrap gap-2 ml-auto justify-end">
@@ -932,6 +965,8 @@ function setPunishmentsMonth(value) {
     const list = document.getElementById('monthDropdownList');
     if (list) list.classList.add('hidden');
     state.punishments.selectedMonth = value || null;
+    state.punishments.statsPeriodMode = 'month';
+    state.punishments.selectedWeekStart = null;
     if (state.punishments.view === 'stats') {
         loadStaffTicketsForSelectedMonth();
         state.punishments.staffStatsRows = null;
@@ -946,6 +981,26 @@ function setPunishmentsMonth(value) {
     scheduleRenderPanel();
 }
 
+function setPunishmentsWeekStart(startYmd) {
+    const s = String(startYmd || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return;
+    const list = document.getElementById('monthDropdownList');
+    if (list) list.classList.add('hidden');
+    state.punishments.statsPeriodMode = 'week';
+    state.punishments.selectedWeekStart = s;
+    state.punishments.staffStatsRows = null;
+    if (state.punishments.view === 'stats') {
+        if (Array.isArray(state.punishments.staffList) && Object.keys(state.punishments.staffStatsData || {}).length > 0) {
+            state.punishments.staffStatsRows = computeStaffStatsRows(
+                state.punishments.staffList,
+                state.punishments.staffStatsData,
+                state.punishments.selectedMonth
+            );
+        }
+        scheduleRenderPanel();
+    }
+}
+
 function setPunishmentsView(view) {
     if (view === 'stats' && getUserLevel() < 3) {
         state.punishments.view = 'list';
@@ -956,6 +1011,7 @@ function setPunishmentsView(view) {
     scheduleRenderPanel();
     if (view === 'stats') {
         ensureStaffSecureLoaded().then(() => {
+            loadStaffPayConfig();
             loadStaffStatsFromServer();
             loadStaffRoles();
             loadStaffTicketsForSelectedMonth();
@@ -978,6 +1034,19 @@ async function ensureStaffSecureLoaded() {
     } catch (_) {
         return false;
     }
+}
+
+async function loadStaffPayConfig() {
+    if (getUserLevel() < 3) return;
+    try {
+        const res = await fetch('/api/staff-pay-config', { headers: apiAuthHeaders() });
+        if (!res.ok) return;
+        const cfg = await res.json().catch(() => ({}));
+        if (window.StaffStatsSecure && typeof window.StaffStatsSecure.setConfig === 'function') {
+            window.StaffStatsSecure.setConfig(cfg);
+        }
+        state.punishments.staffPayConfig = cfg || {};
+    } catch (_) {}
 }
 
 function getEffectiveYm(selectedMonth) {
@@ -1061,11 +1130,14 @@ function exportStaffStatsCsv() {
     const rows = Array.isArray(state.punishments.staffStatsRows) ? state.punishments.staffStatsRows : [];
     const map = state.punishments.staffTicketsBySid || {};
     const roles = state.punishments.staffRolesBySid || {};
-    const payout = rows.map(r => window.StaffStatsSecure.computePayoutRow(
-        r,
-        map[String(r.admin_steamid)] || 0,
-        roles[String(r.admin_steamid)] || 'AUTO'
-    ));
+    // Для недельного режима в CSV не включаем выплаты (тикеты/роль/нормы привязаны к месяцу).
+    if (state?.punishments?.statsPeriodMode === 'week') {
+        const csv = window.StaffStatsSecure.toCsv(rows.map(r => ({ ...r, tickets: 0, rates: { banRate: 0, muteRate: 0, ticketRate: 0 }, pay: { bans: 0, mutes: 0, tickets: 0, fixed: 0, total: 0 } })));
+        const ymd = String(state.punishments.selectedWeekStart || '').trim() || 'week';
+        window.StaffStatsSecure.downloadCsv(`staff-stats-week-${ymd}.csv`, csv);
+        return;
+    }
+    const payout = rows.map(r => window.StaffStatsSecure.computePayoutRow(r, map[String(r.admin_steamid)] || 0, roles[String(r.admin_steamid)] || 'AUTO'));
     const ym = getEffectiveYm(state.punishments.selectedMonth);
     const csv = window.StaffStatsSecure.toCsv(payout);
     window.StaffStatsSecure.downloadCsv(`staff-stats-${ym}.csv`, csv);
@@ -1126,12 +1198,15 @@ async function loadPunishmentsStaffList() {
 }
 
 function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
+    const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
+        ? ('week:' + String(state.punishments.selectedWeekStart))
+        : selectedMonth;
     // Старая таблица: включаем снятые (status=2) в общий счёт
     if (state?.punishments?.staffTableMode === 'old' && window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsOld === 'function') {
-        return window.StaffStatsSecure.computeStaffStatsRowsOld(staffList, statsDataBySid, selectedMonth);
+        return window.StaffStatsSecure.computeStaffStatsRowsOld(staffList, statsDataBySid, period);
     }
     if (window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsSecure === 'function') {
-        return window.StaffStatsSecure.computeStaffStatsRowsSecure(staffList, statsDataBySid, selectedMonth);
+        return window.StaffStatsSecure.computeStaffStatsRowsSecure(staffList, statsDataBySid, period);
     }
     const inSelectedMonth = (p) => {
         if (!selectedMonth) return true;
