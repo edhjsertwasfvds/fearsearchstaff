@@ -65,6 +65,7 @@ async function loadBoundSteamAvatar(steamId) {
 
 const LOCAL_SETTINGS_KEY = 'localUiSettings';
 const PLAYERS_COLUMNS_KEY = 'playersTableColumns';
+const PLAYERS_EXCLUSIONS_KEY = 'playersTableExclusions';
 
 const PLAYERS_COLUMNS_DEF = [
     { id: 'num', label: '№', default: true },
@@ -95,6 +96,41 @@ function togglePlayersColumn(colId) {
     cols[colId] = !cols[colId];
     setPlayersTableColumns(cols);
     scheduleRenderPanel();
+}
+
+function getPlayersExclusions() {
+    try {
+        const raw = localStorage.getItem(PLAYERS_EXCLUSIONS_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            return {
+                excludeCsgoServers: Boolean(parsed.excludeCsgoServers)
+            };
+        }
+    } catch (_) {}
+    return { excludeCsgoServers: false };
+}
+
+function setPlayersExclusions(obj) {
+    const prev = getPlayersExclusions();
+    localStorage.setItem(PLAYERS_EXCLUSIONS_KEY, JSON.stringify({ ...prev, ...obj }));
+}
+
+function togglePlayersExclusion(key) {
+    const ex = getPlayersExclusions();
+    ex[key] = !ex[key];
+    setPlayersExclusions(ex);
+    schedulePlayersPanelRefresh(false, 0);
+    scheduleRenderPanel();
+}
+
+function applyPlayersExclusions(players) {
+    const ex = getPlayersExclusions();
+    if (!ex.excludeCsgoServers) return players;
+    return (Array.isArray(players) ? players : []).filter(p => {
+        const g = String(p?.serverGame || '').trim().toUpperCase();
+        return !(g.includes('CSGO') || g.includes('CS:GO'));
+    });
 }
 
 function getLocalSettings() {
@@ -1698,7 +1734,8 @@ function buildSuspiciousRowHtml(p, index) {
 }
 
 function sortAndFilterAllPlayers(players) {
-    const afterCustom = applyCustomFilters(players);
+    const afterExclusions = applyPlayersExclusions(players);
+    const afterCustom = applyCustomFilters(afterExclusions);
     const afterBanFilters = filterSuspiciousPlayers(afterCustom);
     const afterHide = applyHideFilters(afterBanFilters);
     const sortMethod = localStorage.getItem('suspiciousSortMethod') || 'kills';
@@ -1871,14 +1908,22 @@ function buildAllPlayersTable(players) {
                 <div class="flex gap-2 items-center">
                     <div class="relative" data-columns-dropdown="1">
                         <button type="button" onclick="togglePlayersColumnsMenu(event)" class="px-3 py-2 text-xs font-semibold rounded-lg bg-white/[0.08] text-gray-300 hover:bg-white/[0.12] flex items-center gap-1.5">
-                            Колонки <i class="ph ph-caret-down text-[10px]"></i>
+                            Исключения <i class="ph ph-caret-down text-[10px]"></i>
                         </button>
                         <div id="playersColumnsMenu" class="${state.columnsMenuOpen ? '' : 'hidden'} absolute right-0 top-full mt-1 py-2 px-3 bg-[#1a1a1f] border border-white/10 rounded-xl shadow-xl z-50 min-w-[140px]">
+                            <div class="text-[10px] uppercase tracking-wide text-gray-500 font-semibold px-2 pt-1 pb-1">Колонки</div>
                             ${PLAYERS_COLUMNS_DEF.map(c => {
                                 const v = getPlayersTableColumns();
                                 const checked = v[c.id] !== false;
                                 return `<label class="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-white/[0.06] cursor-pointer text-xs text-gray-200"><input type="checkbox" ${checked ? 'checked' : ''} onchange="togglePlayersColumn('${c.id}')" class="w-3.5 h-3.5 rounded border-white/20 bg-white/5">${c.label}</label>`;
                             }).join('')}
+                            <div class="my-1 border-t border-white/10"></div>
+                            <div class="text-[10px] uppercase tracking-wide text-gray-500 font-semibold px-2 pt-1 pb-1">Исключать</div>
+                            ${(() => {
+                                const ex = getPlayersExclusions();
+                                const checked = ex.excludeCsgoServers ? 'checked' : '';
+                                return `<label class="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-white/[0.06] cursor-pointer text-xs text-gray-200" title="Скрывает игроков, которые сейчас находятся на CS:GO серверах."><input type="checkbox" ${checked} onchange="togglePlayersExclusion('excludeCsgoServers')" class="w-3.5 h-3.5 rounded border-white/20 bg-white/5"><span class="inline-flex items-center gap-1">${serverGameIconHtml('CSGO')}<span>CS:GO сервера</span></span></label>`;
+                            })()}
                         </div>
                     </div>
                     <button type="button" data-players-filters-toggle="1" onclick="togglePlayersFiltersMenu()" class="px-3 py-2 text-xs font-semibold rounded-lg ${state.filtersMenuOpen ? 'bg-indigo-500/30 text-indigo-200' : 'bg-white/[0.08] text-gray-300 hover:bg-white/[0.12]'}">
