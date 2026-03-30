@@ -358,6 +358,9 @@ function buildOnlinePlayersContext(servers) {
     }
 
     servers.forEach(server => {
+        const modeName = String(server?.mode?.name || '');
+        const modeId = Number(server?.mode?.id);
+        const serverGame = (modeId === 5 || /cs:go/i.test(modeName)) ? 'CSGO' : 'CS2';
         const players = server?.live_data?.players;
         if (!Array.isArray(players)) return;
 
@@ -379,6 +382,7 @@ function buildOnlinePlayersContext(servers) {
                     kills: Number(player.kills) || 0,
                     deaths: Number(player.deaths) || 0,
                     serverName: getServerDisplayName(server),
+                    serverGame,
                     serverIp: server?.ip || null,
                     serverPort: Number(server?.port) || null,
                     isAdmin: Boolean(player?.is_admin),
@@ -2018,6 +2022,7 @@ const server = http.createServer(async (req, res) => {
                     player.kills = data.kills;
                     player.deaths = data.deaths;
                     player.serverName = data.serverName;
+                    player.serverGame = data.serverGame;
                 }
             }
             const cachedVac = getCachedData('vacBans');
@@ -3332,6 +3337,7 @@ function sendSuspiciousBans(ws, userLevel) {
                         kills: playerData ? playerData.kills : 0,
                         deaths: playerData ? playerData.deaths : 0,
                         serverName: playerData ? playerData.serverName : 'Unknown',
+                        serverGame: playerData ? playerData.serverGame : null,
                         serverIp: playerData ? playerData.serverIp : null,
                         serverPort: playerData ? playerData.serverPort : null,
                         hasDXDCS: true,
@@ -3362,6 +3368,7 @@ function sendSuspiciousBans(ws, userLevel) {
                             kills: playerData ? playerData.kills : 0,
                             deaths: playerData ? playerData.deaths : 0,
                             serverName: playerData ? playerData.serverName : 'Unknown',
+                            serverGame: playerData ? playerData.serverGame : null,
                             serverIp: playerData ? playerData.serverIp : null,
                             serverPort: playerData ? playerData.serverPort : null,
                             hasDXDCS: false,
@@ -3396,6 +3403,7 @@ function sendSuspiciousBans(ws, userLevel) {
                     kills: playerData ? playerData.kills : 0,
                     deaths: playerData ? playerData.deaths : 0,
                     serverName: playerData ? playerData.serverName : 'Unknown',
+                    serverGame: playerData ? playerData.serverGame : null,
                     serverIp: playerData ? playerData.serverIp : null,
                     serverPort: playerData ? playerData.serverPort : null,
                     hasDXDCS: false,
@@ -3426,6 +3434,7 @@ function sendSuspiciousBans(ws, userLevel) {
                     kills: playerData ? playerData.kills : 0,
                     deaths: playerData ? playerData.deaths : 0,
                     serverName: playerData ? playerData.serverName : 'Unknown',
+                    serverGame: playerData ? playerData.serverGame : null,
                     serverIp: playerData ? playerData.serverIp : null,
                     serverPort: playerData ? playerData.serverPort : null,
                     hasDXDCS: false,
@@ -3457,6 +3466,7 @@ function sendSuspiciousBans(ws, userLevel) {
                     kills: playerData ? playerData.kills : 0,
                     deaths: playerData ? playerData.deaths : 0,
                     serverName: playerData ? playerData.serverName : 'Unknown',
+                    serverGame: playerData ? playerData.serverGame : null,
                     serverIp: playerData ? playerData.serverIp : null,
                     serverPort: playerData ? playerData.serverPort : null,
                     hasDXDCS: false,
@@ -3489,6 +3499,7 @@ function sendSuspiciousBans(ws, userLevel) {
                     kills: playerData ? playerData.kills : 0,
                     deaths: playerData ? playerData.deaths : 0,
                     serverName: playerData ? playerData.serverName : 'Unknown',
+                    serverGame: playerData ? playerData.serverGame : null,
                     serverIp: playerData ? playerData.serverIp : null,
                     serverPort: playerData ? playerData.serverPort : null,
                     hasDXDCS: false,
@@ -3522,6 +3533,7 @@ function sendSuspiciousBans(ws, userLevel) {
                     kills: playerData ? playerData.kills : 0,
                     deaths: playerData ? playerData.deaths : 0,
                     serverName: playerData ? playerData.serverName : 'Unknown',
+                    serverGame: playerData ? playerData.serverGame : null,
                     serverIp: playerData ? playerData.serverIp : null,
                     serverPort: playerData ? playerData.serverPort : null,
                     hasDXDCS: false, hasVAC: false, hasYooma: false, hasCS2Red: false, hasDeti00: false, hasPrideCS2: false,
@@ -3558,6 +3570,7 @@ function sendAllPlayers(ws) {
             kills: d ? d.kills : 0,
             deaths: d ? d.deaths : 0,
             serverName: d ? d.serverName : 'Unknown',
+            serverGame: d ? d.serverGame : null,
             serverIp: d ? d.serverIp : null,
             serverPort: d ? d.serverPort : null,
             whitelisted: wl,

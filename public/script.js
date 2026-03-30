@@ -1601,6 +1601,19 @@ function sortSuspiciousPlayers(players) {
     return { sorted, sortMethod };
 }
 
+function serverGameIconHtml(game) {
+    const g = String(game || '').trim().toUpperCase();
+    // Если бэк ещё не прислал serverGame (старый кэш/сервер без обновления),
+    // показываем CS2 по умолчанию, чтобы иконка была всегда.
+    if (!g) return `<img src="/images/cs2.ico" class="w-3.5 h-3.5 inline-block" alt="CS2" title="CS2">`;
+    const isCsgo = g.includes('CSGO') || g.includes('CS:GO');
+    const isCs2 = g.includes('CS2') || g.includes('CS 2');
+    if (!isCsgo && !isCs2) return `<img src="/images/cs2.ico" class="w-3.5 h-3.5 inline-block" alt="CS2" title="CS2">`;
+    const src = isCsgo ? '/images/csgo.ico' : '/images/cs2.ico';
+    const label = isCsgo ? 'CS:GO' : 'CS2';
+    return `<img src="${src}" class="w-3.5 h-3.5 inline-block" alt="${label}" title="${label}">`;
+}
+
 function buildSuspiciousRowHtml(p, index) {
     const kills = p.kills || 0;
     const deaths = p.deaths || 0;
@@ -1665,7 +1678,7 @@ function buildSuspiciousRowHtml(p, index) {
     const serverPort = Number(p.serverPort);
     const canConnect = Boolean(serverName && serverIp && Number.isFinite(serverPort) && serverPort > 0);
     const connectBtnHtml = canConnect
-        ? `<a href="steam://connect/${encodeURIComponent(serverIp)}:${serverPort}" class="shrink-0 px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 text-[10px] font-semibold transition-colors max-w-[120px] truncate" title="Подключиться к ${escapeHtml(serverName)}">${escapeHtml(serverName)}</a>`
+        ? `<a href="steam://connect/${encodeURIComponent(serverIp)}:${serverPort}" class="shrink-0 px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 text-[10px] font-semibold transition-colors max-w-[120px]" title="Подключиться к ${escapeHtml(serverName)}"><span class="inline-flex items-center gap-1 max-w-full">${serverGameIconHtml(p.serverGame)}<span class="truncate">${escapeHtml(serverName)}</span></span></a>`
         : '';
     const rCnt = getPlayerReportCount(sid);
     const rBadge = `<span data-report-sid="${sid}" class="ml-1 px-1.5 py-0.5 bg-red-500/20 text-red-400 text-[10px] font-bold rounded-full" style="display:${rCnt > 0 ? '' : 'none'}">${rCnt}</span>`;
@@ -2664,8 +2677,9 @@ function processCheckData(checkData, steamId, forModal = false) {
     const isOnline = p.online || (f?.stats?.online === 1);
     const serverName = p.serverName || '';
     const currentGame = s?.currentGame || null;
+    const serverGameIcon = serverGameIconHtml(p.serverGame);
     let statusHtml;
-    if (isOnline) statusHtml = `<span class="text-emerald-400 text-xs font-semibold">● Онлайн</span>${serverName ? ` <span class="text-gray-500 text-xs ml-1">на ${serverName}</span>` : ''}`;
+    if (isOnline) statusHtml = `<span class="text-emerald-400 text-xs font-semibold">● Онлайн</span>${serverName ? ` <span class="text-gray-500 text-xs ml-1 inline-flex items-center gap-1">${serverGameIcon}<span>на ${serverName}</span></span>` : ''}`;
     else if (currentGame) statusHtml = `<span class="text-emerald-400 text-xs font-semibold">● В игре</span> <span class="text-gray-500 text-xs ml-1">${currentGame}</span>`;
     else {
         const lastOff = s?.lastLogoff ? formatAccountAge(s.lastLogoff) : null;
@@ -2724,6 +2738,7 @@ function renderCheckPartial(localData, result, steamId) {
     const p = localData.local || {};
     const nick = p.nickname || 'Unknown';
     const avatar = p.avatar || DEFAULT_AVATAR;
+    const gameIco = serverGameIconHtml(p.serverGame);
     const bansHtml = (p.bans || []).length > 0
         ? (p.bans || []).map(b => `<div class="flex items-center gap-2 p-2.5 rounded-lg bg-rose-500/10"><span class="text-rose-400 text-xs font-semibold">${b.source}</span><span class="text-gray-400 text-xs">${b.reason || '—'}</span></div>`).join('')
         : '<p class="text-gray-500 text-xs">Загрузка банов...</p>';
@@ -2733,7 +2748,7 @@ function renderCheckPartial(localData, result, steamId) {
             <div class="min-w-0 flex-1">
                 <div class="text-white text-lg font-bold truncate">${nick}</div>
                 <div class="text-gray-500 text-xs font-mono">${steamId}</div>
-                ${p.online ? `<div class="text-emerald-400 text-xs mt-1">● Онлайн на ${p.serverName || 'сервере'}</div>` : ''}
+                    ${p.online ? `<div class="text-emerald-400 text-xs mt-1 inline-flex items-center gap-1">${gameIco}● Онлайн на ${p.serverName || 'сервере'}</div>` : ''}
             </div>
         </div>
         <div class="mb-5"><h4 class="text-gray-400 text-xs font-semibold mb-2">Баны</h4><div class="space-y-1.5">${bansHtml}</div></div>
@@ -2745,7 +2760,8 @@ function renderCheckFromMergedPlayer(p, result, steamId) {
     const avatar = p.avatar || DEFAULT_AVATAR;
     const whitelistBadge = p.whitelisted ? '<span class="px-2 py-0.5 bg-green-500/10 text-green-400 text-xs font-semibold rounded-full">Чист</span>' : '';
     const bansHtml = buildBansFromMergedPlayer(p);
-    const statusHtml = p.online ? `<span class="text-emerald-400 text-xs font-semibold">● Онлайн</span>${p.serverName ? ` <span class="text-gray-500 text-xs">на ${p.serverName}</span>` : ''}` : '';
+    const gameIco = serverGameIconHtml(p.serverGame);
+    const statusHtml = p.online ? `<span class="text-emerald-400 text-xs font-semibold">● Онлайн</span>${p.serverName ? ` <span class="text-gray-500 text-xs ml-1 inline-flex items-center gap-1">${gameIco}<span>на ${p.serverName}</span></span>` : ''}` : '';
     result.innerHTML = `
         <div class="flex items-center gap-4 mb-5">
             <img src="${avatar}" class="w-16 h-16 rounded-full ring-2 ring-white/10" onerror="this.src='${DEFAULT_AVATAR}'">
@@ -3251,7 +3267,8 @@ function renderModalFromMergedPlayer(p, content, steamId) {
     const whitelistBadge = p.whitelisted ? '<span class="px-2 py-0.5 bg-green-500/10 text-green-400 text-xs font-semibold rounded-full">Чист</span>' : '';
     const kills = p.kills || 0, deaths = p.deaths || 0;
     const kd = deaths > 0 ? (kills / deaths).toFixed(2) : kills.toFixed(2);
-    const statusHtml = p.online ? `<span class="text-emerald-400 text-xs font-semibold">● Онлайн</span>${p.serverName ? ` <span class="text-gray-500 text-xs ml-1">на ${p.serverName}</span>` : ''}` : '<span class="text-gray-500 text-xs">● Оффлайн</span>';
+    const gameIco = serverGameIconHtml(p.serverGame);
+    const statusHtml = p.online ? `<span class="text-emerald-400 text-xs font-semibold">● Онлайн</span>${p.serverName ? ` <span class="text-gray-500 text-xs ml-1 inline-flex items-center gap-1">${gameIco}<span>на ${p.serverName}</span></span>` : ''}` : '<span class="text-gray-500 text-xs">● Оффлайн</span>';
     const statsCards = [];
     if (kills !== undefined || deaths !== undefined) statsCards.push(`<div class="p-2.5 bg-white/[0.03] rounded-lg"><span class="text-gray-500">K/D</span><div class="text-white font-semibold mt-0.5">${kd} (${kills}/${deaths})</div></div>`);
     const bansHtml = buildBansFromMergedPlayer(p);
