@@ -608,6 +608,7 @@ function renderPanel() {
             )
         ].join('');
 
+        const staffTableMode = state.punishments.staffTableMode === 'old' ? 'old' : 'new';
         const monthSelectHtml = `
             <div class="flex flex-wrap items-center gap-3 mb-4">
                 <div class="relative" id="monthDropdownWrap">
@@ -623,7 +624,11 @@ function renderPanel() {
                 <div class="flex gap-2 ml-auto">
                     <button type="button" onclick="setPunishmentsView(\'list\')" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${effectiveView === 'list' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Список наказаний</button>
                     ${canViewStaffStats
-                        ? `<button type="button" onclick="setPunishmentsView('stats')" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${effectiveView === 'stats' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Статистика стафа</button>`
+                        ? `<button type="button" onclick="setPunishmentsView('stats')" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${effectiveView === 'stats' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Статистика стафа</button>
+                           ${effectiveView === 'stats' ? `
+                            <button type="button" onclick="setStaffStatsTableMode('old')" class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${staffTableMode === 'old' ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Старая таблица</button>
+                            <button type="button" onclick="setStaffStatsTableMode('new')" class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${staffTableMode !== 'old' ? 'bg-indigo-500/30 text-indigo-200' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Новая таблица</button>
+                           ` : ''}`
                         : '<div class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-white/5 text-gray-500 border border-white/10">Статистика стаффа доступна с 3 уровня</div>'}
                 </div>
             </div>`;
@@ -644,8 +649,7 @@ function renderPanel() {
             const totalMutes = statsRows.reduce((s, r) => s + r.mutes, 0);
             const totalSum = totalBans + totalMutes;
             const secure = !!(window.StaffStatsSecure && typeof window.StaffStatsSecure.computePayoutRow === 'function');
-            const tableMode = state.punishments.staffTableMode === 'old' ? 'old' : 'new';
-            const isOldTable = tableMode === 'old';
+            const isOldTable = staffTableMode === 'old';
             const ticketsMap = state.punishments.staffTicketsBySid || {};
             const payoutRows = secure ? statsRows.map(r => window.StaffStatsSecure.computePayoutRow(r, ticketsMap[String(r.admin_steamid)] || 0)) : [];
             const totalTickets = secure ? payoutRows.reduce((s, r) => s + (r.tickets || 0), 0) : 0;
@@ -681,10 +685,6 @@ function renderPanel() {
                 </div>
                 <div class="flex items-center gap-2 mb-3 flex-wrap">
                     ${Array.isArray(state.punishments.staffStatsRows) ? '<div class="text-xs text-gray-500">Статистика считается с запуска сервера и обновляется каждый час.</div>' : '<div class="text-xs text-gray-500">Загрузка с сервера…</div>'}
-                    <div class="ml-auto flex items-center gap-2">
-                        <button type="button" onclick="setStaffStatsTableMode('old')" class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${isOldTable ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Старая таблица</button>
-                        <button type="button" onclick="setStaffStatsTableMode('new')" class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${!isOldTable ? 'bg-indigo-500/30 text-indigo-200' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Новая таблица</button>
-                    </div>
                     ${secure ? `<button type="button" onclick="exportStaffStatsCsv()" class="ml-auto px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors">Экспорт Excel (CSV)</button>` : ''}
                 </div>
                 <div class="overflow-x-auto">
