@@ -102,8 +102,14 @@
             </div>
         </header>
 
+        <div class="flex flex-wrap items-center gap-2 mb-6">
+            <button type="button" id="tabServerBtn" onclick="setSettingsTab('server')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-500/30 text-indigo-300">Сервер</button>
+            <button type="button" id="tabSiteBtn" onclick="setSettingsTab('site')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-white/5 text-gray-400 hover:bg-white/10">Сайт</button>
+            <button type="button" id="tabTechBtn" onclick="setSettingsTab('tech')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-white/5 text-gray-400 hover:bg-white/10">Тех</button>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <section class="glass-panel p-6 rounded-2xl">
+            <section data-settings-tab="server" class="glass-panel p-6 rounded-2xl">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-[#5865F2]/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-chart-line text-[#5865F2] text-xl"></i>
@@ -121,7 +127,7 @@
                 </div>
             </section>
 
-            <section class="glass-panel p-6 rounded-2xl min-h-[420px] flex flex-col">
+            <section data-settings-tab="server" class="glass-panel p-6 rounded-2xl min-h-[420px] flex flex-col">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-cyan-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-user-check text-cyan-400 text-xl"></i>
@@ -138,7 +144,7 @@
                 </div>
             </section>
 
-            <section class="glass-panel p-6 rounded-2xl">
+            <section id="usersSection" data-settings-tab="site" class="glass-panel p-6 rounded-2xl">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-shield-check text-amber-400 text-xl"></i>
@@ -194,7 +200,7 @@
                 <div id="usersList" class="space-y-2 mt-4"></div>
             </section>
 
-            <section id="inviteCodesSection" class="glass-panel p-6 rounded-2xl hidden">
+            <section id="inviteCodesSection" data-settings-tab="site" class="glass-panel p-6 rounded-2xl hidden">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-ticket text-green-400 text-xl"></i>
@@ -221,7 +227,7 @@
                 <div id="inviteCodesList" class="space-y-2 text-sm"></div>
             </section>
 
-            <section id="updateNoticeSection" class="glass-panel p-6 rounded-2xl hidden">
+            <section id="updateNoticeSection" data-settings-tab="tech" class="glass-panel p-6 rounded-2xl hidden">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-cyan-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-megaphone text-cyan-400 text-xl"></i>
@@ -236,7 +242,7 @@
                 </div>
             </section>
 
-            <section class="glass-panel p-6 rounded-2xl">
+            <section data-settings-tab="tech" class="glass-panel p-6 rounded-2xl">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-wrench text-amber-400 text-xl"></i>
@@ -253,7 +259,7 @@
                 </div>
             </section>
 
-            <section class="glass-panel p-6 rounded-2xl">
+            <section id="systemSection" data-settings-tab="tech" class="glass-panel p-6 rounded-2xl hidden">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-gray-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-info text-gray-400 text-xl"></i>
@@ -300,6 +306,7 @@
         let currentUserLevel = 0;
         let sessionToken = '';
         let activityRange = 'week';
+        let currentSettingsTab = 'server';
         const panelVisibilityState = { activity: false, staff: false };
 
         function authHeaders() {
@@ -344,6 +351,24 @@
             applyPanelVisibility(name);
         }
 
+        function setSettingsTab(tab) {
+            currentSettingsTab = (tab === 'site' || tab === 'tech') ? tab : 'server';
+            document.querySelectorAll('[data-settings-tab]').forEach((el) => {
+                el.classList.toggle('hidden', el.getAttribute('data-settings-tab') !== currentSettingsTab);
+            });
+            const btnMap = {
+                server: document.getElementById('tabServerBtn'),
+                site: document.getElementById('tabSiteBtn'),
+                tech: document.getElementById('tabTechBtn')
+            };
+            Object.entries(btnMap).forEach(([k, el]) => {
+                if (!el) return;
+                el.className = k === currentSettingsTab
+                    ? 'px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-500/30 text-indigo-300'
+                    : 'px-4 py-2 rounded-lg text-sm font-semibold bg-white/5 text-gray-400 hover:bg-white/10';
+            });
+        }
+
         window.addEventListener('DOMContentLoaded', async () => {
             const stored = localStorage.getItem('user');
             if (!stored) { window.location.href = '/auth'; return; }
@@ -369,6 +394,7 @@
                 loadInviteCodes();
                 loadUpdateNotice();
             }
+            setSettingsTab('server');
             syncActivityRangeButtons();
             applyPanelVisibility('activity');
             applyPanelVisibility('staff');

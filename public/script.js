@@ -550,7 +550,6 @@ function buildChangesLayout(activeTab, mainHtml) {
             <div class="w-[180px] shrink-0">
                 <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2 space-y-1">
                     <button type="button" onclick="setChangesTab('roles')" class="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${rolesActive ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-transparent'}">Роли</button>
-                    <button type="button" onclick="openSidePanel('Наказания')" class="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition-colors bg-white/5 text-gray-400 hover:bg-white/10 border border-transparent">Наказания</button>
                 </div>
                 <div class="mt-2 text-[11px] text-gray-500 px-1">Доступ: с 3 уровня</div>
             </div>
@@ -591,12 +590,24 @@ function matchFearAdminScore(admin, key) {
 
 function syncRolesEditorFromInputs() {
     const get = (id) => document.getElementById(id);
-    state.rolesEditor.accessToken = String(get('fearAccessToken')?.value || '').trim();
+    state.rolesEditor.accessToken = extractAccessToken(String(get('fearAccessToken')?.value || '').trim());
     state.rolesEditor.authMode = String(get('fearAuthMode')?.value || 'cookie').toLowerCase() === 'bearer' ? 'bearer' : 'cookie';
     state.rolesEditor.steamid = String(get('fearSteamid')?.value || '').trim();
     state.rolesEditor.name = String(get('fearName')?.value || '').trim();
     state.rolesEditor.adminId = String(get('fearAdminId')?.value || '').trim();
     state.rolesEditor.roleName = String(get('fearRoleName')?.value || 'Модератор').trim();
+}
+
+function extractAccessToken(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    if (s.includes('access_token=')) {
+        const start = s.indexOf('access_token=') + 'access_token='.length;
+        const rest = s.slice(start);
+        const end = rest.indexOf(';');
+        return (end >= 0 ? rest.slice(0, end) : rest).trim();
+    }
+    return s;
 }
 
 async function fearFindAdminId() {
@@ -655,23 +666,36 @@ async function fearApplyRoleEdit() {
     if (!Number.isFinite(adminId)) { alert('Нужен корректный admin_id'); return; }
     if (!groupId) { alert('Выбери роль'); return; }
     if (!state.rolesEditor.steamid || !state.rolesEditor.name) { alert('Заполни steamid и name'); return; }
-    const payload = { admin_id: adminId, group_id: groupId, steamid: state.rolesEditor.steamid, name: state.rolesEditor.name };
-    appendRolesLog('Отправка /admins/edit...');
+    const payloadSnake = { admin_id: adminId, group_id: groupId, steamid: state.rolesEditor.steamid, name: state.rolesEditor.name };
+    const payloadCamel = { id: adminId, groupId: groupId, steamid: state.rolesEditor.steamid, name: state.rolesEditor.name };
+    appendRolesLog('Отправка /admins/edit (try #1 camelCase)...');
     scheduleRenderPanel();
     try {
-        const res = await fetch('/api/fear/admins/edit', {
+        const res1 = await fetch('/api/fear/admins/edit', {
             method: 'POST',
             headers: apiAuthHeaders(),
-            body: JSON.stringify({ accessToken: token, authMode: state.rolesEditor.authMode, payload })
+            body: JSON.stringify({ accessToken: token, authMode: state.rolesEditor.authMode, payload: payloadCamel })
         });
-        const data = await res.json().catch(() => ({}));
-        appendRolesLog(`Статус: ${res.status}`);
-        appendRolesLog(JSON.stringify(data));
-        scheduleRenderPanel();
+        const data1 = await res1.json().catch(() => ({}));
+        appendRolesLog(`Статус #1: ${res1.status}`);
+        appendRolesLog(JSON.stringify(data1));
+        if (res1.ok) {
+            scheduleRenderPanel();
+            return;
+        }
+        appendRolesLog('Отправка /admins/edit (try #2 snake_case)...');
+        const res2 = await fetch('/api/fear/admins/edit', {
+            method: 'POST',
+            headers: apiAuthHeaders(),
+            body: JSON.stringify({ accessToken: token, authMode: state.rolesEditor.authMode, payload: payloadSnake })
+        });
+        const data2 = await res2.json().catch(() => ({}));
+        appendRolesLog(`Статус #2: ${res2.status}`);
+        appendRolesLog(JSON.stringify(data2));
     } catch (e) {
         appendRolesLog('Ошибка: ' + String(e?.message || e));
-        scheduleRenderPanel();
     }
+    scheduleRenderPanel();
 }
 
 function renderPanel() {
