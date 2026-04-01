@@ -1063,7 +1063,7 @@ function renderPanel() {
             `<button type="button" class="ui-select-item month-select-item ${(state.punishments.selectedWeekStart === w.value && isWeekMode) ? 'active' : ''}" onclick="setPunishmentsWeekStart('${escapeHtml(w.value)}')">Неделя: ${escapeHtml(w.label)}</button>`
         ).join('');
 
-        const staffTableMode = state.punishments.staffTableMode === 'old' ? 'old' : 'new';
+        const staffTableMode = getUserLevel() === 3 ? 'old' : (state.punishments.staffTableMode === 'old' ? 'old' : 'new');
         const monthSelectHtml = `
             <div class="flex flex-wrap items-center gap-3 mb-4">
                 <div class="relative ui-select-wrap month-select-wrap" id="monthDropdownWrap">
@@ -1082,7 +1082,7 @@ function renderPanel() {
                     <button type="button" onclick="setPunishmentsView(\'list\')" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${effectiveView === 'list' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Список наказаний</button>
                     ${canViewStaffStats
                         ? `<button type="button" onclick="setPunishmentsView('stats')" class="px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${effectiveView === 'stats' ? 'bg-emerald-500/30 text-emerald-300' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Статистика стафа</button>
-                           ${effectiveView === 'stats' ? `
+                           ${effectiveView === 'stats' && getUserLevel() > 3 ? `
                             <button type="button" onclick="setStaffStatsTableMode('old')" class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${staffTableMode === 'old' ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Старая таблица</button>
                             <button type="button" onclick="setStaffStatsTableMode('new')" class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${staffTableMode !== 'old' ? 'bg-indigo-500/30 text-indigo-200' : 'bg-white/5 text-gray-400 hover:bg-white/10'}">Новая таблица</button>
                            ` : ''}`
@@ -1183,11 +1183,11 @@ function renderPanel() {
                     <div class="flex-1 min-w-[100px] bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-center">
                         <div class="text-white font-bold text-xl">${totalPay}</div>
                         <div class="text-gray-500 text-xs mt-0.5">Итого выплаты (р)</div>
-                    </div>` : `
+                    </div>` : (!isOldTable ? `
                     <div class="flex-1 min-w-[160px] bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-center">
                         <div class="text-gray-400 font-semibold text-sm">Загрузка модуля выплат…</div>
-                        <div class="text-gray-600 text-xs mt-0.5">доступно только с 3 уровня</div>
-                    </div>`}
+                        <div class="text-gray-600 text-xs mt-0.5">новая таблица и выплаты — с 4 уровня</div>
+                    </div>` : '')}
                 </div>
                 <div class="flex items-center gap-2 mb-3 flex-wrap">
                     ${Array.isArray(state.punishments.staffStatsRows) ? '<div class="text-xs text-gray-500">Статистика считается с запуска сервера и обновляется каждый час.</div>' : '<div class="text-xs text-gray-500">Загрузка с сервера…</div>'}
@@ -1486,18 +1486,24 @@ function setPunishmentsView(view) {
     state.punishments.view = view;
     scheduleRenderPanel();
     if (view === 'stats') {
-        ensureStaffSecureLoaded().then(() => {
-            loadStaffPayConfig();
+        // Уровень 3: только старая таблица, без secure-модуля и API выплат/тикетов.
+        if (getUserLevel() === 3) {
+            state.punishments.staffTableMode = 'old';
             loadStaffStatsFromServer();
-            loadStaffRoles();
-            loadStaffTicketsForSelectedMonth();
-        });
+        } else {
+            ensureStaffSecureLoaded().then(() => {
+                loadStaffPayConfig();
+                loadStaffStatsFromServer();
+                loadStaffRoles();
+                loadStaffTicketsForSelectedMonth();
+            });
+        }
     }
 }
 
 async function ensureStaffSecureLoaded() {
     if (state.punishments.secureLoaded) return true;
-    if (getUserLevel() < 3) return false;
+    if (getUserLevel() < 4) return false;
     try {
         const res = await fetch('/secure/staff-stats-secure.js', { headers: apiAuthHeaders() });
         if (!res.ok) return false;
@@ -1513,7 +1519,7 @@ async function ensureStaffSecureLoaded() {
 }
 
 async function loadStaffPayConfig() {
-    if (getUserLevel() < 3) return;
+    if (getUserLevel() < 4) return;
     try {
         const res = await fetch('/api/staff-pay-config', { headers: apiAuthHeaders() });
         if (!res.ok) return;
@@ -1532,7 +1538,7 @@ function getEffectiveYm(selectedMonth) {
 }
 
 async function loadStaffTicketsForSelectedMonth() {
-    if (getUserLevel() < 3) return;
+    if (getUserLevel() < 4) return;
     const ym = getEffectiveYm(state.punishments.selectedMonth);
     if (state.punishments.staffTicketsLoading && state.punishments.staffTicketsYm === ym) return;
     state.punishments.staffTicketsLoading = true;
@@ -1556,7 +1562,7 @@ async function loadStaffTicketsForSelectedMonth() {
 }
 
 async function loadStaffRoles() {
-    if (getUserLevel() < 3) return;
+    if (getUserLevel() < 4) return;
     if (state.punishments.staffRolesLoading) return;
     state.punishments.staffRolesLoading = true;
     try {
@@ -1579,7 +1585,7 @@ async function loadStaffRoles() {
 }
 
 async function saveStaffTickets(steamId, tickets) {
-    if (getUserLevel() < 3) return;
+    if (getUserLevel() < 4) return;
     const ym = getEffectiveYm(state.punishments.selectedMonth);
     try {
         const res = await fetch('/api/staff-tickets?ym=' + encodeURIComponent(ym), {
@@ -1620,6 +1626,7 @@ function exportStaffStatsCsv() {
 }
 
 function setStaffStatsTableMode(mode) {
+    if (getUserLevel() === 3) return;
     const m = mode === 'old' ? 'old' : 'new';
     state.punishments.staffTableMode = m;
     if (state.openCategory === 'Наказания' && state.punishments.view === 'stats') {
@@ -1636,7 +1643,7 @@ function setStaffStatsTableMode(mode) {
 
 async function loadStaffStatsFromServer() {
     if (getUserLevel() < 3) return;
-    await ensureStaffSecureLoaded();
+    if (getUserLevel() >= 4) await ensureStaffSecureLoaded();
     try {
         let res = await fetch('/api/punishments/staff-stats', { headers: apiAuthHeaders() });
         if (res.status === 403) return;
@@ -1681,7 +1688,7 @@ async function loadPunishmentsStaffList() {
 }
 
 function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
-    const isOldTable = state?.punishments?.staffTableMode === 'old';
+    const isOldTable = state?.punishments?.staffTableMode === 'old' || getUserLevel() === 3;
     // Один и тот же период (месяц или неделя) для обеих таблиц; отличаются только фильтры строк.
     const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
         ? ('week:' + String(state.punishments.selectedWeekStart))
@@ -1691,7 +1698,7 @@ function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
     if (isOldTable && window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsOld === 'function') {
         return window.StaffStatsSecure.computeStaffStatsRowsOld(staffList, statsDataBySid, period);
     }
-    if (window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsSecure === 'function') {
+    if (!isOldTable && window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsSecure === 'function') {
         return window.StaffStatsSecure.computeStaffStatsRowsSecure(staffList, statsDataBySid, period);
     }
     const list = Array.isArray(staffList) ? staffList : [];
@@ -3518,6 +3525,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 function applyLevelRestrictions(level) {
+    if (level === 3) {
+        state.punishments.staffTableMode = 'old';
+    }
     // Уровни 1-2: нет логов, настройки только локальные (без управления пользователями)
     if (level < 3) {
         const logsLink = document.querySelector('a[href="/logs"]');

@@ -1260,6 +1260,20 @@ const server = http.createServer(async (req, res) => {
     const reqStartedAt = nowMs();
     const clientIp = getClientIp(req);
     logHttpRequest(req, clientIp);
+    const safeLog = (session, actionType, targetSteamId, targetName, details) => {
+        try {
+            if (!session) return;
+            const t = String(actionType || '').trim();
+            if (!t) return;
+            if (t === 'view_bans') return; // never log this action
+            db.logAction(String(session.userId), String(session.username || session.displayName || 'user'), t,
+                targetSteamId != null ? String(targetSteamId) : null,
+                targetName != null ? String(targetName) : null,
+                details != null ? String(details) : null,
+                clientIp || null
+            );
+        } catch (_) {}
+    };
     
     // CORS headers
     const configuredAllowedOrigin = (process.env.ALLOWED_ORIGIN || '').trim();
@@ -1410,6 +1424,7 @@ const server = http.createServer(async (req, res) => {
                 const newLevel = Math.min(parseInt(level) || 1, Math.min(session.level, 5));
                 const id = db.createUser(username, password, displayName || username, newLevel);
                 console.log(`[Auth] Создан пользователь: ${username} (id=${id}), level=${newLevel} (by ${session.username})`);
+                safeLog(session, 'user_create', null, String(username), `id=${id} level=${newLevel}`);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true, id }));
                 } catch (err) {
@@ -1454,10 +1469,12 @@ const server = http.createServer(async (req, res) => {
                     const newLevel = Math.min(Math.max(parseInt(level), 1), Math.min(session.level, 5));
                     db.updateUserLevel(userId, newLevel);
                     console.log(`[Auth] Уровень ${target.username} изменён: ${target.level} → ${newLevel} (by ${session.username})`);
+                    safeLog(session, 'user_level_update', null, String(target.username), `${target.level} -> ${newLevel} (id=${userId})`);
                 }
                 if (password) {
                     db.updateUserPassword(userId, password);
                     console.log(`[Auth] Пароль ${target.username} изменён (by ${session.username})`);
+                    safeLog(session, 'user_password_update', null, String(target.username), `id=${userId}`);
                 }
                 if (Object.prototype.hasOwnProperty.call(payload, 'steamId')) {
                     if (session.level < USER_LEVEL_SUPER) {
@@ -1474,6 +1491,7 @@ const server = http.createServer(async (req, res) => {
                     }
                     db.updateUserSteamId(userId, steamId);
                     console.log(`[Auth] SteamID ${target.username} обновлён: ${steamId || '—'} (by ${session.username})`);
+                    safeLog(session, 'user_steamid_update', String(steamId || ''), String(target.username), `id=${userId}`);
                 }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true }));
@@ -1513,6 +1531,7 @@ const server = http.createServer(async (req, res) => {
         try { db.deleteSessionsByUserId(userId); } catch (_) {}
         db.deleteUser(userId);
         console.log(`[Auth] Удалён пользователь: ${target?.username || userId} (by ${session.username})`);
+        safeLog(session, 'user_delete', null, String(target?.username || userId), `id=${userId}`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
         return;
@@ -1530,6 +1549,7 @@ const server = http.createServer(async (req, res) => {
         try { db.deleteAllSessionsDb(); } catch (_) {}
         db.deleteAllUsers();
         console.log(`[Auth] Сброшены ВСЕ пользователи (by ${session.username})`);
+        safeLog(session, 'users_reset', null, null, null);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
         return;
@@ -1544,6 +1564,7 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         const restored = db.restoreUsersFromEnv();
+        safeLog(session, 'users_restore_env', null, null, `restored=${restored || 0}`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, restored }));
         return;
@@ -1584,6 +1605,7 @@ const server = http.createServer(async (req, res) => {
                 const lvl = Math.min(Math.max(parseInt(level) || 1, 1), 5);
                 const code = db.createInviteCode(lvl, session.userId);
                 console.log(`[Auth] Создан пригласительный код (level=${lvl}) by ${session.username}`);
+                safeLog(session, 'invite_generate', null, null, `level=${lvl} code=${code}`);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true, code }));
             } catch (err) {
@@ -1616,6 +1638,7 @@ const server = http.createServer(async (req, res) => {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
+        safeLog(session, 'invite_delete', null, null, `code=${code}`);
         return;
     }
 
@@ -1708,6 +1731,7 @@ const server = http.createServer(async (req, res) => {
         cache.playerGames.clear();
         
         console.log('Кэш очищен');
+        safeLog(session, 'cache_clear', null, null, null);
         
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, message: 'Cache cleared' }));
@@ -1774,7 +1798,7 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
             return;
         }
-        const logs = db.getActionLogs(100, 0);
+        const logs = (db.getActionLogs(200, 0) || []).filter(l => l && l.action_type !== 'view_bans').slice(0, 100);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ logs }));
         return;
@@ -1835,7 +1859,9 @@ const server = http.createServer(async (req, res) => {
                 const parsed = JSON.parse(body || '{}');
                 const accessToken = String(parsed.accessToken || '').trim();
                 const authMode = String(parsed.authMode || 'cookie').toLowerCase() === 'bearer' ? 'bearer' : 'cookie';
+                const key = String(parsed.key || '').trim();
                 if (!accessToken) {
+                    safeLog(session, 'fear_admins_find_error', null, null, 'reason=missing_token');
                     sendError(res, 400, 'ACCESS_TOKEN_REQUIRED', 'Укажите access token');
                     return;
                 }
@@ -1844,11 +1870,22 @@ const server = http.createServer(async (req, res) => {
                     : { Cookie: `access_token=${accessToken}` };
                 const apiRes = await fearAdminsRequest(FEAR_ADMINS_LIST_PATH, 'GET', h);
                 if (apiRes.statusCode >= 400) {
+                    safeLog(session, 'fear_admins_find_error', null, null, `status=${apiRes.statusCode} mode=${authMode} key=${key || '-'}`);
                     sendJson(res, apiRes.statusCode, { error: apiRes.bodyText || 'Fear API error' });
                     return;
                 }
                 sendJson(res, 200, { payload: apiRes.bodyJson ?? apiRes.bodyText });
+                let count = 0;
+                try {
+                    const payload = apiRes.bodyJson ?? apiRes.bodyText;
+                    const list = Array.isArray(payload)
+                        ? payload
+                        : (Array.isArray(payload?.admins) ? payload.admins : (Array.isArray(payload?.data) ? payload.data : []));
+                    count = Array.isArray(list) ? list.length : 0;
+                } catch (_) {}
+                safeLog(session, 'fear_admins_find', null, null, `mode=${authMode} key=${key || '-'} count=${count}`);
             } catch (err) {
+                safeLog(session, 'fear_admins_find_error', null, null, `exception=${String(err?.message || err || 'unknown')}`);
                 sendError(res, 500, 'FEAR_PROXY_ERROR', err.message || 'Fear API request failed');
             }
         });
@@ -1867,10 +1904,12 @@ const server = http.createServer(async (req, res) => {
                 const authMode = String(parsed.authMode || 'cookie').toLowerCase() === 'bearer' ? 'bearer' : 'cookie';
                 const payload = parsed.payload && typeof parsed.payload === 'object' ? parsed.payload : null;
                 if (!accessToken) {
+                    safeLog(session, 'fear_admins_edit_error', null, null, 'reason=missing_token');
                     sendError(res, 400, 'ACCESS_TOKEN_REQUIRED', 'Укажите access token');
                     return;
                 }
                 if (!payload) {
+                    safeLog(session, 'fear_admins_edit_error', null, null, 'reason=invalid_payload');
                     sendError(res, 400, 'INVALID_PAYLOAD', 'Некорректный payload');
                     return;
                 }
@@ -1879,7 +1918,17 @@ const server = http.createServer(async (req, res) => {
                     : { Cookie: `access_token=${accessToken}` };
                 const apiRes = await fearAdminsRequest(FEAR_ADMINS_EDIT_PATH, 'POST', h, payload);
                 sendJson(res, apiRes.statusCode, apiRes.bodyJson ?? { raw: apiRes.bodyText });
+                const id = payload.id ?? payload.admin_id ?? '';
+                const gid = payload.groupId ?? payload.group_id ?? '';
+                const sid = payload.steamid ?? payload.steamId ?? '';
+                const nm = payload.name ?? '';
+                if (apiRes.statusCode >= 200 && apiRes.statusCode < 300) {
+                    safeLog(session, 'fear_admins_edit', String(sid || ''), String(nm || ''), `id=${id} group=${gid} mode=${authMode}`);
+                } else {
+                    safeLog(session, 'fear_admins_edit_error', String(sid || ''), String(nm || ''), `status=${apiRes.statusCode} id=${id} group=${gid} mode=${authMode}`);
+                }
             } catch (err) {
+                safeLog(session, 'fear_admins_edit_error', null, null, `exception=${String(err?.message || err || 'unknown')}`);
                 sendError(res, 500, 'FEAR_PROXY_ERROR', err.message || 'Fear API request failed');
             }
         });
@@ -1907,6 +1956,7 @@ const server = http.createServer(async (req, res) => {
                 const { active, message } = JSON.parse(body || '{}');
                 db.setSetting('maintenance_active', active ? 'true' : 'false');
                 if (message !== undefined) db.setSetting('maintenance_message', String(message));
+                safeLog(session, 'maintenance_set', null, null, `active=${active ? 'true' : 'false'}`);
                 sendJson(res, 200, { success: true });
             } catch (_) {
                 sendError(res, 400, 'INVALID_JSON', 'Invalid JSON');
@@ -1938,6 +1988,7 @@ const server = http.createServer(async (req, res) => {
                     db.setSetting('update_notice_message', '');
                     db.setSetting('update_notice_id', '0');
                     sendJson(res, 200, { success: true, active: false, id: '0' });
+                    safeLog(session, 'update_notice_clear', null, null, null);
                     return;
                 }
                 const nextId = String(Date.now());
@@ -1945,6 +1996,7 @@ const server = http.createServer(async (req, res) => {
                 db.setSetting('update_notice_message', clean);
                 db.setSetting('update_notice_id', nextId);
                 sendJson(res, 200, { success: true, active: true, id: nextId });
+                safeLog(session, 'update_notice_set', null, null, `id=${nextId}`);
             } catch (_) {
                 sendError(res, 400, 'INVALID_JSON', 'Invalid JSON');
             }
@@ -1980,6 +2032,7 @@ const server = http.createServer(async (req, res) => {
                 for (const [key, value] of Object.entries(data)) {
                     db.setSetting(key, value);
                 }
+                safeLog(session, 'settings_update', null, null, Object.keys(data || {}).join(','));
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true }));
             } catch (_) {
@@ -1990,10 +2043,10 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // --- Staff roles for payouts (ГА / СТА / СТМ / М / МЛ) ---
+    // --- Staff roles for payouts (ГА / СТА / СТМ / М / МЛ) — только 4+ (новая таблица / выплаты) ---
     if (req.url === '/api/staff-roles' && req.method === 'GET') {
         const session = getSessionFromReq(req);
-        if (!session || session.level < USER_LEVEL_WHITELIST) {
+        if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
             return;
@@ -2028,6 +2081,7 @@ const server = http.createServer(async (req, res) => {
                     db.upsertStaffRole(sid, rawRole, session.userId, session.username);
                 }
                 sendJson(res, 200, { ok: true });
+                safeLog(session, 'staff_role_set', sid, null, `role=${rawRole}`);
             } catch (_) {
                 sendError(res, 400, 'INVALID_JSON', 'Invalid JSON');
             }
@@ -2035,10 +2089,10 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // --- Staff payroll config (norms) for staff stats (level >= 3) ---
+    // --- Staff payroll config (norms) for staff stats (level >= 4) ---
     if (req.url === '/api/staff-pay-config' && req.method === 'GET') {
         const session = getSessionFromReq(req);
-        if (!session || session.level < USER_LEVEL_WHITELIST) {
+        if (!session || session.level < USER_LEVEL_ADMIN) {
             sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав');
             return;
         }
@@ -2721,6 +2775,13 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
                 db.addBanComment(steamId, banSource || 'manual', String(session.userId), session.username, comment);
+                safeLog(
+                    session,
+                    'add_comment',
+                    String(steamId),
+                    String(banSource || 'manual'),
+                    `Комментарий: ${String(comment).slice(0, 220)}`
+                );
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true }));
             } catch (_) {
@@ -2768,8 +2829,8 @@ const server = http.createServer(async (req, res) => {
             sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
             return;
         }
-        if (session.level < USER_LEVEL_WHITELIST) {
-            sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав (нужен уровень 3+)');
+        if (session.level < USER_LEVEL_ADMIN) {
+            sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав (нужен уровень 4+)');
             return;
         }
 
@@ -2818,8 +2879,8 @@ const server = http.createServer(async (req, res) => {
             sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
             return;
         }
-        if (session.level < USER_LEVEL_WHITELIST) {
-            sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав (нужен уровень 3+)');
+        if (session.level < USER_LEVEL_ADMIN) {
+            sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав (нужен уровень 4+)');
             return;
         }
         try {

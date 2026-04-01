@@ -21,6 +21,7 @@
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        :root { color-scheme: dark; }
         body {
             font-family: 'Inter', sans-serif;
             background-color: #09090b;
@@ -48,13 +49,19 @@
                 linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
             background-size: 32px 32px;
         }
-        select, select option {
-            background-color: #1a1a1e;
-            color: #fff;
+        select {
+            color-scheme: dark;
+            accent-color: #6366f1;
+            background-color: #0f1324;
+            color: #f3f4f6;
         }
-        select option:checked {
-            background-color: #5865F2;
-        }
+        select option { background-color: #0f1324; color: #f3f4f6; }
+        select option:checked { background-color: rgba(99, 102, 241, 0.28); color: #e0e7ff; }
+        html.theme-midnight select, html.theme-midnight select option { background-color: #0b1220; color: #e2e8f0; }
+        html.theme-indigo select, html.theme-indigo select option { background-color: #111a36; color: #e0e7ff; }
+        html.theme-emerald select, html.theme-emerald select option { background-color: #0d211b; color: #d1fae5; }
+        html.theme-crimson select, html.theme-crimson select option { background-color: #24121a; color: #ffe4e6; }
+        html.theme-graphite select, html.theme-graphite select option { background-color: #1a1d24; color: #e4e4e7; }
         .level-badge {
             display: inline-flex;
             align-items: center;
@@ -77,6 +84,54 @@
         .custom-scroll::-webkit-scrollbar { width: 6px; }
         .custom-scroll::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.03); border-radius: 999px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.5); border-radius: 999px; }
+        .ui-select-trigger {
+            display: inline-flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .ui-select-trigger.open { border-color: rgba(99, 102, 241, 0.55) !important; }
+        .ui-select-menu {
+            position: absolute;
+            z-index: 90;
+            left: 0;
+            right: auto;
+            top: calc(100% + 6px);
+            padding: 6px;
+            border-radius: 10px;
+            border: 1px solid rgba(99, 102, 241, 0.28);
+            background: rgba(15, 19, 36, 0.98);
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+            min-width: 100%;
+            max-height: 260px;
+            overflow-y: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .ui-select-menu::-webkit-scrollbar { display: none; }
+        .ui-select-item {
+            width: 100%;
+            border: 0;
+            background: transparent;
+            color: #d1d5db;
+            text-align: left;
+            font-size: 13px;
+            padding: 7px 9px;
+            border-radius: 8px;
+            transition: background-color .12s ease, color .12s ease;
+        }
+        .ui-select-item:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+        .ui-select-item.active { background: rgba(99, 102, 241, .2); color: #c7d2fe; }
+        html.theme-midnight .ui-select-menu { border-color: rgba(148, 163, 184, .25); background: rgba(14, 16, 24, .98); }
+        html.theme-midnight .ui-select-item.active { background: rgba(148, 163, 184, .18); color: #cbd5e1; }
+        html.theme-indigo .ui-select-menu { border-color: rgba(99, 102, 241, .28); background: rgba(21, 29, 56, .98); }
+        html.theme-indigo .ui-select-item.active { background: rgba(99, 102, 241, .2); color: #a5b4fc; }
+        html.theme-emerald .ui-select-menu { border-color: rgba(16, 185, 129, .25); background: rgba(13, 26, 23, .98); }
+        html.theme-emerald .ui-select-item.active { background: rgba(16, 185, 129, .18); color: #34d399; }
+        html.theme-crimson .ui-select-menu { border-color: rgba(244, 63, 94, .25); background: rgba(36, 18, 24, .98); }
+        html.theme-crimson .ui-select-item.active { background: rgba(244, 63, 94, .18); color: #fda4af; }
+        html.theme-graphite .ui-select-menu { border-color: rgba(161, 161, 170, .24); background: rgba(23, 24, 28, .98); }
+        html.theme-graphite .ui-select-item.active { background: rgba(161, 161, 170, .16); color: #d4d4d8; }
     </style>
 </head>
 <body class="bg-[#09090b] text-white min-h-screen">
@@ -144,7 +199,7 @@
                 </div>
             </section>
 
-            <section id="usersSection" data-settings-tab="site" class="glass-panel p-6 rounded-2xl">
+            <section id="usersSection" data-settings-tab="site" class="glass-panel p-6 rounded-2xl hidden">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-shield-check text-amber-400 text-xl"></i>
@@ -187,7 +242,7 @@
                         <button onclick="addUser()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 rounded-lg font-semibold transition-colors text-sm">Добавить</button>
                     </div>
                 </div>
-                <div id="resetUsersBlock" class="mt-4 pt-4 border-t border-white/[0.06] hidden space-y-3">
+                <div id="resetUsersBlock" data-requires-level5="true" class="mt-4 pt-4 border-t border-white/[0.06] hidden space-y-3">
                     <div class="flex gap-2 flex-wrap items-center">
                         <button onclick="restoreFromEnv()" class="px-4 py-2 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg font-semibold text-sm transition-colors">Восстановить из .env</button>
                         <span class="text-gray-500 text-xs">Добавит пользователей из DEFAULT_USERS в .env (если их нет)</span>
@@ -200,7 +255,7 @@
                 <div id="usersList" class="space-y-2 mt-4"></div>
             </section>
 
-            <section id="inviteCodesSection" data-settings-tab="site" class="glass-panel p-6 rounded-2xl hidden">
+            <section id="inviteCodesSection" data-settings-tab="site" data-requires-level5="true" class="glass-panel p-6 rounded-2xl hidden">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-ticket text-green-400 text-xl"></i>
@@ -227,7 +282,7 @@
                 <div id="inviteCodesList" class="space-y-2 text-sm"></div>
             </section>
 
-            <section id="updateNoticeSection" data-settings-tab="tech" class="glass-panel p-6 rounded-2xl hidden">
+            <section id="updateNoticeSection" data-settings-tab="tech" data-requires-level5="true" class="glass-panel p-6 rounded-2xl hidden">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-cyan-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-megaphone text-cyan-400 text-xl"></i>
@@ -242,7 +297,7 @@
                 </div>
             </section>
 
-            <section data-settings-tab="tech" class="glass-panel p-6 rounded-2xl">
+            <section data-settings-tab="tech" class="glass-panel p-6 rounded-2xl hidden">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-wrench text-amber-400 text-xl"></i>
@@ -259,7 +314,7 @@
                 </div>
             </section>
 
-            <section id="systemSection" data-settings-tab="tech" class="glass-panel p-6 rounded-2xl hidden">
+            <section id="systemSection" class="glass-panel p-6 rounded-2xl hidden">
                 <div class="flex items-center gap-3 mb-4">
                     <div class="w-10 h-10 bg-gray-500/10 rounded-xl flex items-center justify-center">
                         <i class="ph ph-info text-gray-400 text-xl"></i>
@@ -307,6 +362,7 @@
         let sessionToken = '';
         let activityRange = 'week';
         let currentSettingsTab = 'server';
+        let uiOpenSelectMenu = null;
         const panelVisibilityState = { activity: false, staff: false };
 
         function authHeaders() {
@@ -317,6 +373,84 @@
             d.textContent = s;
             return d.innerHTML;
         }
+
+        function closeUiSelectMenu() {
+            if (!uiOpenSelectMenu) return;
+            const trigger = uiOpenSelectMenu.parentElement?.querySelector('.ui-select-trigger');
+            if (trigger) trigger.classList.remove('open');
+            uiOpenSelectMenu.remove();
+            uiOpenSelectMenu = null;
+        }
+
+        function initUiSelects(root = document) {
+            if (!root || !root.querySelectorAll) return;
+            root.querySelectorAll('select').forEach((selectEl) => {
+                if (selectEl.dataset.uiSelectInit === '1') return;
+                selectEl.dataset.uiSelectInit = '1';
+                let host = selectEl.parentElement;
+                if (!host) return;
+                if (!host.classList.contains('ui-select-wrap')) {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'ui-select-wrap relative w-full';
+                    host.insertBefore(wrap, selectEl);
+                    wrap.appendChild(selectEl);
+                    host = wrap;
+                }
+
+                const trigger = document.createElement('button');
+                trigger.type = 'button';
+                trigger.className = 'ui-select-trigger';
+                trigger.innerHTML = '<span class="truncate"></span><i class="ph ph-caret-down text-gray-400 text-xs"></i>';
+                const selectClasses = String(selectEl.className || '').trim();
+                if (selectClasses) trigger.className += ' ' + selectClasses;
+
+                selectEl.classList.add('sr-only', 'pointer-events-none', 'absolute', 'opacity-0');
+                selectEl.setAttribute('tabindex', '-1');
+                host.appendChild(trigger);
+
+                const syncLabel = () => {
+                    const selected = selectEl.options[selectEl.selectedIndex];
+                    const label = selected ? String(selected.textContent || '').trim() : '';
+                    const span = trigger.querySelector('span');
+                    if (span) span.textContent = label || 'Выбрать';
+                };
+
+                const openMenu = () => {
+                    closeUiSelectMenu();
+                    trigger.classList.add('open');
+                    const menu = document.createElement('div');
+                    menu.className = 'ui-select-menu';
+                    Array.from(selectEl.options).forEach((opt) => {
+                        const item = document.createElement('button');
+                        item.type = 'button';
+                        item.className = 'ui-select-item' + (opt.value === selectEl.value ? ' active' : '');
+                        item.textContent = String(opt.textContent || '').trim();
+                        item.addEventListener('click', () => {
+                            selectEl.value = opt.value;
+                            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                            syncLabel();
+                            closeUiSelectMenu();
+                        });
+                        menu.appendChild(item);
+                    });
+                    host.appendChild(menu);
+                    uiOpenSelectMenu = menu;
+                };
+
+                trigger.addEventListener('click', () => {
+                    if (uiOpenSelectMenu) { closeUiSelectMenu(); return; }
+                    openMenu();
+                });
+                selectEl.addEventListener('change', syncLabel);
+                syncLabel();
+            });
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!uiOpenSelectMenu) return;
+            if (e.target.closest('.ui-select-menu') || e.target.closest('.ui-select-trigger')) return;
+            closeUiSelectMenu();
+        });
 
         function syncActivityRangeButtons() {
             const mk = (id, active) => {
@@ -388,13 +522,12 @@
 
             document.getElementById('userName').textContent = user.displayName || user.username;
             if (currentUserLevel >= 5) {
-                document.getElementById('resetUsersBlock').classList.remove('hidden');
-                document.getElementById('inviteCodesSection').classList.remove('hidden');
-                document.getElementById('updateNoticeSection').classList.remove('hidden');
+                document.querySelectorAll('[data-requires-level5="true"]').forEach((el) => el.classList.remove('hidden'));
                 loadInviteCodes();
                 loadUpdateNotice();
             }
             setSettingsTab('server');
+            initUiSelects(document);
             syncActivityRangeButtons();
             applyPanelVisibility('activity');
             applyPanelVisibility('staff');
@@ -626,6 +759,7 @@
                         </div>
                     </div>`;
                 }).join('');
+                initUiSelects(container);
             } catch (e) {
                 console.error('loadUsers error:', e);
                 document.getElementById('usersList').innerHTML = '<p class="text-gray-500 text-sm">Ошибка загрузки</p>';
@@ -774,6 +908,7 @@
                         </div>
                     `;
                 }).join('');
+                initUiSelects(staffList);
             } catch (_) {
                 if (staffLast) staffLast.textContent = 'Ошибка загрузки';
             }

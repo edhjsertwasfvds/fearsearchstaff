@@ -47,6 +47,69 @@
         }
         body { scrollbar-width: none; -ms-overflow-style: none; }
         body::-webkit-scrollbar { display: none; }
+        .custom-select-trigger {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 12px 14px;
+            color: #fff;
+            font-size: 14px;
+            transition: border-color .15s ease, background-color .15s ease;
+        }
+        .custom-select-trigger:hover { background: rgba(255, 255, 255, 0.08); }
+        .custom-select-trigger.open, .custom-select-trigger:focus-visible {
+            outline: none;
+            border-color: #5865F2;
+        }
+        .custom-select-menu {
+            position: absolute;
+            z-index: 60;
+            left: 0;
+            right: 0;
+            margin-top: 8px;
+            padding: 6px;
+            border-radius: 12px;
+            border: 1px solid rgba(88, 101, 242, .28);
+            background: rgba(15, 19, 36, 0.98);
+            box-shadow: 0 18px 40px rgba(0,0,0,.45);
+            max-height: 260px;
+            overflow-y: auto;
+        }
+        .custom-select-item {
+            width: 100%;
+            text-align: left;
+            border: 0;
+            background: transparent;
+            color: #d1d5db;
+            font-size: 14px;
+            line-height: 1.2;
+            padding: 9px 10px;
+            border-radius: 8px;
+            transition: background-color .12s ease, color .12s ease;
+        }
+        .custom-select-item:hover {
+            background: rgba(255,255,255,.08);
+            color: #fff;
+        }
+        .custom-select-item.active {
+            background: rgba(88, 101, 242, .2);
+            color: #a5b4fc;
+        }
+        html.theme-midnight .custom-select-menu { border-color: rgba(148, 163, 184, .25); background: rgba(14, 16, 24, .98); }
+        html.theme-midnight .custom-select-item.active { background: rgba(148, 163, 184, .18); color: #cbd5e1; }
+        html.theme-indigo .custom-select-menu { border-color: rgba(99, 102, 241, .28); background: rgba(21, 29, 56, .98); }
+        html.theme-indigo .custom-select-item.active { background: rgba(99, 102, 241, .2); color: #a5b4fc; }
+        html.theme-emerald .custom-select-menu { border-color: rgba(16, 185, 129, .25); background: rgba(13, 26, 23, .98); }
+        html.theme-emerald .custom-select-item.active { background: rgba(16, 185, 129, .18); color: #34d399; }
+        html.theme-crimson .custom-select-menu { border-color: rgba(244, 63, 94, .25); background: rgba(36, 18, 24, .98); }
+        html.theme-crimson .custom-select-item.active { background: rgba(244, 63, 94, .18); color: #fda4af; }
+        html.theme-graphite .custom-select-menu { border-color: rgba(161, 161, 170, .24); background: rgba(23, 24, 28, .98); }
+        html.theme-graphite .custom-select-item.active { background: rgba(161, 161, 170, .16); color: #d4d4d8; }
     </style>
 </head>
 <body class="bg-[#09090b] text-white min-h-screen w-full relative overflow-x-hidden selection:bg-[#5865F2] selection:text-white">
@@ -79,13 +142,14 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                     <label for="filterType" class="block text-sm font-semibold mb-2 text-gray-300">Тип действия</label>
-                    <select id="filterType" class="w-full bg-white/[0.05] border border-white/[0.1] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-[#5865F2]">
+                    <div class="relative">
+                    <select id="filterType" data-custom-select class="sr-only">
                         <option value="">Все действия</option>
                         <option value="add_to_whitelist">Добавление в whitelist</option>
                         <option value="remove_from_whitelist">Удаление из whitelist</option>
-                        <option value="view_bans">Просмотр банов</option>
                         <option value="add_comment">Добавление комментария</option>
                     </select>
+                    </div>
                 </div>
                 <div>
                     <label for="filterUser" class="block text-sm font-semibold mb-2 text-gray-300">Пользователь</label>
@@ -106,7 +170,7 @@
             </div>
         </section>
 
-        <section class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6" aria-label="Статистика">
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6" aria-label="Статистика">
             <div class="glass-panel rounded-2xl p-6">
                 <div class="text-gray-400 text-sm mb-2">Всего действий</div>
                 <div id="totalActions" class="text-3xl font-bold">0</div>
@@ -114,10 +178,6 @@
             <div class="glass-panel rounded-2xl p-6">
                 <div class="text-gray-400 text-sm mb-2">Добавлено в whitelist</div>
                 <div id="whitelistAdded" class="text-3xl font-bold text-green-400">0</div>
-            </div>
-            <div class="glass-panel rounded-2xl p-6">
-                <div class="text-gray-400 text-sm mb-2">Просмотров банов</div>
-                <div id="viewsCount" class="text-3xl font-bold text-blue-400">0</div>
             </div>
             <div class="glass-panel rounded-2xl p-6">
                 <div class="text-gray-400 text-sm mb-2">Уникальных пользователей</div>
@@ -157,6 +217,73 @@
         const logsPerPage = 50;
         let allLogs = [];
         let filteredLogs = [];
+        let openCustomSelectMenu = null;
+
+        function closeCustomSelectMenu() {
+            if (!openCustomSelectMenu) return;
+            const trigger = openCustomSelectMenu.parentElement?.querySelector('.custom-select-trigger');
+            if (trigger) trigger.classList.remove('open');
+            openCustomSelectMenu.remove();
+            openCustomSelectMenu = null;
+        }
+
+        function initCustomSelects() {
+            document.querySelectorAll('select[data-custom-select]').forEach((selectEl) => {
+                if (selectEl.dataset.customized === '1') return;
+                selectEl.dataset.customized = '1';
+
+                const host = selectEl.parentElement;
+                if (!host) return;
+
+                const trigger = document.createElement('button');
+                trigger.type = 'button';
+                trigger.className = 'custom-select-trigger';
+                trigger.innerHTML = '<span></span><i class="ph ph-caret-down text-gray-400"></i>';
+                host.appendChild(trigger);
+
+                const syncTriggerLabel = () => {
+                    const selected = selectEl.options[selectEl.selectedIndex];
+                    trigger.querySelector('span').textContent = selected ? selected.textContent : 'Выбрать';
+                };
+
+                const openMenu = () => {
+                    closeCustomSelectMenu();
+                    trigger.classList.add('open');
+                    const menu = document.createElement('div');
+                    menu.className = 'custom-select-menu';
+
+                    Array.from(selectEl.options).forEach((opt) => {
+                        const item = document.createElement('button');
+                        item.type = 'button';
+                        item.className = 'custom-select-item' + (opt.value === selectEl.value ? ' active' : '');
+                        item.textContent = opt.textContent || '';
+                        item.addEventListener('click', () => {
+                            selectEl.value = opt.value;
+                            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                            syncTriggerLabel();
+                            closeCustomSelectMenu();
+                        });
+                        menu.appendChild(item);
+                    });
+
+                    host.appendChild(menu);
+                    openCustomSelectMenu = menu;
+                };
+
+                trigger.addEventListener('click', () => {
+                    if (openCustomSelectMenu) { closeCustomSelectMenu(); return; }
+                    openMenu();
+                });
+                selectEl.addEventListener('change', syncTriggerLabel);
+                syncTriggerLabel();
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!openCustomSelectMenu) return;
+                if (e.target.closest('.custom-select-menu') || e.target.closest('.custom-select-trigger')) return;
+                closeCustomSelectMenu();
+            });
+        }
 
         (async () => {
             try {
@@ -167,6 +294,7 @@
                 const data = await res.json();
                 if ((data.level || 0) < 3) { window.location.href = '/'; return; }
             } catch (_) { window.location.href = '/auth'; return; }
+            initCustomSelects();
             loadLogs();
         })();
 
@@ -198,7 +326,6 @@
         function updateStatistics() {
             document.getElementById('totalActions').textContent = filteredLogs.length;
             document.getElementById('whitelistAdded').textContent = filteredLogs.filter(log => log.action_type === 'add_to_whitelist').length;
-            document.getElementById('viewsCount').textContent = filteredLogs.filter(log => log.action_type === 'view_bans').length;
             document.getElementById('uniqueUsers').textContent = new Set(filteredLogs.map(log => log.user_name)).size;
         }
 
@@ -209,7 +336,6 @@
             const actionNames = {
                 'add_to_whitelist': '✅ Добавление в whitelist',
                 'remove_from_whitelist': '❌ Удаление из whitelist',
-                'view_bans': '👁️ Просмотр банов',
                 'add_comment': '💬 Комментарий'
             };
 
