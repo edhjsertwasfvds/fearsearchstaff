@@ -21,14 +21,105 @@ const state = {
     changesTab: 'roles',
     rolesEditor: { authMode: 'cookie', accessToken: '', steamid: '', name: '', adminId: '', roleName: 'Модератор', log: [] }
 };
+const ROLES_EDITOR_ACCESS_TOKEN_KEY = 'rolesEditorAccessToken';
 
 let ws = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let playersPanelRefreshQueued = false;
 let playersPanelRefreshTimer = null;
+let uiOpenSelectMenu = null;
+let rolesAutoResolveTimer = null;
 
 const DEFAULT_AVATAR = 'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
+
+function closeUiSelectMenu() {
+    if (!uiOpenSelectMenu) return;
+    uiOpenSelectMenu.classList.add('hidden');
+    const trigger = uiOpenSelectMenu.parentElement?.querySelector('.ui-select-trigger');
+    if (trigger) trigger.classList.remove('open');
+    uiOpenSelectMenu = null;
+}
+
+function initUiSelects(root = document) {
+    const selects = Array.from(root.querySelectorAll('select[data-ui-select="1"]:not([data-ui-select-init="1"])'));
+    selects.forEach((select) => {
+        const parent = select.parentElement;
+        if (!parent) return;
+
+        let wrap = parent;
+        if (!parent.classList.contains('ui-select-wrap')) {
+            wrap = document.createElement('div');
+            wrap.className = 'ui-select-wrap';
+            parent.insertBefore(wrap, select);
+            wrap.appendChild(select);
+        }
+
+        select.dataset.uiSelectInit = '1';
+        select.classList.add('hidden');
+
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'ui-select-trigger';
+
+        const label = document.createElement('span');
+        label.className = 'truncate';
+        const updateLabel = () => {
+            const selected = select.options[select.selectedIndex];
+            label.textContent = selected ? selected.textContent : '';
+        };
+        updateLabel();
+
+        const caret = document.createElement('i');
+        caret.className = 'ph ph-caret-down text-gray-500 text-xs';
+        trigger.append(label, caret);
+
+        const menu = document.createElement('div');
+        menu.className = 'ui-select-menu hidden';
+
+        const syncActive = () => {
+            Array.from(menu.querySelectorAll('.ui-select-item')).forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.value === select.value);
+            });
+        };
+
+        Array.from(select.options).forEach((opt) => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'ui-select-item';
+            item.textContent = opt.textContent || '';
+            item.dataset.value = opt.value;
+            item.addEventListener('click', () => {
+                if (select.value !== opt.value) {
+                    select.value = opt.value;
+                    select.dispatchEvent(new Event('input', { bubbles: true }));
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                updateLabel();
+                syncActive();
+                closeUiSelectMenu();
+            });
+            menu.appendChild(item);
+        });
+        syncActive();
+
+        trigger.addEventListener('click', () => {
+            const opening = menu.classList.contains('hidden');
+            closeUiSelectMenu();
+            if (!opening) return;
+            menu.classList.remove('hidden');
+            trigger.classList.add('open');
+            uiOpenSelectMenu = menu;
+        });
+
+        select.addEventListener('change', () => {
+            updateLabel();
+            syncActive();
+        });
+
+        wrap.append(trigger, menu);
+    });
+}
 
 async function loadBoundSteamAvatar(steamId) {
     const avatarEl = document.getElementById('userAvatar');
@@ -263,8 +354,10 @@ function punishmentInSelectedPeriod(p, selectedPeriod) {
     if (sel.startsWith('week:')) {
         const startStr = sel.slice(5).trim();
         if (!/^\d{4}-\d{2}-\d{2}$/.test(startStr)) return false;
-        const start = new Date(startStr + 'T00:00:00');
+        const [yy, mm, dd] = startStr.split('-').map(n => parseInt(n, 10));
+        const start = new Date(yy, (mm || 1) - 1, dd || 1, 0, 0, 0, 0);
         if (Number.isNaN(start.getTime())) return false;
+        // Week is Wednesday -> Wednesday (7 days).
         const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
         return d >= start && d < end;
     }
@@ -591,11 +684,37 @@ function matchFearAdminScore(admin, key) {
 function syncRolesEditorFromInputs() {
     const get = (id) => document.getElementById(id);
     state.rolesEditor.accessToken = extractAccessToken(String(get('fearAccessToken')?.value || '').trim());
-    state.rolesEditor.authMode = String(get('fearAuthMode')?.value || 'cookie').toLowerCase() === 'bearer' ? 'bearer' : 'cookie';
+    state.rolesEditor.authMode = 'cookie';
     state.rolesEditor.steamid = String(get('fearSteamid')?.value || '').trim();
-    state.rolesEditor.name = String(get('fearName')?.value || '').trim();
-    state.rolesEditor.adminId = String(get('fearAdminId')?.value || '').trim();
     state.rolesEditor.roleName = String(get('fearRoleName')?.value || 'Модератор').trim();
+}
+
+function loadRolesEditorAccessToken() {
+    try {
+        const saved = String(localStorage.getItem(ROLES_EDITOR_ACCESS_TOKEN_KEY) || '').trim();
+        if (saved) state.rolesEditor.accessToken = extractAccessToken(saved);
+    } catch (_) {}
+}
+
+function saveRolesEditorAccessToken() {
+    try {
+        const token = extractAccessToken(state.rolesEditor.accessToken || '');
+        if (!token) localStorage.removeItem(ROLES_EDITOR_ACCESS_TOKEN_KEY);
+        else localStorage.setItem(ROLES_EDITOR_ACCESS_TOKEN_KEY, token);
+    } catch (_) {}
+}
+
+function onRolesEditorAccessTokenInput() {
+    syncRolesEditorFromInputs();
+    saveRolesEditorAccessToken();
+}
+
+function onRolesEditorSteamidInput() {
+    syncRolesEditorFromInputs();
+    if (rolesAutoResolveTimer) clearTimeout(rolesAutoResolveTimer);
+    rolesAutoResolveTimer = setTimeout(() => {
+        fearFindAdminId({ silent: true });
+    }, 350);
 }
 
 function extractAccessToken(raw) {
@@ -610,25 +729,26 @@ function extractAccessToken(raw) {
     return s;
 }
 
-async function fearFindAdminId() {
+async function fearFindAdminId(options = {}) {
+    const silent = Boolean(options && options.silent);
     syncRolesEditorFromInputs();
     const token = state.rolesEditor.accessToken;
-    const key = state.rolesEditor.steamid || state.rolesEditor.name;
-    if (!token) { alert('Вставь access token'); return; }
-    if (!key) { alert('Заполни steamid или name'); return; }
-    appendRolesLog('Запрос списка админов...');
+    const key = state.rolesEditor.steamid;
+    if (!token) { if (!silent) alert('Вставь access token'); return false; }
+    if (!key) { if (!silent) alert('Заполни steamid'); return false; }
+    if (!silent) appendRolesLog('Запрос списка админов...');
     scheduleRenderPanel();
     try {
         const res = await fetch('/api/fear/admins/find', {
             method: 'POST',
             headers: apiAuthHeaders(),
-            body: JSON.stringify({ accessToken: token, authMode: state.rolesEditor.authMode })
+            body: JSON.stringify({ accessToken: token, authMode: 'cookie', key })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) {
-            appendRolesLog('Ошибка: ' + (data.error || res.status));
+            if (!silent) appendRolesLog('Ошибка: ' + (data.error || res.status));
             scheduleRenderPanel();
-            return;
+            return false;
         }
         const payload = data.payload;
         const list = Array.isArray(payload) ? payload : (Array.isArray(payload?.admins) ? payload.admins : (Array.isArray(payload?.data) ? payload.data : []));
@@ -638,9 +758,11 @@ async function fearFindAdminId() {
             .filter(x => x.s >= 0)
             .sort((x, y) => y.s - x.s);
         if (!scored.length) {
-            appendRolesLog('Совпадений не найдено');
+            state.rolesEditor.adminId = '';
+            state.rolesEditor.name = '';
+            if (!silent) appendRolesLog('Совпадений не найдено');
             scheduleRenderPanel();
-            return;
+            return false;
         }
         const top = scored[0].a;
         const adminId = top.admin_id ?? top.id ?? '';
@@ -649,32 +771,45 @@ async function fearFindAdminId() {
         state.rolesEditor.name = String(top.name || state.rolesEditor.name || '');
         const gid = Number(top.group_id ?? top.groupId ?? 0);
         if (FEAR_ROLE_BY_GROUP_ID[gid]) state.rolesEditor.roleName = FEAR_ROLE_BY_GROUP_ID[gid];
-        appendRolesLog(`Найден: id=${state.rolesEditor.adminId} | ${state.rolesEditor.name} | ${state.rolesEditor.steamid}`);
+        if (!silent) appendRolesLog(`Найден: id=${state.rolesEditor.adminId} | ${state.rolesEditor.name} | ${state.rolesEditor.steamid}`);
         scheduleRenderPanel();
+        return true;
     } catch (e) {
-        appendRolesLog('Ошибка: ' + String(e?.message || e));
+        if (!silent) appendRolesLog('Ошибка: ' + String(e?.message || e));
         scheduleRenderPanel();
+        return false;
     }
 }
 
 async function fearApplyRoleEdit() {
     syncRolesEditorFromInputs();
     const token = state.rolesEditor.accessToken;
-    const adminId = parseInt(state.rolesEditor.adminId, 10);
     const groupId = FEAR_GROUP_ID_BY_ROLE[state.rolesEditor.roleName];
     if (!token) { alert('Вставь access token'); return; }
-    if (!Number.isFinite(adminId)) { alert('Нужен корректный admin_id'); return; }
     if (!groupId) { alert('Выбери роль'); return; }
-    if (!state.rolesEditor.steamid || !state.rolesEditor.name) { alert('Заполни steamid и name'); return; }
-    const payloadSnake = { admin_id: adminId, group_id: groupId, steamid: state.rolesEditor.steamid, name: state.rolesEditor.name };
-    const payloadCamel = { id: adminId, groupId: groupId, steamid: state.rolesEditor.steamid, name: state.rolesEditor.name };
+    if (!state.rolesEditor.steamid) { alert('Заполни steamid'); return; }
+    if (!state.rolesEditor.adminId) {
+        appendRolesLog('Поиск admin_id по steamid...');
+        const resolved = await fearFindAdminId({ silent: true });
+        if (!resolved || !state.rolesEditor.adminId) {
+            appendRolesLog('Не удалось определить admin_id автоматически');
+            scheduleRenderPanel();
+            alert('Не удалось определить admin_id по steamid');
+            return;
+        }
+    }
+    const adminId = parseInt(state.rolesEditor.adminId, 10);
+    if (!Number.isFinite(adminId)) { alert('Нужен корректный admin_id'); return; }
+    const resolvedName = String(state.rolesEditor.name || state.rolesEditor.steamid || '').trim();
+    const payloadSnake = { admin_id: adminId, group_id: groupId, steamid: state.rolesEditor.steamid, name: resolvedName };
+    const payloadCamel = { id: adminId, groupId: groupId, steamid: state.rolesEditor.steamid, name: resolvedName };
     appendRolesLog('Отправка /admins/edit (try #1 camelCase)...');
     scheduleRenderPanel();
     try {
         const res1 = await fetch('/api/fear/admins/edit', {
             method: 'POST',
             headers: apiAuthHeaders(),
-            body: JSON.stringify({ accessToken: token, authMode: state.rolesEditor.authMode, payload: payloadCamel })
+            body: JSON.stringify({ accessToken: token, authMode: 'cookie', payload: payloadCamel })
         });
         const data1 = await res1.json().catch(() => ({}));
         appendRolesLog(`Статус #1: ${res1.status}`);
@@ -687,7 +822,7 @@ async function fearApplyRoleEdit() {
         const res2 = await fetch('/api/fear/admins/edit', {
             method: 'POST',
             headers: apiAuthHeaders(),
-            body: JSON.stringify({ accessToken: token, authMode: state.rolesEditor.authMode, payload: payloadSnake })
+            body: JSON.stringify({ accessToken: token, authMode: 'cookie', payload: payloadSnake })
         });
         const data2 = await res2.json().catch(() => ({}));
         appendRolesLog(`Статус #2: ${res2.status}`);
@@ -765,24 +900,18 @@ function renderPanel() {
         ).join('');
         const main = `
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                <input id="fearAccessToken" type="text" value="${escapeHtml(state.rolesEditor.accessToken)}" placeholder="access_token" class="md:col-span-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-indigo-500">
-                <select id="fearAuthMode" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500">
-                    <option value="cookie" ${state.rolesEditor.authMode === 'cookie' ? 'selected' : ''}>Cookie</option>
-                    <option value="bearer" ${state.rolesEditor.authMode === 'bearer' ? 'selected' : ''}>Bearer</option>
-                </select>
-                <select id="fearRoleName" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500">${roleOptions}</select>
-                <input id="fearSteamid" type="text" value="${escapeHtml(state.rolesEditor.steamid)}" placeholder="steamid" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-indigo-500">
-                <input id="fearName" type="text" value="${escapeHtml(state.rolesEditor.name)}" placeholder="name" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500">
-                <input id="fearAdminId" type="text" value="${escapeHtml(state.rolesEditor.adminId)}" placeholder="admin_id (авто)" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-indigo-500">
+                <input id="fearAccessToken" oninput="onRolesEditorAccessTokenInput()" type="text" value="${escapeHtml(state.rolesEditor.accessToken)}" placeholder="access_token" class="md:col-span-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-indigo-500">
+                <select id="fearRoleName" data-ui-select="1" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500">${roleOptions}</select>
+                <input id="fearSteamid" oninput="onRolesEditorSteamidInput()" type="text" value="${escapeHtml(state.rolesEditor.steamid)}" placeholder="steamid" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-indigo-500">
             </div>
             <div class="flex flex-wrap gap-2 mb-3">
-                <button type="button" onclick="fearFindAdminId()" class="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg">Найти ID</button>
                 <button type="button" onclick="fearApplyRoleEdit()" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg">Применить роль</button>
             </div>
             <div class="rounded-lg border border-white/10 bg-black/20 p-3 h-[320px] overflow-y-auto text-xs font-mono text-gray-300 whitespace-pre-wrap">${escapeHtml((state.rolesEditor.log || []).join('\n') || 'Лог пуст')}</div>
         `;
         title.textContent = 'Изменения';
         content.innerHTML = buildChangesLayout('roles', main);
+        initUiSelects(content);
         return;
     }
 
@@ -870,10 +999,12 @@ function renderPanel() {
             const starts = new Set();
             const addTs = (ts) => {
                 if (!ts || ts <= 0) return;
+                // Use "noon local time" to avoid timezone/DST edge cases shifting the weekday.
                 const d = new Date(ts * 1000);
-                // Monday-start week
-                const day = (d.getDay() + 6) % 7; // Mon=0..Sun=6
-                const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day);
+                d.setHours(12, 0, 0, 0);
+                // Wednesday-start week (Wed=0..Tue=6)
+                const day = (d.getDay() - 3 + 7) % 7;
+                const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day, 12, 0, 0, 0);
                 const ymd = start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0');
                 starts.add(ymd);
             };
@@ -885,8 +1016,9 @@ function renderPanel() {
             });
             const arr = Array.from(starts).sort().reverse().slice(0, 12);
             const labels = arr.map(ymd => {
-                const start = new Date(ymd + 'T00:00:00');
-                const end = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
+                const [yy, mm, dd] = String(ymd).split('-').map(n => parseInt(n, 10));
+                const start = new Date(yy, (mm || 1) - 1, dd || 1, 12, 0, 0, 0);
+                const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
                 const label = start.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' }) + ' — ' + end.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
                 return { value: ymd, label };
             });
@@ -922,25 +1054,25 @@ function renderPanel() {
             ? (weekOptions.find(w => w.value === state.punishments.selectedWeekStart)?.label || state.punishments.selectedWeekStart)
             : (selectedMonth ? (monthOptions.months.find(m => m.value === selectedMonth)?.label || selectedMonth) : monthOptions.all.label);
         const monthDropdownItems = [
-            `<div class="px-3 py-2 text-sm cursor-pointer rounded transition-colors ${!selectedMonth ? 'text-emerald-400 bg-emerald-500/10' : 'text-gray-300 hover:bg-white/10'}" onclick="setPunishmentsMonth('')">${monthOptions.all.label}</div>`,
+            `<button type="button" class="ui-select-item month-select-item ${!selectedMonth ? 'active' : ''}" onclick="setPunishmentsMonth('')">${monthOptions.all.label}</button>`,
             ...monthOptions.months.map(m =>
-                `<div class="px-3 py-2 text-sm cursor-pointer rounded transition-colors ${selectedMonth === m.value ? 'text-emerald-400 bg-emerald-500/10' : 'text-gray-300 hover:bg-white/10'}" onclick="setPunishmentsMonth('${escapeHtml(m.value)}')">${escapeHtml(m.label)}</div>`
+                `<button type="button" class="ui-select-item month-select-item ${selectedMonth === m.value ? 'active' : ''}" onclick="setPunishmentsMonth('${escapeHtml(m.value)}')">${escapeHtml(m.label)}</button>`
             )
         ].join('');
         const weekDropdownItems = weekOptions.map(w =>
-            `<div class="px-3 py-2 text-sm cursor-pointer rounded transition-colors ${(state.punishments.selectedWeekStart === w.value && isWeekMode) ? 'text-indigo-300 bg-indigo-500/10' : 'text-gray-300 hover:bg-white/10'}" onclick="setPunishmentsWeekStart('${escapeHtml(w.value)}')">Неделя: ${escapeHtml(w.label)}</div>`
+            `<button type="button" class="ui-select-item month-select-item ${(state.punishments.selectedWeekStart === w.value && isWeekMode) ? 'active' : ''}" onclick="setPunishmentsWeekStart('${escapeHtml(w.value)}')">Неделя: ${escapeHtml(w.label)}</button>`
         ).join('');
 
         const staffTableMode = state.punishments.staffTableMode === 'old' ? 'old' : 'new';
         const monthSelectHtml = `
             <div class="flex flex-wrap items-center gap-3 mb-4">
-                <div class="relative" id="monthDropdownWrap">
-                    <button type="button" onclick="toggleMonthDropdown()" class="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm hover:bg-white/10 transition-colors">
+                <div class="relative ui-select-wrap month-select-wrap" id="monthDropdownWrap">
+                    <button type="button" onclick="toggleMonthDropdown()" class="ui-select-trigger month-select-trigger">
                         <i class="ph ph-calendar-blank text-emerald-400"></i>
                         <span id="monthDropdownLabel">${escapeHtml(currentPeriodLabel)}</span>
                         <i class="ph ph-caret-down text-gray-500 text-xs"></i>
                     </button>
-                    <div id="monthDropdownList" class="hidden absolute left-0 top-full mt-1 z-50 w-52 max-h-64 overflow-y-auto bg-[#1a1a1a] border border-white/10 rounded-lg shadow-xl p-1" style="scrollbar-width:thin;scrollbar-color:#333 transparent">
+                    <div id="monthDropdownList" class="ui-select-menu month-select-menu hidden w-52">
                         ${monthDropdownItems}
                         ${weekOptions.length ? '<div class="my-1 border-t border-white/10"></div>' : ''}
                         ${weekDropdownItems}
@@ -1274,23 +1406,38 @@ function scheduleRenderPanel() {
     requestAnimationFrame(() => {
         _renderQueued = false;
         renderPanel();
+        const panel = document.getElementById('panelContent');
+        if (panel) initUiSelects(panel);
     });
 }
 
 function toggleMonthDropdown() {
     const list = document.getElementById('monthDropdownList');
+    const trigger = document.querySelector('#monthDropdownWrap .ui-select-trigger');
     if (list) list.classList.toggle('hidden');
+    if (trigger && list) trigger.classList.toggle('open', !list.classList.contains('hidden'));
 }
 
 document.addEventListener('click', function _monthClose(e) {
     const wrap = document.getElementById('monthDropdownWrap');
     const list = document.getElementById('monthDropdownList');
-    if (wrap && list && !wrap.contains(e.target)) list.classList.add('hidden');
+    if (wrap && list && !wrap.contains(e.target)) {
+        list.classList.add('hidden');
+        const trigger = wrap.querySelector('.ui-select-trigger');
+        if (trigger) trigger.classList.remove('open');
+    }
+});
+
+document.addEventListener('click', (e) => {
+    if (e.target.closest('.ui-select-menu') || e.target.closest('.ui-select-trigger')) return;
+    closeUiSelectMenu();
 });
 
 function setPunishmentsMonth(value) {
     const list = document.getElementById('monthDropdownList');
     if (list) list.classList.add('hidden');
+    const trigger = document.querySelector('#monthDropdownWrap .ui-select-trigger');
+    if (trigger) trigger.classList.remove('open');
     state.punishments.selectedMonth = value || null;
     state.punishments.statsPeriodMode = 'month';
     state.punishments.selectedWeekStart = null;
@@ -1313,6 +1460,8 @@ function setPunishmentsWeekStart(startYmd) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return;
     const list = document.getElementById('monthDropdownList');
     if (list) list.classList.add('hidden');
+    const trigger = document.querySelector('#monthDropdownWrap .ui-select-trigger');
+    if (trigger) trigger.classList.remove('open');
     state.punishments.statsPeriodMode = 'week';
     state.punishments.selectedWeekStart = s;
     state.punishments.staffStatsRows = null;
@@ -1912,7 +2061,7 @@ function buildSuspiciousRowHtml(p, index) {
     const serverPort = Number(p.serverPort);
     const canConnect = Boolean(serverName && serverIp && Number.isFinite(serverPort) && serverPort > 0);
     const connectBtnHtml = canConnect
-        ? `<a href="steam://connect/${encodeURIComponent(serverIp)}:${serverPort}" class="shrink-0 px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 text-[10px] font-semibold transition-colors max-w-[120px]" title="Подключиться к ${escapeHtml(serverName)}"><span class="inline-flex items-center gap-1 max-w-full">${serverGameIconHtml(p.serverGame)}<span class="truncate">${escapeHtml(serverName)}</span></span></a>`
+        ? `<a href="steam://connect/${encodeURIComponent(serverIp)}:${serverPort}" class="shrink-0 w-[150px] px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 text-[10px] font-semibold transition-colors" title="Подключиться к ${escapeHtml(serverName)}"><span class="inline-flex items-center gap-1 w-full">${serverGameIconHtml(p.serverGame)}<span class="truncate">${escapeHtml(serverName)}</span></span></a>`
         : '';
     const rCnt = getPlayerReportCount(sid);
     const rBadge = `<span data-report-sid="${sid}" class="ml-1 px-1.5 py-0.5 bg-red-500/20 text-red-400 text-[10px] font-bold rounded-full" style="display:${rCnt > 0 ? '' : 'none'}">${rCnt}</span>`;
@@ -1920,7 +2069,7 @@ function buildSuspiciousRowHtml(p, index) {
     const vis = getPlayersTableColumns();
     const cells = [];
     if (vis.num) cells.push(`<td data-column="num" class="py-3 px-3 text-white text-sm font-bold w-12">${index + 1}</td>`);
-    if (vis.player) cells.push(`<td data-column="player" class="py-3 px-3"><div class="flex items-center gap-3"><img src="${p.avatar || DEFAULT_AVATAR}" alt="${p.nickname || 'Player'}" class="w-9 h-9 rounded-full" onerror="this.src='${DEFAULT_AVATAR}'"><div class="min-w-0"><div class="flex items-center gap-1"><span class="text-white text-sm font-semibold truncate">${p.nickname || 'Unknown'}</span>${fBadge}${rBadge}</div><div class="mt-0.5 flex items-center justify-between gap-2"><div class="text-gray-500 text-xs font-mono truncate">${p.steamId}</div>${connectBtnHtml}</div></div></div></td>`);
+    if (vis.player) cells.push(`<td data-column="player" class="py-3 px-3"><div class="flex items-center gap-3"><img src="${p.avatar || DEFAULT_AVATAR}" alt="${p.nickname || 'Player'}" class="w-9 h-9 rounded-full" onerror="this.src='${DEFAULT_AVATAR}'"><div class="min-w-0"><div class="flex items-center gap-1"><span class="text-white text-sm font-semibold truncate">${p.nickname || 'Unknown'}</span>${fBadge}${rBadge}</div><div class="mt-0.5 flex items-center gap-2"><div class="text-gray-500 text-xs font-mono truncate">${p.steamId}</div>${connectBtnHtml}</div></div></div></td>`);
     if (vis.flags) cells.push(`<td data-column="flags" class="py-3 px-2"><div class="flex gap-1 flex-wrap">${flagsHtml}</div></td>`);
     if (vis.kd) cells.push(`<td data-column="kd" class="py-3 px-2"><div class="text-gray-400 text-xs font-semibold">${kd} <span class="text-gray-500">(${kills}/${deaths})</span></div></td>`);
     if (vis.accDate) cells.push(`<td data-column="accDate" class="py-3 px-2"><span id="acc-age-${sid}" class="text-gray-500 text-xs">...</span></td>`);
@@ -2108,19 +2257,19 @@ function buildAllPlayersTable(players) {
                         <button type="button" onclick="togglePlayersColumnsMenu(event)" class="px-3 py-2 text-xs font-semibold rounded-lg bg-white/[0.08] text-gray-300 hover:bg-white/[0.12] flex items-center gap-1.5">
                             Исключения <i class="ph ph-caret-down text-[10px]"></i>
                         </button>
-                        <div id="playersColumnsMenu" class="${state.columnsMenuOpen ? '' : 'hidden'} absolute right-0 top-full mt-1 py-2 px-3 bg-[#1a1a1f] border border-white/10 rounded-xl shadow-xl z-50 min-w-[140px]">
-                            <div class="text-[10px] uppercase tracking-wide text-gray-500 font-semibold px-2 pt-1 pb-1">Колонки</div>
+                        <div id="playersColumnsMenu" class="${state.columnsMenuOpen ? '' : 'hidden'} ui-select-menu players-columns-menu absolute right-0 top-full mt-1 rounded-xl shadow-xl z-50">
+                            <div class="text-[10px] uppercase tracking-wide text-gray-400 font-semibold px-2 pt-1 pb-1">Колонки</div>
                             ${PLAYERS_COLUMNS_DEF.map(c => {
                                 const v = getPlayersTableColumns();
                                 const checked = v[c.id] !== false;
-                                return `<label class="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-white/[0.06] cursor-pointer text-xs text-gray-200"><input type="checkbox" ${checked ? 'checked' : ''} onchange="togglePlayersColumn('${c.id}')" class="w-3.5 h-3.5 rounded border-white/20 bg-white/5">${c.label}</label>`;
+                                return `<label class="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-white/[0.08] cursor-pointer text-xs text-gray-100"><input type="checkbox" ${checked ? 'checked' : ''} onchange="togglePlayersColumn('${c.id}')" class="w-3.5 h-3.5 rounded border-white/20 bg-white/5">${c.label}</label>`;
                             }).join('')}
                             <div class="my-1 border-t border-white/10"></div>
-                            <div class="text-[10px] uppercase tracking-wide text-gray-500 font-semibold px-2 pt-1 pb-1">Исключать</div>
+                            <div class="text-[10px] uppercase tracking-wide text-gray-400 font-semibold px-2 pt-1 pb-1">Исключать</div>
                             ${(() => {
                                 const ex = getPlayersExclusions();
                                 const checked = ex.excludeCsgoServers ? 'checked' : '';
-                                return `<label class="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-white/[0.06] cursor-pointer text-xs text-gray-200" title="Скрывает игроков, которые сейчас находятся на CS:GO серверах."><input type="checkbox" ${checked} onchange="togglePlayersExclusion('excludeCsgoServers')" class="w-3.5 h-3.5 rounded border-white/20 bg-white/5"><span class="inline-flex items-center gap-1">${serverGameIconHtml('CSGO')}<span>CS:GO сервера</span></span></label>`;
+                                return `<label class="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-white/[0.08] cursor-pointer text-xs text-gray-100" title="Скрывает игроков, которые сейчас находятся на CS:GO серверах."><input type="checkbox" ${checked} onchange="togglePlayersExclusion('excludeCsgoServers')" class="w-3.5 h-3.5 rounded border-white/20 bg-white/5"><span class="inline-flex items-center gap-1">${serverGameIconHtml('CSGO')}<span>CS:GO сервера</span></span></label>`;
                             })()}
                         </div>
                     </div>
@@ -3279,12 +3428,22 @@ async function checkUpdateNotice() {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
+    // Anti-flicker: reveal UI only after session init.
+    const revealUi = () => { try { document.body.classList.remove('app-preload'); } catch (_) {} };
+    const preloadTimer = setTimeout(revealUi, 2000);
     const path = window.location.pathname;
-    if (path === '/auth' || path === '/auth/') return;
+    if (path === '/auth' || path === '/auth/') {
+        clearTimeout(preloadTimer);
+        revealUi();
+        return;
+    }
     applyLocalSettings();
+    loadRolesEditorAccessToken();
 
     const stored = localStorage.getItem('user');
     if (!stored || stored === 'null' || stored === 'undefined') {
+        clearTimeout(preloadTimer);
+        revealUi();
         window.location.href = '/auth';
         return;
     }
@@ -3293,6 +3452,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         const user = JSON.parse(stored);
     
         if (!user.sessionToken) {
+            clearTimeout(preloadTimer);
+            revealUi();
             localStorage.removeItem('user');
         window.location.href = '/auth';
         return;
@@ -3318,6 +3479,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                     steamId: data.steamId || null
                 }));
             } else if (res.status === 401) {
+                clearTimeout(preloadTimer);
+                revealUi();
                 localStorage.removeItem('user');
                 window.location.href = '/auth';
                 return;
@@ -3343,8 +3506,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         } else {
             if (adminPanel) adminPanel.classList.add('hidden');
         }
+        clearTimeout(preloadTimer);
+        revealUi();
         checkUpdateNotice();
     } catch (err) {
+        clearTimeout(preloadTimer);
+        revealUi();
         localStorage.removeItem('user');
         window.location.href = '/auth';
     }
@@ -3868,6 +4035,8 @@ function initSmoothWheelScrolling() {
         if (window.__smoothWheelEnabled !== true) return;
         if (e.ctrlKey || e.altKey || e.metaKey) return;
         if ((window.__smoothWheelMode || '') !== 'glide') return;
+        // Do not hijack wheel inside dropdown menus (they must scroll natively).
+        if (e.target && e.target.closest && e.target.closest('.ui-select-menu')) return;
         const el = getScrollParent(e.target);
         if (!el) return;
         const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
