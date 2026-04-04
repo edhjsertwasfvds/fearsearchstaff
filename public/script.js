@@ -1018,8 +1018,8 @@ function renderPanel() {
             const labels = arr.map(ymd => {
                 const [yy, mm, dd] = String(ymd).split('-').map(n => parseInt(n, 10));
                 const start = new Date(yy, (mm || 1) - 1, dd || 1, 12, 0, 0, 0);
-                const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-                const label = start.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' }) + ' — ' + end.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+                const endInclusive = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
+                const label = start.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' }) + ' — ' + endInclusive.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
                 return { value: ymd, label };
             });
             return labels;
