@@ -353,17 +353,6 @@
             inviteCodeBtn.textContent = 'Продолжить';
         };
 
-        function getNextPathFromUrl() {
-            try {
-                const p = new URLSearchParams(window.location.search);
-                const next = String(p.get('next') || '').trim();
-                if (!next) return '/';
-                // basic safety: only allow relative paths
-                if (next.startsWith('/') && !next.startsWith('//')) return next;
-            } catch (_) {}
-            return '/';
-        }
-
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorMsg.style.display = 'none';
@@ -387,9 +376,10 @@
                         username: data.user.username,
                         displayName: data.user.displayName,
                         level: data.user.level,
+                        sessionToken: data.sessionToken,
                         expiresAt: data.expiresAt
                     }));
-                    window.location.href = getNextPathFromUrl();
+                    window.location.href = '/';
                 } else {
                     errorMsg.textContent = data.error || 'Ошибка авторизации';
                     errorMsg.style.display = 'block';
@@ -429,9 +419,10 @@
                         username: data.user.username,
                         displayName: data.user.displayName,
                         level: data.user.level,
+                        sessionToken: data.sessionToken,
                         expiresAt: data.expiresAt
                     }));
-                    window.location.href = getNextPathFromUrl();
+                    window.location.href = '/';
                 } else {
                     errorMsg.textContent = data.error || 'Ошибка регистрации';
                     errorMsg.style.display = 'block';
@@ -445,16 +436,11 @@
             registerBtn.textContent = 'Зарегистрироваться';
         });
 
-        if (!inviteCode) {
-            // Если cookie-сессия уже есть — сразу уходим на next
-            fetch('/api/auth/session', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: '{}'
-            }).then(r => r.ok ? r.json() : null).then((data) => {
-                if (data && data.valid) window.location.href = getNextPathFromUrl();
-            }).catch(() => {});
+        if (localStorage.getItem('user') && !inviteCode) {
+            try {
+                const u = JSON.parse(localStorage.getItem('user'));
+                if (u && u.sessionToken) window.location.href = '/';
+            } catch (_) {}
         }
     </script>
     <script>
@@ -463,14 +449,16 @@
                 try {
                     const u = JSON.parse(localStorage.getItem('user') || '{}');
                     if ((u.level || 0) >= 5) return;
-                    const meRes = await fetch('/api/me', { credentials: 'same-origin' });
+                    if (u.sessionToken) {
+                        const meRes = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
                         if (meRes.ok) {
                             const me = await meRes.json();
                             if ((me.level || 0) >= 5) return;
                         }
+                    }
                 } catch (_) {}
                 const u2 = JSON.parse(localStorage.getItem('user') || '{}');
-                const r = await fetch('/api/maintenance', { credentials: 'same-origin' });
+                const r = await fetch('/api/maintenance', { headers: u2.sessionToken ? { 'Authorization': 'Bearer ' + u2.sessionToken } : {} });
                 const { active, message } = await r.json();
                 if (!active) return;
                 const el = document.createElement('div');

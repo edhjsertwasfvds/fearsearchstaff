@@ -1,19 +1,9 @@
 const auth = require('../auth');
 
-function getCookieValue(cookieHeader, name) {
-    if (!cookieHeader || !name) return '';
-    const re = new RegExp('(?:^|;\\s*)' + String(name).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '=([^;]+)', 'i');
-    const m = String(cookieHeader).match(re);
-    if (!m) return '';
-    try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; }
-}
-
 function getSessionFromReq(req) {
     const header = req.headers['authorization'] || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-    const tokenFromCookie = getCookieValue(req.headers.cookie || '', 'sessionToken');
-    const sessionToken = token || tokenFromCookie || '';
-    return sessionToken ? auth.getSession(sessionToken) : null;
+    return token ? auth.getSession(token) : null;
 }
 
 function sendJson(res, status, payload) {
@@ -44,7 +34,6 @@ function getAllowedMethodsForApiPath(pathname) {
     if (pathname === '/api/auth/session') return 'POST, OPTIONS';
     if (pathname === '/api/auth/register-by-invite') return 'POST, OPTIONS';
     if (pathname === '/api/auth/validate-invite') return 'GET, OPTIONS';
-    if (pathname === '/api/csrf') return 'GET, OPTIONS';
 
     if (pathname === '/api/users') return 'GET, POST, OPTIONS';
     if (/^\/api\/users\/\d+$/.test(pathname)) return 'PUT, DELETE, OPTIONS';

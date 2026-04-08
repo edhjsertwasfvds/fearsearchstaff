@@ -138,9 +138,7 @@
         <nav class="mt-6 flex justify-center gap-2" id="pagination" aria-label="Пагинация"></nav>
     </main>
 
-    <script src="/js/session.js"></script>
     <script>
-        const apiFetch = (window.App && window.App.session && window.App.session.apiFetch) ? window.App.session.apiFetch : fetch;
         let currentPage = 1;
         const itemsPerPage = 50;
         let allWhitelist = [];
@@ -151,8 +149,10 @@
 
         (async () => {
             try {
-                const res = await apiFetch('/api/me');
-                if (!res.ok) return;
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                if (!u.sessionToken) { window.location.href = '/auth'; return; }
+                const res = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                if (!res.ok) { window.location.href = '/auth'; return; }
                 const data = await res.json();
                 pageUserLevel = data.level || 0;
                 pageUserId = data.id != null ? String(data.id) : null;
@@ -198,7 +198,10 @@
         // Загрузка whitelist
         async function loadWhitelist() {
             try {
-                const response = await apiFetch('/api/whitelist');
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                const response = await fetch('/api/whitelist', {
+                    headers: { 'Authorization': 'Bearer ' + (u.sessionToken || '') }
+                });
                 const data = await response.json();
                 if (!response.ok) {
                     if (response.status === 401) { window.location.href = '/auth'; return; }
@@ -367,11 +370,19 @@
             if (!confirm(`Удалить ${nickname} из whitelist?`)) {
                 return;
             }
-            if (ws && ws.readyState === WebSocket.OPEN) {
+
+            let sessionToken = '';
+            try {
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                sessionToken = u.sessionToken || '';
+            } catch (_) {}
+
+            if (ws && ws.readyState === WebSocket.OPEN && sessionToken) {
                 ws.send(JSON.stringify({
                     type: 'remove_from_whitelist',
                     steamId: steamId,
-                    nickname: nickname
+                    nickname: nickname,
+                    sessionToken: sessionToken
                 }));
                 
                 console.log(`❌ Игрок ${nickname} удален из whitelist`);
@@ -389,13 +400,16 @@
                 try {
                     const u = JSON.parse(localStorage.getItem('user') || '{}');
                     if ((u.level || 0) >= 5) return;
-                    const meRes = await apiFetch('/api/me');
-                    if (meRes.ok) {
-                        const me = await meRes.json();
-                        if ((me.level || 0) >= 5) return;
+                    if (u.sessionToken) {
+                        const meRes = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                        if (meRes.ok) {
+                            const me = await meRes.json();
+                            if ((me.level || 0) >= 5) return;
+                        }
                     }
                 } catch (_) {}
-                const r = await apiFetch('/api/maintenance');
+                const u2 = JSON.parse(localStorage.getItem('user') || '{}');
+                const r = await fetch('/api/maintenance', { headers: u2.sessionToken ? { 'Authorization': 'Bearer ' + u2.sessionToken } : {} });
                 const { active, message } = await r.json();
                 if (!active) return;
                 const el = document.createElement('div');

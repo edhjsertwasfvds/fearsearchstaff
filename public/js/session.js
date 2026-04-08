@@ -26,41 +26,13 @@ function getUserLevel() {
     return getCurrentUser().level || 0;
 }
 
-function clearAuthAndRedirectToAuth() {
-    try { localStorage.removeItem('user'); } catch (_) {}
-    const next = (location && (location.pathname + location.search + location.hash)) || '/';
-    window.location.href = '/auth?next=' + encodeURIComponent(next);
+function getSessionToken() {
+    try { return (JSON.parse(localStorage.getItem('user') || '{}')).sessionToken || ''; } catch { return ''; }
 }
 
-let __csrfToken = '';
-async function ensureCsrfToken() {
-    if (__csrfToken) return __csrfToken;
-    const r = await fetch('/api/csrf', { method: 'GET', credentials: 'same-origin' });
-    if (r.status === 401) {
-        clearAuthAndRedirectToAuth();
-        throw new Error('Unauthorized');
-    }
-    if (!r.ok) throw new Error('Failed to get CSRF token');
-    const data = await r.json().catch(() => ({}));
-    __csrfToken = String(data.csrfToken || '').trim();
-    if (!__csrfToken) throw new Error('Invalid CSRF token');
-    return __csrfToken;
-}
-
-async function apiFetch(input, init) {
-    const opts = init ? { ...init } : {};
-    const method = String((opts.method || 'GET')).toUpperCase();
-    opts.credentials = 'same-origin';
-    opts.headers = { ...(opts.headers || {}) };
-    if (method !== 'GET' && method !== 'HEAD') {
-        const csrf = await ensureCsrfToken();
-        opts.headers['X-CSRF-Token'] = csrf;
-    }
-    const r = await fetch(input, opts);
-    if (r.status === 401) {
-        clearAuthAndRedirectToAuth();
-    }
-    return r;
+function apiAuthHeaders() {
+    const token = getSessionToken();
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 
 window.App = window.App || {};
@@ -70,8 +42,7 @@ window.App.session = {
     getCurrentUser,
     setCurrentUserPatch,
     getUserLevel,
-    apiFetch,
-    ensureCsrfToken,
-    clearAuthAndRedirectToAuth
+    getSessionToken,
+    apiAuthHeaders
 };
 

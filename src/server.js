@@ -145,52 +145,6 @@ const FEAR_API_HOST = 'api.fearproject.ru';
 const FEAR_ADMINS_LIST_PATH = '/admins/';
 const FEAR_ADMINS_EDIT_PATH = '/admins/edit';
 
-function getCookieValue(cookieHeader, name) {
-    if (!cookieHeader || !name) return '';
-    const re = new RegExp('(?:^|;\\s*)' + String(name).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '=([^;]+)', 'i');
-    const m = String(cookieHeader).match(re);
-    if (!m) return '';
-    try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; }
-}
-
-function getRequestOrigin(req) {
-    const xfProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
-    const proto = xfProto || (IS_PROD ? 'https' : 'http');
-    const host = String(req.headers.host || 'localhost');
-    return `${proto}://${host}`;
-}
-
-function isSameOriginRequest(req) {
-    const origin = String(req.headers.origin || '').trim();
-    if (!origin) return true; // non-browser / same-origin navigation
-    return origin === getRequestOrigin(req);
-}
-
-function csrfCookieOptions() {
-    const secure = IS_PROD ? 'Secure; ' : '';
-    return `Path=/; SameSite=Lax; ${secure}`;
-}
-
-function setCsrfCookie(res, token) {
-    const maxAge = 60 * 60; // 1 hour
-    const cookie = `XSRF-TOKEN=${encodeURIComponent(String(token || ''))}; ${csrfCookieOptions()}Max-Age=${maxAge}`;
-    res.setHeader('Set-Cookie', cookie);
-}
-
-function checkCsrf(req, res) {
-    const headerToken = String(req.headers['x-csrf-token'] || '').trim();
-    const cookieToken = String(getCookieValue(req.headers.cookie || '', 'XSRF-TOKEN') || '').trim();
-    if (!headerToken || !cookieToken || headerToken !== cookieToken) {
-        sendError(res, 403, 'CSRF', 'CSRF token missing or invalid');
-        return false;
-    }
-    if (!isSameOriginRequest(req)) {
-        sendError(res, 403, 'CSRF_ORIGIN', 'Origin mismatch');
-        return false;
-    }
-    return true;
-}
-
 function fearAdminsRequest(pathname, method, headers = {}, body = null) {
     return new Promise((resolve, reject) => {
         const payload = body ? JSON.stringify(body) : null;
@@ -1335,7 +1289,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (allowedOrigin) res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
     res.setHeader('Access-Control-Allow-Methods', allowMethods);
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key, X-CSRF-Token');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -1379,30 +1333,6 @@ const server = http.createServer(async (req, res) => {
         if (!isApiRequest) return;
         trackMetric(runtimeMetrics.api, `${req.method} ${req.url.split('?')[0]}`, nowMs() - reqStartedAt);
     });
-
-    // CSRF token (double-submit). Only for authenticated users.
-    if (parsedUrl.pathname === '/api/csrf' && req.method === 'GET') {
-        const session = requireSession(req, res, 0);
-        if (!session) return;
-        const token = crypto.randomBytes(32).toString('hex');
-        setCsrfCookie(res, token);
-        sendJson(res, 200, { csrfToken: token });
-        return;
-    }
-
-    // CSRF protection for state-changing API endpoints (cookie-only auth).
-    // Exclusions: endpoints that must work before having a session cookie.
-    const csrfExcluded = (
-        parsedUrl.pathname === '/api/auth/login' ||
-        parsedUrl.pathname === '/api/auth/register-by-invite' ||
-        parsedUrl.pathname === '/api/auth/validate-invite' ||
-        parsedUrl.pathname === '/api/auth/session' ||
-        parsedUrl.pathname === '/api/public-config'
-    );
-    const isStateChanging = (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.method === 'PATCH');
-    if (isApiRequest && isStateChanging && !csrfExcluded) {
-        if (!checkCsrf(req, res)) return;
-    }
 
     // Авторизация по логину/паролю
     if (req.url === '/api/auth/login' && req.method === 'POST') {
@@ -1814,24 +1744,24 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             try {
-                const parsed = body ? JSON.parse(body) : {};
-                const sessionToken = parsed && parsed.sessionToken ? String(parsed.sessionToken) : '';
-                const session = sessionToken ? auth.getSession(sessionToken) : getSessionFromReq(req);
-                if (session) {
+                const { sessionToken } = JSON.parse(body);
+                const validation = auth.validateSession(sessionToken);
+                
+                if (validation.valid) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({
                         valid: true,
                         session: {
-                            userId: session.userId,
-                            username: session.username,
-                            displayName: session.displayName,
-                            level: session.level,
-                            expiresAt: session.expiresAt
+                            userId: validation.session.userId,
+                            username: validation.session.username,
+                            displayName: validation.session.displayName,
+                            level: validation.session.level,
+                            expiresAt: validation.session.expiresAt
                         }
                     }));
                 } else {
                     res.writeHead(401, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ valid: false, error: 'UNAUTHORIZED' }));
+                    res.end(JSON.stringify({ valid: false, error: validation.error }));
                 }
             } catch (err) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1847,10 +1777,8 @@ const server = http.createServer(async (req, res) => {
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
             try {
-                const parsed = body ? JSON.parse(body) : {};
-                const sessionToken = parsed && parsed.sessionToken ? String(parsed.sessionToken) : '';
-                const token = sessionToken || String(getCookieValue(req.headers.cookie || '', 'sessionToken') || '');
-                if (token) auth.deleteSession(token);
+                const { sessionToken } = JSON.parse(body);
+                auth.deleteSession(sessionToken);
                 
                 const cookieSecure = IS_PROD ? 'Secure; ' : '';
                 res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `sessionToken=; Path=/; SameSite=Lax; ${cookieSecure}Max-Age=0` });
@@ -3281,23 +3209,6 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Last-Modified', lastModified);
         res.setHeader('ETag', etag);
         res.setHeader('Vary', 'Accept-Encoding');
-        if (isHtml) {
-            // Soft CSP (current HTML contains inline scripts/styles).
-            res.setHeader(
-                'Content-Security-Policy',
-                [
-                    "default-src 'self'",
-                    "base-uri 'self'",
-                    "object-src 'none'",
-                    "frame-ancestors 'none'",
-                    "img-src 'self' https: data:",
-                    "font-src 'self' https: data:",
-                    "style-src 'self' 'unsafe-inline' https:",
-                    "script-src 'self' 'unsafe-inline'",
-                    "connect-src 'self' https:"
-                ].join('; ')
-            );
-        }
 
         const inm = String(req.headers['if-none-match'] || '');
         const ims = String(req.headers['if-modified-since'] || '');

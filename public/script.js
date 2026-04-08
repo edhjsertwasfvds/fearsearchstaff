@@ -33,31 +33,6 @@ let rolesAutoResolveTimer = null;
 
 const DEFAULT_AVATAR = 'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
 
-const apiFetch = (window.App && window.App.session && window.App.session.apiFetch) ? window.App.session.apiFetch : fetch;
-
-let __toastWrap = null;
-function showToast(message, variant = 'info') {
-    const msg = String(message || '').trim();
-    if (!msg) return;
-    if (!__toastWrap) {
-        __toastWrap = document.createElement('div');
-        __toastWrap.id = 'appToasts';
-        __toastWrap.className = 'fixed top-4 right-4 z-[400] flex flex-col gap-2';
-        document.body.appendChild(__toastWrap);
-    }
-    const toast = document.createElement('div');
-    const base = 'px-4 py-3 rounded-xl border shadow-xl text-sm font-semibold max-w-[360px]';
-    const styles = variant === 'error'
-        ? 'bg-rose-500/15 border-rose-500/30 text-rose-200'
-        : (variant === 'success'
-            ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
-            : 'bg-white/10 border-white/15 text-gray-200');
-    toast.className = `${base} ${styles}`;
-    toast.textContent = msg;
-    __toastWrap.appendChild(toast);
-    setTimeout(() => { try { toast.remove(); } catch (_) {} }, 3200);
-}
-
 function closeUiSelectMenu() {
     if (!uiOpenSelectMenu) return;
     uiOpenSelectMenu.classList.add('hidden');
@@ -163,7 +138,7 @@ async function loadBoundSteamAvatar(steamId) {
         return;
     }
     try {
-        const res = await apiFetch('/api/steam-avatar/' + encodeURIComponent(sid));
+        const res = await fetch('/api/steam-avatar/' + encodeURIComponent(sid), { headers: apiAuthHeaders() });
         const data = await res.json().catch(() => ({}));
         const avatar = String(data?.avatar || '').trim();
         if (!avatar) {
@@ -481,7 +456,7 @@ function prefetchPunishmentsSummary() {
     if (_punishmentsPrefetchStarted) return;
     _punishmentsPrefetchStarted = true;
     state.punishments.loading = true;
-    apiFetch('/api/punishments')
+    fetch('/api/punishments', { headers: apiAuthHeaders() })
         .then(r => r.json())
         .catch(() => ({ count: 0, punishments: [] }))
         .then(d => {
@@ -759,14 +734,14 @@ async function fearFindAdminId(options = {}) {
     syncRolesEditorFromInputs();
     const token = state.rolesEditor.accessToken;
     const key = state.rolesEditor.steamid;
-    if (!token) { if (!silent) showToast('Вставь access token', 'error'); return false; }
-    if (!key) { if (!silent) showToast('Заполни steamid', 'error'); return false; }
+    if (!token) { if (!silent) alert('Вставь access token'); return false; }
+    if (!key) { if (!silent) alert('Заполни steamid'); return false; }
     if (!silent) appendRolesLog('Запрос списка админов...');
     scheduleRenderPanel();
     try {
-        const res = await apiFetch('/api/fear/admins/find', {
+        const res = await fetch('/api/fear/admins/find', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: apiAuthHeaders(),
             body: JSON.stringify({ accessToken: token, authMode: 'cookie', key })
         });
         const data = await res.json().catch(() => ({}));
@@ -810,30 +785,30 @@ async function fearApplyRoleEdit() {
     syncRolesEditorFromInputs();
     const token = state.rolesEditor.accessToken;
     const groupId = FEAR_GROUP_ID_BY_ROLE[state.rolesEditor.roleName];
-    if (!token) { showToast('Вставь access token', 'error'); return; }
-    if (!groupId) { showToast('Выбери роль', 'error'); return; }
-    if (!state.rolesEditor.steamid) { showToast('Заполни steamid', 'error'); return; }
+    if (!token) { alert('Вставь access token'); return; }
+    if (!groupId) { alert('Выбери роль'); return; }
+    if (!state.rolesEditor.steamid) { alert('Заполни steamid'); return; }
     if (!state.rolesEditor.adminId) {
         appendRolesLog('Поиск admin_id по steamid...');
         const resolved = await fearFindAdminId({ silent: true });
         if (!resolved || !state.rolesEditor.adminId) {
             appendRolesLog('Не удалось определить admin_id автоматически');
             scheduleRenderPanel();
-            showToast('Не удалось определить admin_id по steamid', 'error');
+            alert('Не удалось определить admin_id по steamid');
             return;
         }
     }
     const adminId = parseInt(state.rolesEditor.adminId, 10);
-    if (!Number.isFinite(adminId)) { showToast('Нужен корректный admin_id', 'error'); return; }
+    if (!Number.isFinite(adminId)) { alert('Нужен корректный admin_id'); return; }
     const resolvedName = String(state.rolesEditor.name || state.rolesEditor.steamid || '').trim();
     const payloadSnake = { admin_id: adminId, group_id: groupId, steamid: state.rolesEditor.steamid, name: resolvedName };
     const payloadCamel = { id: adminId, groupId: groupId, steamid: state.rolesEditor.steamid, name: resolvedName };
     appendRolesLog('Отправка /admins/edit (try #1 camelCase)...');
     scheduleRenderPanel();
     try {
-        const res1 = await apiFetch('/api/fear/admins/edit', {
+        const res1 = await fetch('/api/fear/admins/edit', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: apiAuthHeaders(),
             body: JSON.stringify({ accessToken: token, authMode: 'cookie', payload: payloadCamel })
         });
         const data1 = await res1.json().catch(() => ({}));
@@ -844,9 +819,9 @@ async function fearApplyRoleEdit() {
             return;
         }
         appendRolesLog('Отправка /admins/edit (try #2 snake_case)...');
-        const res2 = await apiFetch('/api/fear/admins/edit', {
+        const res2 = await fetch('/api/fear/admins/edit', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: apiAuthHeaders(),
             body: JSON.stringify({ accessToken: token, authMode: 'cookie', payload: payloadSnake })
         });
         const data2 = await res2.json().catch(() => ({}));
@@ -1530,7 +1505,7 @@ async function ensureStaffSecureLoaded() {
     if (state.punishments.secureLoaded) return true;
     if (getUserLevel() < 4) return false;
     try {
-        const res = await apiFetch('/secure/staff-stats-secure.js');
+        const res = await fetch('/secure/staff-stats-secure.js', { headers: apiAuthHeaders() });
         if (!res.ok) return false;
         const js = await res.text();
         const s = document.createElement('script');
@@ -1546,7 +1521,7 @@ async function ensureStaffSecureLoaded() {
 async function loadStaffPayConfig() {
     if (getUserLevel() < 4) return;
     try {
-        const res = await apiFetch('/api/staff-pay-config');
+        const res = await fetch('/api/staff-pay-config', { headers: apiAuthHeaders() });
         if (!res.ok) return;
         const cfg = await res.json().catch(() => ({}));
         if (window.StaffStatsSecure && typeof window.StaffStatsSecure.setConfig === 'function') {
@@ -1569,7 +1544,7 @@ async function loadStaffTicketsForSelectedMonth() {
     state.punishments.staffTicketsLoading = true;
     state.punishments.staffTicketsYm = ym;
     try {
-        const res = await apiFetch('/api/staff-tickets?ym=' + encodeURIComponent(ym));
+        const res = await fetch('/api/staff-tickets?ym=' + encodeURIComponent(ym), { headers: apiAuthHeaders() });
         if (res.status === 403) return;
         const data = await res.json().catch(() => ({}));
         const map = {};
@@ -1591,7 +1566,7 @@ async function loadStaffRoles() {
     if (state.punishments.staffRolesLoading) return;
     state.punishments.staffRolesLoading = true;
     try {
-        const res = await apiFetch('/api/staff-roles');
+        const res = await fetch('/api/staff-roles', { headers: apiAuthHeaders() });
         if (!res.ok) return;
         const data = await res.json().catch(() => ({}));
         const map = {};
@@ -1613,9 +1588,9 @@ async function saveStaffTickets(steamId, tickets) {
     if (getUserLevel() < 4) return;
     const ym = getEffectiveYm(state.punishments.selectedMonth);
     try {
-        const res = await apiFetch('/api/staff-tickets?ym=' + encodeURIComponent(ym), {
+        const res = await fetch('/api/staff-tickets?ym=' + encodeURIComponent(ym), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: apiAuthHeaders(),
             body: JSON.stringify({ steamId, tickets })
         });
         if (!res.ok) return;
@@ -1670,11 +1645,11 @@ async function loadStaffStatsFromServer() {
     if (getUserLevel() < 3) return;
     if (getUserLevel() >= 4) await ensureStaffSecureLoaded();
     try {
-        let res = await apiFetch('/api/punishments/staff-stats');
+        let res = await fetch('/api/punishments/staff-stats', { headers: apiAuthHeaders() });
         if (res.status === 403) return;
         let data = await res.json().catch(() => ({}));
         if (!data.lastUpdated || !data.staffStatsData || Object.keys(data.staffStatsData || {}).length === 0) {
-            const retry = await apiFetch('/api/punishments/staff-stats?force=1');
+            const retry = await fetch('/api/punishments/staff-stats?force=1', { headers: apiAuthHeaders() });
             if (retry.ok) {
                 data = await retry.json().catch(() => data);
             }
@@ -1789,7 +1764,7 @@ async function loadStaffBansStats() {
                 let loaded = false;
                 for (let attempt = 1; attempt <= 4; attempt++) {
                     try {
-                        const res = await apiFetch('/api/punishments?steamId=' + encodeURIComponent(sid));
+                        const res = await fetch('/api/punishments?steamId=' + encodeURIComponent(sid), { headers: apiAuthHeaders() });
                         if (res.status === 429) {
                             await sleep(900 * attempt);
                             continue;
@@ -1844,7 +1819,7 @@ async function loadPunishmentsBySteamId() {
     state.punishments.view = 'list';
     scheduleRenderPanel();
     try {
-        const res = await apiFetch('/api/punishments?steamId=' + encodeURIComponent(steamId));
+        const res = await fetch('/api/punishments?steamId=' + encodeURIComponent(steamId), { headers: apiAuthHeaders() });
         if (res.status === 403) {
             const err = await res.json().catch(() => ({}));
             state.punishments = {
@@ -2547,15 +2522,17 @@ function openSidePanel(category) {
         state.changesTab = 'roles';
     }
     if (category === 'Лаунчер') {
-        void apiFetch('/api/me')
-            .then((r) => (r.ok ? r.json() : null))
-            .then((data) => {
-                if (data && typeof data.launcherApiKey === 'string' && data.launcherApiKey) {
-                    state.launcherApiKey = data.launcherApiKey;
-                }
-                if (state.openCategory === 'Лаунчер') scheduleRenderPanel();
-            })
-            .catch(() => {});
+        const u = getCurrentUser();
+        if (u && u.sessionToken) {
+            void fetch('/api/me', { headers: { Authorization: 'Bearer ' + u.sessionToken } })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((data) => {
+                    if (data && typeof data.launcherApiKey === 'string' && data.launcherApiKey) {
+                        state.launcherApiKey = data.launcherApiKey;
+                    }
+                    if (state.openCategory === 'Лаунчер') scheduleRenderPanel();
+                });
+        }
     }
     if (category === 'Наказания') loadPunishmentsStaffList();
     if (category === 'Наказания') prefetchPunishmentsSummary();
@@ -3315,14 +3292,14 @@ function closeFriendsModal() {
 function addToWhitelist(steamId, nickname) {
     if (!confirm(`Отметить игрока "${nickname}" как чистого?`)) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'add_to_whitelist', steamId, nickname }));
+        ws.send(JSON.stringify({ type: 'add_to_whitelist', steamId, nickname, sessionToken: getSessionToken() }));
     }
 }
 
 function removeFromWhitelist(steamId, nickname) {
     if (!confirm(`Удалить "${nickname}" из whitelist?`)) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'remove_from_whitelist', steamId, nickname }));
+        ws.send(JSON.stringify({ type: 'remove_from_whitelist', steamId, nickname, sessionToken: getSessionToken() }));
     }
 }
 
@@ -3386,14 +3363,16 @@ function openFlagsMenu(x, y) {
     try {
         const u = getCurrentUser();
         if ((u.level || 0) >= 5) return;
-        try {
-            const meRes = await apiFetch('/api/me');
-            if (meRes.ok) {
-                const me = await meRes.json();
-                if ((me.level || 0) >= 5) return;
-            }
-        } catch (_) {}
-        const res = await apiFetch('/api/maintenance');
+        if (u.sessionToken) {
+            try {
+                const meRes = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                if (meRes.ok) {
+                    const me = await meRes.json();
+                    if ((me.level || 0) >= 5) return;
+                }
+            } catch (_) {}
+        }
+        const res = await fetch('/api/maintenance', { headers: u.sessionToken ? { 'Authorization': 'Bearer ' + u.sessionToken } : {} });
         const { active, message } = await res.json();
         if (!active) return;
         let el = document.getElementById('maintenanceBanner');
@@ -3412,7 +3391,7 @@ function openFlagsMenu(x, y) {
 
 async function checkUpdateNotice() {
     try {
-        const res = await apiFetch('/api/update-notice');
+        const res = await fetch('/api/update-notice');
         if (!res.ok) return;
         const data = await res.json();
         if (!data?.active || !data?.message || !data?.id || data.id === '0') return;
@@ -3467,27 +3446,54 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     applyLocalSettings();
     loadRolesEditorAccessToken();
+
+    const stored = localStorage.getItem('user');
+    if (!stored || stored === 'null' || stored === 'undefined') {
+        clearTimeout(preloadTimer);
+        revealUi();
+        window.location.href = '/auth';
+        return;
+    }
+    
     try {
-        const res = await apiFetch('/api/me');
-        if (!res.ok) return; // apiFetch обработает 401 редиректом
-        const data = await res.json().catch(() => ({}));
-        const level = typeof data.level === 'number' ? data.level : 0;
-        state.userLevel = level;
-        if (data.id != null) state.userId = String(data.id);
-        if (data.steamId) state.userSteamId = String(data.steamId);
-        if (typeof data.launcherApiKey === 'string' && data.launcherApiKey) {
-            state.launcherApiKey = data.launcherApiKey;
-        }
+        const user = JSON.parse(stored);
+    
+        if (!user.sessionToken) {
+            clearTimeout(preloadTimer);
+            revealUi();
+            localStorage.removeItem('user');
+        window.location.href = '/auth';
+        return;
+    }
+    
+        let level = user.level || 0;
+        if (user.id != null) state.userId = String(user.id);
         try {
-            localStorage.setItem('user', JSON.stringify({
-                id: data.id ?? null,
-                username: data.username || '',
-                displayName: data.displayName || '',
-                level,
-                steamId: data.steamId || null,
-                expiresAt: null
-            }));
+            const res = await fetch('/api/me', {
+                headers: { 'Authorization': 'Bearer ' + user.sessionToken }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (typeof data.level === 'number') level = data.level;
+                if (data.id != null) state.userId = String(data.id);
+                if (data.steamId) state.userSteamId = String(data.steamId);
+                if (typeof data.launcherApiKey === 'string' && data.launcherApiKey) {
+                    state.launcherApiKey = data.launcherApiKey;
+                }
+                localStorage.setItem('user', JSON.stringify({
+                    ...user,
+                    level,
+                    steamId: data.steamId || null
+                }));
+            } else if (res.status === 401) {
+                clearTimeout(preloadTimer);
+                revealUi();
+                localStorage.removeItem('user');
+                window.location.href = '/auth';
+                return;
+            }
         } catch (_) {}
+        state.userLevel = level;
 
         const adminPanel = document.getElementById('adminPanel');
         const loginButton = document.getElementById('loginButton');
@@ -3497,9 +3503,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                 adminPanel.classList.remove('hidden');
                 const nameEl = document.getElementById('userName');
                 const avatarEl = document.getElementById('userAvatar');
-                if (nameEl) nameEl.textContent = data.displayName || data.username || 'User';
+                if (nameEl) nameEl.textContent = user.displayName || user.username;
                 if (avatarEl) avatarEl.style.display = 'none';
-                loadBoundSteamAvatar(state.userSteamId || data.steamId || '');
+                loadBoundSteamAvatar(state.userSteamId || user.steamId || '');
             }
             if (loginButton) loginButton.style.display = 'none';
 
@@ -3546,8 +3552,14 @@ function applyLevelRestrictions(level) {
 }
 
 function logout() {
-    apiFetch('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-        .catch((e) => { console.warn('Logout request failed:', e); });
+    const user = getCurrentUser();
+    if (user.sessionToken) {
+        fetch('/api/auth/logout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionToken: user.sessionToken })
+        }).catch((e) => { console.warn('Logout request failed:', e); });
+    }
     localStorage.removeItem('user');
     window.location.href = '/auth';
 }
@@ -3866,10 +3878,14 @@ async function addComment(steamId) {
     const input = document.getElementById('commentInput');
     const comment = input.value.trim();
     if (!comment) return;
+    const token = getSessionToken();
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
     try {
-        const res = await apiFetch('/api/comments', {
+        const res = await fetch('/api/comments', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
+            credentials: 'include',
             body: JSON.stringify({ steamId, comment })
         });
         const data = await res.json().catch(() => ({}));

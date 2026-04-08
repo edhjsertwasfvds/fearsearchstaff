@@ -557,61 +557,27 @@
     </div>
 
     <script>
-        // Auth bootstrap (cookie-only):
-        // - Проверяем сессию через API
-        // - Если не авторизован -> редирект на /auth?next=...
-        // - Если авторизован -> грузим защищённые JS ассеты
+        // Bootstrap: чтобы авторизованные пользователи могли загрузить защищенные .js ассеты.
+        // Пользовательский токен хранится в localStorage, поэтому кладем его в cookie до загрузки JS.
         (function () {
-            function clearAuth() {
-                try { localStorage.removeItem('user'); } catch (_) {}
+            try {
+                var raw = localStorage.getItem('user');
+                var u = raw ? JSON.parse(raw) : null;
+                var token = u && u.sessionToken;
+                if (!token) return;
+                var hasCookie = false;
                 try {
-                    var secure = location && location.protocol === 'https:' ? 'Secure; ' : '';
-                    document.cookie = 'sessionToken=; Path=/; SameSite=Lax; ' + secure + 'Max-Age=0';
-                    document.cookie = 'XSRF-TOKEN=; Path=/; SameSite=Lax; ' + secure + 'Max-Age=0';
+                    hasCookie = String(document.cookie || '').split(';').some(function (c) {
+                        return String(c).trim().startsWith('sessionToken=');
+                    });
                 } catch (_) {}
-            }
-            function redirectToAuth() {
-                var next = '';
-                try { next = (location && (location.pathname + location.search + location.hash)) || '/'; } catch (_) { next = '/'; }
-                location.href = '/auth?next=' + encodeURIComponent(next);
-            }
-            function loadScript(src) {
-                return new Promise(function (resolve, reject) {
-                    var s = document.createElement('script');
-                    s.src = src;
-                    s.async = false;
-                    s.onload = function () { resolve(); };
-                    s.onerror = function () { reject(new Error('Failed to load: ' + src)); };
-                    document.body.appendChild(s);
-                });
-            }
-
-            fetch('/api/auth/session', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: '{}'
-            }).then(function (r) {
-                if (!r.ok) throw new Error('Session invalid');
-                return r.json();
-            }).then(function (data) {
-                if (!data || !data.valid) throw new Error('Session invalid');
-                try {
-                    var session = data.session || {};
-                    localStorage.setItem('user', JSON.stringify({
-                        id: session.userId,
-                        username: session.username,
-                        displayName: session.displayName,
-                        level: session.level || 0,
-                        expiresAt: session.expiresAt
-                    }));
-                } catch (_) {}
-                return loadScript('/js/session.js').then(function () { return loadScript('/script.js'); });
-            }).catch(function () {
-                clearAuth();
-                redirectToAuth();
-            });
+                if (hasCookie) return;
+                var secure = location && location.protocol === 'https:' ? 'Secure; ' : '';
+                document.cookie = 'sessionToken=' + encodeURIComponent(token) + '; Path=/; SameSite=Lax; ' + secure;
+            } catch (_) {}
         })();
     </script>
+    <script src="/js/session.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>

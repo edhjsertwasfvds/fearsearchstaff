@@ -212,9 +212,7 @@
         <nav class="mt-6 flex justify-center gap-2" id="pagination" aria-label="Пагинация"></nav>
     </main>
 
-    <script src="/js/session.js"></script>
     <script>
-        const apiFetch = (window.App && window.App.session && window.App.session.apiFetch) ? window.App.session.apiFetch : fetch;
         let currentPage = 1;
         const logsPerPage = 50;
         let allLogs = [];
@@ -289,8 +287,10 @@
 
         (async () => {
             try {
-                const res = await apiFetch('/api/me');
-                if (!res.ok) return;
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                if (!u.sessionToken) { window.location.href = '/auth'; return; }
+                const res = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                if (!res.ok) { window.location.href = '/auth'; return; }
                 const data = await res.json();
                 if ((data.level || 0) < 3) { window.location.href = '/'; return; }
             } catch (_) { window.location.href = '/auth'; return; }
@@ -300,7 +300,10 @@
 
         async function loadLogs() {
             try {
-                const response = await apiFetch('/api/logs');
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                const response = await fetch('/api/logs', {
+                    headers: { 'Authorization': 'Bearer ' + (u.sessionToken || '') }
+                });
                 const data = await response.json();
                 if (!response.ok) {
                     if (response.status === 403) { window.location.href = '/'; return; }
@@ -423,13 +426,16 @@
                 try {
                     const u = JSON.parse(localStorage.getItem('user') || '{}');
                     if ((u.level || 0) >= 5) return;
-                    const meRes = await apiFetch('/api/me');
-                    if (meRes.ok) {
-                        const me = await meRes.json();
-                        if ((me.level || 0) >= 5) return;
+                    if (u.sessionToken) {
+                        const meRes = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + u.sessionToken } });
+                        if (meRes.ok) {
+                            const me = await meRes.json();
+                            if ((me.level || 0) >= 5) return;
+                        }
                     }
                 } catch (_) {}
-                const r = await apiFetch('/api/maintenance');
+                const u2 = JSON.parse(localStorage.getItem('user') || '{}');
+                const r = await fetch('/api/maintenance', { headers: u2.sessionToken ? { 'Authorization': 'Bearer ' + u2.sessionToken } : {} });
                 const { active, message } = await r.json();
                 if (!active) return;
                 const el = document.createElement('div');

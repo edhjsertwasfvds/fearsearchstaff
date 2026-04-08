@@ -1,14 +1,6 @@
 const WebSocket = require('ws');
 const https = require('https');
 
-function getCookieValue(cookieHeader, name) {
-    if (!cookieHeader || !name) return '';
-    const re = new RegExp('(?:^|;\\s*)' + String(name).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&') + '=([^;]+)', 'i');
-    const m = String(cookieHeader).match(re);
-    if (!m) return '';
-    try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; }
-}
-
 function attachWss({
     server,
     auth,
@@ -40,18 +32,13 @@ function attachWss({
         ws._clientMeta = { ip: wsIp, ua: wsUa, origin: wsOrigin };
         console.log(`[WS] connected ip=${wsIp} origin=${wsOrigin} ua="${wsUa}"`);
 
-        const cookieToken = getCookieValue(req?.headers?.cookie || '', 'sessionToken');
-        ws._session = cookieToken ? auth.getSession(String(cookieToken)) : null;
-
         // Отправляем текущие данные сразу при подключении
         sendCurrentData(ws);
 
         ws.on('message', (message) => {
             try {
                 const data = JSON.parse(message.toString());
-                // cookie-only: авторизация берётся из handshake cookie.
-                // для обратной совместимости поддерживаем sessionToken в payload, но cookie приоритетнее.
-                const sid = ws._session || (data && data.sessionToken ? auth.getSession(String(data.sessionToken)) : null);
+                const sid = data && data.sessionToken ? auth.getSession(String(data.sessionToken)) : null;
                 const type = data && data.type ? String(data.type) : 'unknown';
                 const steamId = data && data.steamId != null ? String(data.steamId) : '-';
                 console.log(
@@ -137,7 +124,7 @@ function attachWss({
                         });
                     }
                 } else if (data.type === 'add_to_whitelist') {
-                    const session = sid;
+                    const session = data.sessionToken ? auth.getSession(data.sessionToken) : null;
                     if (!session || session.level < 1) {
                         if (ws.readyState === WebSocket.OPEN) {
                             ws.send(JSON.stringify({ type: 'error', message: 'Войдите для добавления в чистые' }));
@@ -169,7 +156,7 @@ function attachWss({
                         }
                     }
                 } else if (data.type === 'remove_from_whitelist') {
-                    const session = sid;
+                    const session = data.sessionToken ? auth.getSession(data.sessionToken) : null;
                     if (!session || session.level < 1) {
                         if (ws.readyState === WebSocket.OPEN) {
                             ws.send(JSON.stringify({ type: 'error', message: 'Войдите для удаления из чистых' }));

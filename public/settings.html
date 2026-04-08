@@ -357,38 +357,16 @@
         </div>
     </main>
 
-    <script src="/js/session.js"></script>
     <script>
         let currentUserLevel = 0;
+        let sessionToken = '';
         let activityRange = 'week';
         let currentSettingsTab = 'server';
         let uiOpenSelectMenu = null;
         const panelVisibilityState = { activity: false, staff: false };
-        const apiFetch = (window.App && window.App.session && window.App.session.apiFetch) ? window.App.session.apiFetch : fetch;
-        let __toastWrap = null;
-        function showToast(message, variant = 'info') {
-            const msg = String(message || '').trim();
-            if (!msg) return;
-            if (!__toastWrap) {
-                __toastWrap = document.createElement('div');
-                __toastWrap.className = 'fixed top-4 right-4 z-[400] flex flex-col gap-2';
-                document.body.appendChild(__toastWrap);
-            }
-            const el = document.createElement('div');
-            const base = 'px-4 py-3 rounded-xl border shadow-xl text-sm font-semibold max-w-[420px]';
-            const styles = variant === 'error'
-                ? 'bg-rose-500/15 border-rose-500/30 text-rose-200'
-                : (variant === 'success'
-                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
-                    : 'bg-white/10 border-white/15 text-gray-200');
-            el.className = `${base} ${styles}`;
-            el.textContent = msg;
-            __toastWrap.appendChild(el);
-            setTimeout(() => { try { el.remove(); } catch (_) {} }, 3200);
-        }
 
         function authHeaders() {
-            return { 'Content-Type': 'application/json' };
+            return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sessionToken };
         }
         function esc(s) {
             const d = document.createElement('div');
@@ -526,26 +504,23 @@
         }
 
         window.addEventListener('DOMContentLoaded', async () => {
+            const stored = localStorage.getItem('user');
+            if (!stored) { window.location.href = '/auth'; return; }
+            const user = JSON.parse(stored);
+            sessionToken = user.sessionToken || '';
+            if (!sessionToken) { window.location.href = '/auth'; return; }
+
             try {
-                const res = await apiFetch('/api/me');
-                if (!res.ok) return;
+                const res = await fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + sessionToken } });
+                if (!res.ok) { window.location.href = '/auth'; return; }
                 const data = await res.json();
                 currentUserLevel = data.level || 0;
-                try {
-                    localStorage.setItem('user', JSON.stringify({
-                        id: data.id ?? null,
-                        username: data.username || '',
-                        displayName: data.displayName || '',
-                        level: currentUserLevel,
-                        steamId: data.steamId || null,
-                        expiresAt: null
-                    }));
-                } catch (_) {}
-                document.getElementById('userName').textContent = data.displayName || data.username || 'User';
             } catch (_) { window.location.href = '/auth'; return; }
 
             if (currentUserLevel < 4) { window.location.href = '/'; return; }
             const isLevel5 = currentUserLevel >= 5;
+
+            document.getElementById('userName').textContent = user.displayName || user.username;
             if (currentUserLevel >= 5) {
                 document.querySelectorAll('[data-requires-level5="true"]').forEach((el) => el.classList.remove('hidden'));
                 loadInviteCodes();
@@ -565,7 +540,7 @@
 
         async function loadStaffNorms() {
             try {
-                const res = await apiFetch('/api/settings', { headers: authHeaders() });
+                const res = await fetch('/api/settings', { headers: authHeaders() });
                 if (!res.ok) return;
                 const settings = await res.json().catch(() => ({}));
                 const getN = (k) => {
@@ -590,7 +565,7 @@
             const wp = parseInt(document.getElementById('normWeekPunish')?.value || '0', 10) || 0;
             const wt = parseInt(document.getElementById('normWeekTickets')?.value || '0', 10) || 0;
             try {
-                const res = await apiFetch('/api/settings', {
+                const res = await fetch('/api/settings', {
                     method: 'POST',
                     headers: authHeaders(),
                     body: JSON.stringify({
@@ -602,18 +577,18 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok || data.error) {
-                    showToast(data.error || 'Не удалось сохранить', 'error');
+                    alert(data.error || 'Не удалось сохранить');
                     return;
                 }
-                showToast('Нормы сохранены', 'success');
+                alert('Нормы сохранены');
             } catch (_) {
-                showToast('Ошибка сохранения', 'error');
+                alert('Ошибка сохранения');
             }
         }
 
         async function loadMaintenanceStatus() {
             try {
-                const res = await apiFetch('/api/maintenance');
+                const res = await fetch('/api/maintenance');
                 const { active, message } = await res.json();
                 const btn = document.getElementById('maintenanceBtn');
                 const msg = document.getElementById('maintenanceMessage');
@@ -625,18 +600,18 @@
 
         async function toggleMaintenance() {
             try {
-                const res = await apiFetch('/api/maintenance');
+                const res = await fetch('/api/maintenance');
                 const { active } = await res.json();
                 const msg = document.getElementById('maintenanceMessage').value.trim();
                 const newActive = !active;
-                await apiFetch('/api/maintenance', {
+                await fetch('/api/maintenance', {
                     method: 'POST',
                     headers: authHeaders(),
                     body: JSON.stringify({ active: newActive, message: msg || undefined })
                 });
                 loadMaintenanceStatus();
-                showToast(newActive ? 'Тех. работы включены' : 'Тех. работы выключены', 'success');
-            } catch (_) { showToast('Ошибка', 'error'); }
+                alert(newActive ? 'Уведомление о техработах включено' : 'Уведомление выключено');
+            } catch (_) { alert('Ошибка'); }
         }
 
         let lastGeneratedCode = '';
@@ -648,7 +623,7 @@
                 return;
             }
             try {
-                const res = await apiFetch('/api/users/reset', { method: 'DELETE', headers: authHeaders() });
+                const res = await fetch('/api/users/reset', { method: 'DELETE', headers: authHeaders() });
                 const data = await res.json();
                 if (data.error) { alert(data.error); return; }
                 alert('Все пользователи удалены. Добавьте пользователя в DEFAULT_USERS в .env и перезапустите сервер.');
@@ -659,7 +634,7 @@
 
         async function restoreFromEnv() {
             try {
-                const res = await apiFetch('/api/users/restore-env', { method: 'POST', headers: authHeaders() });
+                const res = await fetch('/api/users/restore-env', { method: 'POST', headers: authHeaders() });
                 const data = await res.json();
                 if (data.error) { alert(data.error); return; }
                 alert(data.restored ? `Восстановлено пользователей: ${data.restored}` : 'Все пользователи из .env уже существуют.');
@@ -669,7 +644,7 @@
 
         async function loadInviteCodes() {
             try {
-                const res = await apiFetch('/api/invites?used=1', { headers: authHeaders() });
+                const res = await fetch('/api/invites?used=1', { headers: authHeaders() });
                 const { codes } = await res.json();
                 const el = document.getElementById('inviteCodesList');
                 if (!codes || codes.length === 0) { el.innerHTML = '<p class="text-gray-500">Нет кодов</p>'; return; }
@@ -691,7 +666,7 @@
             if (!cleanCode) return;
             if (!confirm(`Удалить пригласительный код "${cleanCode}"?`)) return;
             try {
-                const res = await apiFetch('/api/invites/' + encodeURIComponent(cleanCode), {
+                const res = await fetch('/api/invites/' + encodeURIComponent(cleanCode), {
                     method: 'DELETE',
                     headers: authHeaders()
                 });
@@ -710,7 +685,7 @@
         async function generateInvite() {
             const level = parseInt(document.getElementById('inviteLevel').value);
             try {
-                const res = await apiFetch('/api/invites/generate', {
+                const res = await fetch('/api/invites/generate', {
                     method: 'POST',
                     headers: authHeaders(),
                     body: JSON.stringify({ level })
@@ -728,12 +703,12 @@
         }
 
         function copyInviteCode() {
-            navigator.clipboard.writeText(lastGeneratedCode).then(() => showToast('Скопировано', 'success')).catch(() => showToast('Не удалось скопировать', 'error'));
+            navigator.clipboard.writeText(lastGeneratedCode).then(() => alert('Скопировано'));
         }
 
         async function loadUsers() {
             try {
-                const res = await apiFetch('/api/users', { headers: authHeaders() });
+                const res = await fetch('/api/users', { headers: authHeaders() });
                 if (!res.ok) {
                     document.getElementById('usersList').innerHTML = '<p class="text-gray-500 text-sm">Ошибка загрузки</p>';
                     return;
@@ -797,7 +772,7 @@
             const level = parseInt(document.getElementById('newUserLevel').value);
             if (!username || !password) { alert('Введите логин и пароль'); return; }
             try {
-                const res = await apiFetch('/api/users', {
+                const res = await fetch('/api/users', {
                     method: 'POST',
                     headers: authHeaders(),
                     body: JSON.stringify({ username, password, displayName: username, level })
@@ -812,7 +787,7 @@
 
         async function changeLevel(id, newLevel) {
             try {
-                const res = await apiFetch(`/api/users/${id}`, {
+                const res = await fetch(`/api/users/${id}`, {
                     method: 'PUT',
                     headers: authHeaders(),
                     body: JSON.stringify({ level: parseInt(newLevel) })
@@ -827,7 +802,7 @@
             const newPass = prompt(`Новый пароль для "${username}":`);
             if (!newPass) return;
             try {
-                const res = await apiFetch(`/api/users/${id}`, {
+                const res = await fetch(`/api/users/${id}`, {
                     method: 'PUT',
                     headers: authHeaders(),
                     body: JSON.stringify({ password: newPass })
@@ -863,7 +838,7 @@
 
         async function deleteUser(id, username) {
             if (!confirm(`Удалить пользователя "${username}"?`)) return;
-            const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE', headers: authHeaders() });
+            const res = await fetch(`/api/users/${id}`, { method: 'DELETE', headers: authHeaders() });
             const data = await res.json();
             if (data.error) { alert(data.error); return; }
             loadUsers();
@@ -879,7 +854,7 @@
             if (staffList) staffList.innerHTML = '';
 
             try {
-                const res = await apiFetch('/api/staff', { headers: authHeaders() });
+                const res = await fetch('/api/staff', { headers: authHeaders() });
                 if (!res.ok) return;
                 const data = await res.json();
                 const list = Array.isArray(data.staffList) ? data.staffList : [];
@@ -887,7 +862,7 @@
                 // Подтягиваем роли для выплат (level >=3, редактирование только с 5 уровня).
                 staffRolesBySid = {};
                 try {
-                    const rRes = await apiFetch('/api/staff-roles', { headers: authHeaders() });
+                    const rRes = await fetch('/api/staff-roles', { headers: authHeaders() });
                     if (rRes.ok) {
                         const rData = await rRes.json().catch(() => ({}));
                         (Array.isArray(rData.roles) ? rData.roles : []).forEach(r => {
@@ -944,7 +919,7 @@
             const r = String(role || '').trim().toUpperCase();
             if (!sid) return;
             try {
-                const res = await apiFetch('/api/staff-roles', {
+                const res = await fetch('/api/staff-roles', {
                     method: 'POST',
                     headers: authHeaders(),
                     body: JSON.stringify({ steamId: sid, role: r })
@@ -963,7 +938,7 @@
 
         async function loadActivityChart() {
             try {
-                const res = await apiFetch('/api/activity?range=' + encodeURIComponent(activityRange), { headers: authHeaders() });
+                const res = await fetch('/api/activity?range=' + encodeURIComponent(activityRange), { headers: authHeaders() });
                 if (!res.ok) return;
                 const { activity } = await res.json();
                 const chart = document.getElementById('activityChart');
@@ -992,7 +967,7 @@
 
         async function loadUpdateNotice() {
             try {
-                const res = await apiFetch('/api/update-notice', { headers: authHeaders() });
+                const res = await fetch('/api/update-notice', { headers: authHeaders() });
                 if (!res.ok) return;
                 const data = await res.json();
                 const area = document.getElementById('updateNoticeMessage');
@@ -1006,7 +981,7 @@
             const message = (area?.value || '').trim();
             if (!message) { alert('Введите текст уведомления'); return; }
             try {
-                const res = await apiFetch('/api/update-notice', {
+                const res = await fetch('/api/update-notice', {
                     method: 'POST',
                     headers: authHeaders(),
                     body: JSON.stringify({ message })
@@ -1024,7 +999,7 @@
 
         async function clearUpdateNotice() {
             try {
-                const res = await apiFetch('/api/update-notice', {
+                const res = await fetch('/api/update-notice', {
                     method: 'POST',
                     headers: authHeaders(),
                     body: JSON.stringify({ message: '' })
