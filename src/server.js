@@ -1409,19 +1409,9 @@ const server = http.createServer(async (req, res) => {
         if (!checkLoginRateLimit(clientIp)) {
             res.writeHead(429, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Слишком много попыток входа. Подождите 5 минут.' }));
-        return;
-    }
+            return;
+        }
 
-    // Публичная конфигурация страницы авторизации (без секрета)
-    if (req.url === '/api/public-config' && req.method === 'GET') {
-        const supportUrl = String(process.env.AUTH_SUPPORT_URL || '').trim();
-        const supportLabel = String(process.env.AUTH_SUPPORT_LABEL || '').trim();
-        sendJson(res, 200, {
-            authSupportUrl: supportUrl || null,
-            authSupportLabel: supportLabel || null
-        });
-        return;
-    }
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
@@ -1455,6 +1445,17 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Invalid JSON' }));
             }
+        });
+        return;
+    }
+
+    // Публичная конфигурация страницы авторизации (без секрета)
+    if (req.url === '/api/public-config' && req.method === 'GET') {
+        const supportUrl = String(process.env.AUTH_SUPPORT_URL || '').trim();
+        const supportLabel = String(process.env.AUTH_SUPPORT_LABEL || '').trim();
+        sendJson(res, 200, {
+            authSupportUrl: supportUrl || null,
+            authSupportLabel: supportLabel || null
         });
         return;
     }

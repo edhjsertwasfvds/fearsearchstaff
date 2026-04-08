@@ -445,7 +445,7 @@
             registerBtn.textContent = 'Зарегистрироваться';
         });
 
-        if (!inviteCode) {
+        if (!inviteFromUrl) {
             // Если cookie-сессия уже есть — сразу уходим на next
             fetch('/api/auth/session', {
                 method: 'POST',
