@@ -3469,7 +3469,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     loadRolesEditorAccessToken();
     try {
         const res = await apiFetch('/api/me');
-        if (!res.ok) return; // apiFetch обработает 401 редиректом
+        if (!res.ok) {
+            // Не оставляем UI в “урезанном” состоянии без объяснения.
+            try { localStorage.removeItem('user'); } catch (_) {}
+            window.location.href = '/auth?next=' + encodeURIComponent(location.pathname + location.search + location.hash);
+            return;
+        }
         const data = await res.json().catch(() => ({}));
         const level = typeof data.level === 'number' ? data.level : 0;
         state.userLevel = level;

@@ -377,6 +377,7 @@
                 const res = await fetch('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     body: JSON.stringify({ username, password })
                 });
                 const data = await res.json();
@@ -419,6 +420,7 @@
                 const res = await fetch('/api/auth/register-by-invite', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
                     body: JSON.stringify({ username, password, inviteCode: code })
                 });
                 const data = await res.json();
