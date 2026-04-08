@@ -1443,7 +1443,7 @@ const server = http.createServer(async (req, res) => {
                 console.log(`[Auth] Пользователь авторизован: ${user.username} (id=${user.id}), level=${user.level}`);
                 const maxAge = Math.max(0, Math.floor((session.expiresAt - Date.now()) / 1000));
                 const cookieSecure = IS_PROD ? 'Secure; ' : '';
-                const cookie = `sessionToken=${encodeURIComponent(session.token)}; Path=/; SameSite=Lax; ${cookieSecure}Max-Age=${maxAge}`;
+                const cookie = `sessionToken=${encodeURIComponent(session.token)}; Path=/; SameSite=Lax; HttpOnly; ${cookieSecure}Max-Age=${maxAge}`;
                 res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': cookie });
                 res.end(JSON.stringify({
                     success: true,
@@ -1853,7 +1853,13 @@ const server = http.createServer(async (req, res) => {
                 if (token) auth.deleteSession(token);
                 
                 const cookieSecure = IS_PROD ? 'Secure; ' : '';
-                res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `sessionToken=; Path=/; SameSite=Lax; ${cookieSecure}Max-Age=0` });
+                res.writeHead(200, {
+                    'Content-Type': 'application/json',
+                    'Set-Cookie': [
+                        `sessionToken=; Path=/; SameSite=Lax; HttpOnly; ${cookieSecure}Max-Age=0`,
+                        `XSRF-TOKEN=; Path=/; SameSite=Lax; ${cookieSecure}Max-Age=0`
+                    ]
+                });
                 res.end(JSON.stringify({ success: true, message: 'Logged out' }));
             } catch (err) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -3282,7 +3288,7 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('ETag', etag);
         res.setHeader('Vary', 'Accept-Encoding');
         if (isHtml) {
-            // Soft CSP (current HTML contains inline scripts/styles).
+            // Soft CSP (current HTML contains inline scripts/styles + a few external CDNs).
             res.setHeader(
                 'Content-Security-Policy',
                 [
@@ -3292,7 +3298,7 @@ const server = http.createServer(async (req, res) => {
                     "frame-ancestors 'none'",
                     "img-src 'self' https: data:",
                     "font-src 'self' https: data:",
-                    "style-src 'self' 'unsafe-inline' https:",
+                    "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com",
                     "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com",
                     "connect-src 'self' https:"
                 ].join('; ')
