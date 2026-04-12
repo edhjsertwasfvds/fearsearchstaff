@@ -932,8 +932,8 @@ function renderPanel() {
         return;
     }
 
-    if (cat === 'Админы') {
-        title.textContent = 'Админы';
+    if (cat === 'Поиск') {
+        title.textContent = 'Поиск';
         content.innerHTML = buildBddStaffSearchPanel();
         return;
     }
@@ -2556,7 +2556,7 @@ function openSidePanel(category) {
     if (category === 'Лаунчер' && getUserLevel() < 5) {
         return;
     }
-    if (category === 'Админы' && getUserLevel() < 3) {
+    if (category === 'Поиск' && getUserLevel() < 3) {
         return;
     }
     const panel = document.getElementById('sidePanel');
@@ -3738,13 +3738,13 @@ function applyLevelRestrictions(level) {
     if (level === 3) {
         state.punishments.staffTableMode = 'old';
     }
-    if (level < 3 && state.openCategory === 'Админы') {
+    if (level < 3 && state.openCategory === 'Поиск') {
         closeSidePanel();
     }
-    const adminsNav = document.getElementById('navItemAdmins');
-    if (adminsNav) {
-        if (level >= 3) adminsNav.classList.remove('hidden');
-        else adminsNav.classList.add('hidden');
+    const searchNav = document.getElementById('navItemSearch');
+    if (searchNav) {
+        if (level >= 3) searchNav.classList.remove('hidden');
+        else searchNav.classList.add('hidden');
     }
     // Уровни 1-2: нет логов, настройки только локальные (без управления пользователями)
     if (level < 3) {
