@@ -10,6 +10,8 @@ const state = {
     allPlayers: { loading: false, players: [] },
     faceitLevels: {},
     openCategory: null,
+    /** Вкладка внутри «Проверка»: player | admins */
+    checkSubTab: 'player',
     userLevel: 0,
     userId: null,
     userSteamId: '',
@@ -879,7 +881,11 @@ function renderPanel() {
     const cat = state.openCategory;
     if (!cat) return;
 
-    if (cat === 'Проверка' && document.getElementById('checkInput')) return;
+    if (cat === 'Проверка') {
+        const sub = (state.checkSubTab === 'admins' && getUserLevel() >= 3) ? 'admins' : 'player';
+        if (sub === 'player' && document.getElementById('checkInput')) return;
+        if (sub === 'admins' && document.getElementById('bddStaffQuery')) return;
+    }
 
     title.textContent = cat;
 
@@ -929,12 +935,6 @@ function renderPanel() {
             staggerRows(content);
             requestAccountAgeFor(merged, 'steamId');
         }
-        return;
-    }
-
-    if (cat === 'Поиск') {
-        title.textContent = 'Поиск';
-        content.innerHTML = buildBddStaffSearchPanel();
         return;
     }
 
@@ -1424,7 +1424,22 @@ function renderPanel() {
     }
 
     if (cat === 'Проверка') {
-        content.innerHTML = `
+        const canStaffSearch = getUserLevel() >= 3;
+        let sub = state.checkSubTab === 'admins' && canStaffSearch ? 'admins' : 'player';
+        if (state.checkSubTab === 'admins' && !canStaffSearch) state.checkSubTab = 'player';
+
+        const tabBtn = (id, label) => {
+            const on = sub === id;
+            return `<button type="button" onclick="setCheckSubTab('${id}')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-colors border ${on ? 'bg-cyan-500/20 text-cyan-100 border-cyan-500/45' : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-gray-200'}">${escapeHtml(label)}</button>`;
+        };
+        const tabs = `
+            <div class="flex flex-wrap gap-2 mb-4 border-b border-white/10 pb-3">
+                ${tabBtn('player', 'Игрок')}
+                ${canStaffSearch ? tabBtn('admins', 'Админы') : ''}
+            </div>`;
+
+        if (sub === 'player') {
+            content.innerHTML = tabs + `
             <div class="px-1">
                 <div class="flex gap-2 mb-4">
                     <input type="text" id="checkInput" placeholder="SteamID игрока" autocomplete="off" class="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-cyan-500 transition-colors font-mono">
@@ -1432,15 +1447,25 @@ function renderPanel() {
                 </div>
                 <div id="checkResult" class="text-gray-400 text-sm text-center py-4">Введите SteamID для проверки</div>
             </div>`;
-        setTimeout(() => {
-            const inp = document.getElementById('checkInput');
-            if (inp) {
-                inp.focus();
-                inp.addEventListener('keydown', e => { if (e.key === 'Enter') runPlayerCheck(); });
-            }
-        }, 50);
+            setTimeout(() => {
+                const inp = document.getElementById('checkInput');
+                if (inp) {
+                    inp.focus();
+                    inp.addEventListener('keydown', e => { if (e.key === 'Enter') runPlayerCheck(); });
+                }
+            }, 50);
+        } else {
+            content.innerHTML = tabs + `<div class="px-1">${buildBddStaffSearchPanel()}</div>`;
+        }
         return;
     }
+}
+
+function setCheckSubTab(tab) {
+    if (tab === 'admins' && getUserLevel() < 3) return;
+    if (tab !== 'player' && tab !== 'admins') return;
+    state.checkSubTab = tab;
+    scheduleRenderPanel();
 }
 
 let _renderQueued = false;
@@ -2556,9 +2581,6 @@ function openSidePanel(category) {
     if (category === 'Лаунчер' && getUserLevel() < 5) {
         return;
     }
-    if (category === 'Поиск' && getUserLevel() < 3) {
-        return;
-    }
     const panel = document.getElementById('sidePanel');
     if (!panel) return;
     if (state.openCategory === category && panel.classList.contains('show')) {
@@ -3013,13 +3035,13 @@ function mergeAllPlayersWithBans(players) {
 function buildBddStaffSearchPanel() {
     return `
         <div class="space-y-4">
-            <p class="text-gray-400 text-sm leading-relaxed">Staff search (PostgreSQL <span class="text-gray-300 font-mono text-xs">admins</span> + <span class="text-gray-300 font-mono text-xs">profiles</span>). Search by <strong class="text-gray-300 font-normal">Steam ID</strong>, <strong class="text-gray-300 font-normal">Discord ID</strong>, or <strong class="text-gray-300 font-normal">Discord username</strong> only.</p>
+            <p class="text-gray-400 text-sm leading-relaxed">SteamId DIscordID Discord</p>
             <div class="flex flex-wrap gap-2 items-end">
                 <div class="flex-1 min-w-[220px]">
                     <label class="block text-gray-500 text-xs font-semibold mb-1">Query</label>
-                    <input type="text" id="bddStaffQuery" autocomplete="off" class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-sky-500/50" placeholder="Steam ID, Discord ID, or username" onkeydown="if(event.key==='Enter'){runBddStaffSearch()}">
+                    <input type="text" id="bddStaffQuery" autocomplete="off" class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-cyan-500/50" placeholder="Steam ID, Discord ID, or username" onkeydown="if(event.key==='Enter'){runBddStaffSearch()}">
                 </div>
-                <button type="button" onclick="runBddStaffSearch()" class="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-600 text-white text-sm font-semibold shrink-0">Search</button>
+                <button type="button" onclick="runBddStaffSearch()" class="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-600 text-white text-sm font-semibold shrink-0">Search</button>
             </div>
             <div id="bddStaffResults" class="text-gray-500 text-sm min-h-[48px]">Enter a query and press Search.</div>
         </div>`;
@@ -3093,7 +3115,7 @@ async function runBddStaffSearch() {
         out.innerHTML = '<span class="text-amber-400 text-sm">Enter at least 2 characters.</span>';
         return;
     }
-    out.innerHTML = '<div class="flex items-center gap-2 py-2"><div class="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div><span class="text-gray-500 text-sm">Loading…</span></div>';
+    out.innerHTML = '<div class="flex items-center gap-2 py-2"><div class="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div><span class="text-gray-500 text-sm">Loading…</span></div>';
     try {
         const res = await fetch('/api/bdd-staff/search?q=' + encodeURIComponent(q), {
             credentials: 'include',
@@ -3738,13 +3760,9 @@ function applyLevelRestrictions(level) {
     if (level === 3) {
         state.punishments.staffTableMode = 'old';
     }
-    if (level < 3 && state.openCategory === 'Поиск') {
-        closeSidePanel();
-    }
-    const searchNav = document.getElementById('navItemSearch');
-    if (searchNav) {
-        if (level >= 3) searchNav.classList.remove('hidden');
-        else searchNav.classList.add('hidden');
+    if (level < 3 && state.openCategory === 'Проверка' && state.checkSubTab === 'admins') {
+        state.checkSubTab = 'player';
+        scheduleRenderPanel();
     }
     // Уровни 1-2: нет логов, настройки только локальные (без управления пользователями)
     if (level < 3) {
