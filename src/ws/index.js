@@ -1,6 +1,23 @@
 const WebSocket = require('ws');
 const https = require('https');
 
+function getCookieValue(cookieHeader, name) {
+    if (!cookieHeader || !name) return '';
+    const parts = String(cookieHeader).split(';');
+    for (const part of parts) {
+        const idx = part.indexOf('=');
+        if (idx <= 0) continue;
+        const key = part.slice(0, idx).trim();
+        if (key !== name) continue;
+        try {
+            return decodeURIComponent(part.slice(idx + 1).trim());
+        } catch (_) {
+            return part.slice(idx + 1).trim();
+        }
+    }
+    return '';
+}
+
 function attachWss({
     server,
     auth,
@@ -30,6 +47,8 @@ function attachWss({
         const wsUa = truncateForLog(req?.headers?.['user-agent'] || '-', 220);
         const wsOrigin = truncateForLog(req?.headers?.origin || '-', 140);
         ws._clientMeta = { ip: wsIp, ua: wsUa, origin: wsOrigin };
+        const wsCookieSessionToken = getCookieValue(req?.headers?.cookie, 'sessionToken');
+        ws._session = wsCookieSessionToken ? auth.getSession(String(wsCookieSessionToken)) : null;
         console.log(`[WS] connected ip=${wsIp} origin=${wsOrigin} ua="${wsUa}"`);
 
         // Отправляем текущие данные сразу при подключении
@@ -38,7 +57,8 @@ function attachWss({
         ws.on('message', (message) => {
             try {
                 const data = JSON.parse(message.toString());
-                const sid = data && data.sessionToken ? auth.getSession(String(data.sessionToken)) : null;
+                const sidFromMessage = data && data.sessionToken ? auth.getSession(String(data.sessionToken)) : null;
+                const sid = sidFromMessage || ws._session || null;
                 const type = data && data.type ? String(data.type) : 'unknown';
                 const steamId = data && data.steamId != null ? String(data.steamId) : '-';
                 console.log(
@@ -61,9 +81,6 @@ function attachWss({
                     const level = sid && Number.isFinite(Number(sid.level)) ? Number(sid.level) : 0;
                     sendSuspiciousBans(ws, level);
                 } else if (data.type === 'get_all_players') {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7606/ingest/8eb7c909-b287-4c23-9dd2-e858bf2a1ece',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcb7ae'},body:JSON.stringify({sessionId:'dcb7ae',runId:'pre-fix-2',hypothesisId:'H6',location:'src/ws/index.js:onmessage(get_all_players)',message:'Received get_all_players request',data:{hasSession:Boolean(sid),sessionLevel:sid&&Number.isFinite(Number(sid.level))?Number(sid.level):0,wsReadyState:ws?.readyState??null},timestamp:Date.now()})}).catch(()=>{});
-                    // #endregion
                     sendAllPlayers(ws);
                 } else if (data.type === 'get_faceit_levels') {
                     sendFaceitLevels(ws);
@@ -127,7 +144,7 @@ function attachWss({
                         });
                     }
                 } else if (data.type === 'add_to_whitelist') {
-                    const session = data.sessionToken ? auth.getSession(data.sessionToken) : null;
+                    const session = sid;
                     if (!session || session.level < 1) {
                         if (ws.readyState === WebSocket.OPEN) {
                             ws.send(JSON.stringify({ type: 'error', message: 'Войдите для добавления в чистые' }));
@@ -159,7 +176,7 @@ function attachWss({
                         }
                     }
                 } else if (data.type === 'remove_from_whitelist') {
-                    const session = data.sessionToken ? auth.getSession(data.sessionToken) : null;
+                    const session = sid;
                     if (!session || session.level < 1) {
                         if (ws.readyState === WebSocket.OPEN) {
                             ws.send(JSON.stringify({ type: 'error', message: 'Войдите для удаления из чистых' }));

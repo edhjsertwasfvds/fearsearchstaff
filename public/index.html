@@ -25,7 +25,6 @@
     <link rel="preload" as="image" href="/images/lvl9.svg" type="image/svg+xml">
     <link rel="preload" as="image" href="/images/lvl10.svg" type="image/svg+xml">
     <style>
-        html { zoom: 80%; }
         body {
             font-family: 'Inter', sans-serif;
             background-color: #09090b;
@@ -461,6 +460,18 @@
                 </div>
             </div>
 
+            <div id="navItemAdmins" class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer hidden" data-category="Админы" onclick="openSidePanel('Админы', 'sky')">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-sky-500/10 flex items-center justify-center shrink-0">
+                        <i class="ph ph-users text-sky-400 text-xl"></i>
+                    </div>
+                    <span class="text-[15px] font-semibold text-gray-100">Админы</span>
+                </div>
+                <div class="h-8 px-3.5 rounded-full bg-sky-500/10 flex items-center justify-center border border-sky-500/20 shrink-0">
+                    <i class="ph ph-database text-sky-400 text-sm"></i>
+                </div>
+            </div>
+
             <div id="navItemLauncher" class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer hidden" data-category="Лаунчер" onclick="openSidePanel('Лаунчер', 'violet')">
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-full bg-violet-500/10 flex items-center justify-center shrink-0">
@@ -487,7 +498,7 @@
         </nav>
     </aside>
 
-    <main id="sidePanel" class="absolute top-12 left-1/2 -translate-x-1/2 w-[min(1400px,calc(100vw-620px))] max-w-[1400px]">
+    <main id="sidePanel" class="absolute top-12 left-1/2 -translate-x-1/2 w-[min(1200px,calc(100vw-700px))] max-w-[1200px]">
         <div class="glass-panel rounded-2xl overflow-hidden">
             <header class="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
                 <h2 id="panelTitle" class="text-white text-[16px] font-bold">Загрузка...</h2>
@@ -495,7 +506,7 @@
                     <i class="ph ph-x text-gray-400 text-lg"></i>
                 </button>
             </header>
-            <div id="panelContent" data-smooth-scroll-container="1" class="p-6 max-h-[94vh] overflow-y-auto hide-scrollbar">
+            <div id="panelContent" data-smooth-scroll-container="1" class="p-6 max-h-[80vh] overflow-y-auto hide-scrollbar">
                 <p class="text-gray-400 text-sm">Загрузка...</p>
             </div>
         </div>

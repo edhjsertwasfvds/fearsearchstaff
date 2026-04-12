@@ -477,6 +477,13 @@ function getSessionTokenFromCookie(cookieHeader) {
     return m ? decodeURIComponent(m[1]) : '';
 }
 
+function resolveUserSession(req) {
+    const s = getSessionFromReq(req);
+    if (s) return s;
+    const ck = getSessionTokenFromCookie(req.headers.cookie || '');
+    return ck ? auth.getSession(ck) : null;
+}
+
 // Функция для проверки банов на Yooma через WebSocket (быстрая параллельная проверка)
 function checkYoomaBans(steamIds, playerDataMap, progressCallback, finalCallback) {
     try {
@@ -1342,6 +1349,16 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Публичная конфигурация страницы авторизации (без секрета)
+    if (req.url === '/api/public-config' && req.method === 'GET') {
+        const supportUrl = String(process.env.AUTH_SUPPORT_URL || '').trim();
+        const supportLabel = String(process.env.AUTH_SUPPORT_LABEL || '').trim();
+        sendJson(res, 200, {
+            authSupportUrl: supportUrl || null,
+            authSupportLabel: supportLabel || null
+        });
+        return;
+    }
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
@@ -1375,17 +1392,6 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Invalid JSON' }));
             }
-        });
-        return;
-    }
-
-    // Публичная конфигурация страницы авторизации (без секрета)
-    if (req.url === '/api/public-config' && req.method === 'GET') {
-        const supportUrl = String(process.env.AUTH_SUPPORT_URL || '').trim();
-        const supportLabel = String(process.env.AUTH_SUPPORT_LABEL || '').trim();
-        sendJson(res, 200, {
-            authSupportUrl: supportUrl || null,
-            authSupportLabel: supportLabel || null
         });
         return;
     }
@@ -2124,6 +2130,44 @@ const server = http.createServer(async (req, res) => {
             steamId: user?.steamId || null,
             launcherApiKey: launcherApiKey || null
         });
+        return;
+    }
+
+    // Поиск стаффа в PostgreSQL (общая БД с VibeCodingBdd на Railway)
+    if (parsedUrl.pathname === '/api/bdd-staff/search' && req.method === 'GET') {
+        const session = resolveUserSession(req);
+        if (!session) {
+            sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+            return;
+        }
+        if (session.level < USER_LEVEL_WHITELIST) {
+            sendError(res, 403, 'FORBIDDEN', 'Раздел доступен с уровня 3');
+            return;
+        }
+        const bddStaffPg = require('./bddStaffPg');
+        if (!bddStaffPg.isConfigured()) {
+            sendJson(res, 503, {
+                code: 'BDD_PG_NOT_CONFIGURED',
+                error: 'Не задан BDD_DATABASE_URL или DATABASE_URL (подключи тот же Postgres, куда пишет VibeCodingBdd).'
+            });
+            return;
+        }
+        const q = (parsedUrl.searchParams.get('q') || '').trim();
+        if (q.length < 2) {
+            sendJson(res, 200, { ok: true, rows: [], hint: 'Минимум 2 символа' });
+            return;
+        }
+        try {
+            const rows = await bddStaffPg.searchBddStaff(q);
+            sendJson(res, 200, { ok: true, rows });
+        } catch (e) {
+            console.error('[bdd-staff/search]', e && e.message, e && e.code);
+            const msg =
+                e && e.code === '42P01'
+                    ? 'Таблицы admins/profiles не найдены. Запусти VibeCodingBdd хотя бы раз или примени db/init.sql.'
+                    : 'Ошибка запроса к PostgreSQL';
+            sendJson(res, 500, { code: 'BDD_PG_ERROR', error: msg });
+        }
         return;
     }
 
@@ -3731,9 +3775,6 @@ function sendAllPlayers(ws) {
     const cached = getCachedData('players');
     const defaultAvatar = 'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
     if (!cached) {
-        // #region agent log
-        fetch('http://127.0.0.1:7606/ingest/8eb7c909-b287-4c23-9dd2-e858bf2a1ece',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcb7ae'},body:JSON.stringify({sessionId:'dcb7ae',runId:'pre-fix',hypothesisId:'H5',location:'src/server.js:sendAllPlayers(no-cache)',message:'No cached players data, sending loading=true',data:{wsReadyState:ws?.readyState ?? null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'all_players', players: [], loading: true }));
         }
@@ -3757,10 +3798,7 @@ function sendAllPlayers(ws) {
             whitelisted: wl,
             whitelistAddedBy: wlEntry ? wlEntry.added_by_discord_id : null
         };
-    }).filter(p => !p.whitelisted);
-    // #region agent log
-    fetch('http://127.0.0.1:7606/ingest/8eb7c909-b287-4c23-9dd2-e858bf2a1ece',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcb7ae'},body:JSON.stringify({sessionId:'dcb7ae',runId:'pre-fix',hypothesisId:'H5',location:'src/server.js:sendAllPlayers(with-cache)',message:'Prepared all_players payload',data:{steamIdsCount:steamIds.size,playersCount:players.length,wsReadyState:ws?.readyState ?? null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+    });
     if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'all_players', players, loading: false }));
     }

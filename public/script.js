@@ -7,7 +7,7 @@ const state = {
     vac:   { loading: false, players: [] },
     yooma: { loading: false, players: [] },
     suspicious: { loading: false, players: [] },
-    allPlayers: { loading: true, players: [] },
+    allPlayers: { loading: false, players: [] },
     faceitLevels: {},
     openCategory: null,
     userLevel: 0,
@@ -28,6 +28,8 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 let playersPanelRefreshQueued = false;
 let playersPanelRefreshTimer = null;
+let playersLoadRetryTimer = null;
+let playersLoadRetryLeft = 0;
 let uiOpenSelectMenu = null;
 let rolesAutoResolveTimer = null;
 
@@ -409,15 +411,16 @@ function connectWebSocket() {
     ws = new WebSocket(wsUrl);
     
     ws.onopen = () => {
-        // #region agent log
-        fetch('http://127.0.0.1:7606/ingest/8eb7c909-b287-4c23-9dd2-e858bf2a1ece',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcb7ae'},body:JSON.stringify({sessionId:'dcb7ae',runId:'pre-fix',hypothesisId:'H1',location:'public/script.js:ws.onopen',message:'WebSocket opened',data:{readyState:ws?.readyState ?? null,openCategory:state?.openCategory ?? null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (reconnectTimer) {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
         }
         reconnectAttempts = 0;
         requestAll();
+        if (isPlayersCategoryOpen()) {
+            requestPlayersDataNow();
+            schedulePlayersLoadRetry();
+        }
     };
     
     ws.onmessage = (event) => {
@@ -452,6 +455,34 @@ function requestAll() {
     ws.send(JSON.stringify({ type: 'get_suspicious_bans', userLevel: level }));
     ws.send(JSON.stringify({ type: 'get_all_players' }));
     ws.send(JSON.stringify({ type: 'get_faceit_levels' }));
+}
+
+function requestPlayersDataNow() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const level = getUserLevel();
+    ws.send(JSON.stringify({ type: 'get_suspicious_bans', userLevel: level }));
+    ws.send(JSON.stringify({ type: 'get_all_players' }));
+}
+
+function schedulePlayersLoadRetry() {
+    if (playersLoadRetryTimer) {
+        clearTimeout(playersLoadRetryTimer);
+        playersLoadRetryTimer = null;
+    }
+    playersLoadRetryLeft = 5;
+    const tick = () => {
+        if (!isPlayersCategoryOpen()) return;
+        const stillLoading = state.allPlayers.loading && state.allPlayers.players.length === 0;
+        if (!stillLoading) return;
+        requestPlayersDataNow();
+        playersLoadRetryLeft -= 1;
+        if (playersLoadRetryLeft > 0) {
+            playersLoadRetryTimer = setTimeout(tick, 900);
+        } else {
+            playersLoadRetryTimer = null;
+        }
+    };
+    playersLoadRetryTimer = setTimeout(tick, 500);
 }
 
 let _punishmentsPrefetchStarted = false;
@@ -543,12 +574,13 @@ function applyMessage(data) {
         case 'all_players':
             if (!data.loading) {
                 state.allPlayers = { loading: false, players: Array.isArray(data.players) ? data.players : [] };
+                if (playersLoadRetryTimer) {
+                    clearTimeout(playersLoadRetryTimer);
+                    playersLoadRetryTimer = null;
+                }
             } else {
                 state.allPlayers.loading = true;
             }
-            // #region agent log
-            fetch('http://127.0.0.1:7606/ingest/8eb7c909-b287-4c23-9dd2-e858bf2a1ece',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcb7ae'},body:JSON.stringify({sessionId:'dcb7ae',runId:'pre-fix',hypothesisId:'H2',location:'public/script.js:applyMessage(all_players)',message:'Received all_players payload',data:{loading:Boolean(data.loading),playersCount:Array.isArray(data.players)?data.players.length:-1,openCategory:state.openCategory},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             if (isPlayersCategoryOpen()) schedulePlayersPanelRefresh(false);
             break;
         case 'stats_update':
@@ -889,9 +921,6 @@ function renderPanel() {
 
     if (cat === 'Игроки' || cat === 'Опасные') {
         const { loading, players } = state.allPlayers;
-        // #region agent log
-        fetch('http://127.0.0.1:7606/ingest/8eb7c909-b287-4c23-9dd2-e858bf2a1ece',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcb7ae'},body:JSON.stringify({sessionId:'dcb7ae',runId:'pre-fix',hypothesisId:'H3',location:'public/script.js:renderPanel(players)',message:'Render players panel branch',data:{loading:Boolean(loading),playersCount:Array.isArray(players)?players.length:-1,openCategory:cat},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (loading && players.length === 0) {
             content.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Загрузка игроков...</p>';
         } else {
@@ -900,6 +929,12 @@ function renderPanel() {
             staggerRows(content);
             requestAccountAgeFor(merged, 'steamId');
         }
+        return;
+    }
+
+    if (cat === 'Админы') {
+        title.textContent = 'Админы';
+        content.innerHTML = buildBddStaffSearchPanel();
         return;
     }
 
@@ -2305,7 +2340,9 @@ function buildAllPlayersTable(players) {
                     </tr>
                 </thead>
                 <tbody>
-                ${sorted.map((p, i) => buildSuspiciousRowHtml(p, i)).join('')}
+                ${sorted.length > 0
+                    ? sorted.map((p, i) => buildSuspiciousRowHtml(p, i)).join('')
+                    : `<tr><td colspan="${PLAYERS_COLUMNS_DEF.filter(c => getPlayersTableColumns()[c.id]).length}" class="py-8 px-3 text-center"><div class="text-gray-400 text-sm">По текущим фильтрам игроки не найдены</div><button type="button" onclick="resetPlayersFilters()" class="mt-3 px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] text-gray-200 text-xs font-semibold">Сбросить фильтры и исключения</button></td></tr>`}
                 </tbody></table>
         </div>`;
 }
@@ -2516,10 +2553,10 @@ function copyLauncherDocText(elementId) {
 // ——— Панель: открыть/закрыть ———
 
 function openSidePanel(category) {
-    // #region agent log
-    fetch('http://127.0.0.1:7606/ingest/8eb7c909-b287-4c23-9dd2-e858bf2a1ece',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcb7ae'},body:JSON.stringify({sessionId:'dcb7ae',runId:'pre-fix',hypothesisId:'H1',location:'public/script.js:openSidePanel',message:'openSidePanel called',data:{category,wsReadyState:ws?.readyState ?? null,currentOpenCategory:state?.openCategory ?? null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (category === 'Лаунчер' && getUserLevel() < 5) {
+        return;
+    }
+    if (category === 'Админы' && getUserLevel() < 3) {
         return;
     }
     const panel = document.getElementById('sidePanel');
@@ -2532,9 +2569,6 @@ function openSidePanel(category) {
     state.openCategory = category;
     if (category === 'Изменения' && !state.changesTab) {
         state.changesTab = 'roles';
-    }
-    if ((category === 'Игроки' || category === 'Опасные') && (!Array.isArray(state.allPlayers.players) || state.allPlayers.players.length === 0)) {
-        state.allPlayers.loading = true;
     }
     if (category === 'Лаунчер') {
         const u = getCurrentUser();
@@ -2551,7 +2585,11 @@ function openSidePanel(category) {
     }
     if (category === 'Наказания') loadPunishmentsStaffList();
     if (category === 'Наказания') prefetchPunishmentsSummary();
-    if (category === 'Игроки' || category === 'Опасные') startFearReportsIfNeeded();
+    if (category === 'Игроки' || category === 'Опасные') {
+        startFearReportsIfNeeded();
+        requestPlayersDataNow();
+        schedulePlayersLoadRetry();
+    }
     document.querySelectorAll('.dropdown-item[data-category]').forEach(el => {
         el.classList.toggle('active', el.getAttribute('data-category') === category);
     });
@@ -2577,10 +2615,7 @@ function openSidePanel(category) {
         const level = getUserLevel();
         if (category === 'VAC') ws.send(JSON.stringify({ type: 'get_vac_bans' }));
         else if (category === 'Yooma') ws.send(JSON.stringify({ type: 'get_yooma_bans', userLevel: level }));
-        else if (category === 'Игроки' || category === 'Опасные') {
-            ws.send(JSON.stringify({ type: 'get_suspicious_bans', userLevel: level }));
-            ws.send(JSON.stringify({ type: 'get_all_players' }));
-        }
+        else if (category === 'Игроки' || category === 'Опасные') requestPlayersDataNow();
     }
 }
 
@@ -2826,6 +2861,7 @@ function resetPlayersFilters() {
     setCustomFilters(getDefaultCustomFilters());
     setHideFilters(getDefaultHideFilters());
     setSuspiciousFilters([]);
+    setPlayersExclusions({ excludeCsgoServers: false });
     clearPlayersFiltersUiMeta();
     schedulePlayersPanelRefresh(false, 0);
     scheduleRenderPanel();
@@ -2972,6 +3008,178 @@ function mergeAllPlayersWithBans(players) {
         if (!sp) return { ...p, steamId: sid };
         return { ...p, ...sp, steamId: sid };
     });
+}
+
+function buildBddStaffSearchPanel() {
+    return `
+        <div class="space-y-4">
+            <p class="text-gray-400 text-sm leading-relaxed">Поиск по базе стаффа (PostgreSQL: <span class="text-gray-300 font-mono text-xs">admins</span> + <span class="text-gray-300 font-mono text-xs">profiles</span>, <a href="https://github.com/VibeCodingMeta/VibeCodingBdd" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:text-sky-300">VibeCodingBdd</a>). Укажите SteamID64, Discord&nbsp;ID или ник Discord (username) / имя профиля.</p>
+            <div class="flex flex-wrap gap-2 items-end">
+                <div class="flex-1 min-w-[220px]">
+                    <label class="block text-gray-500 text-xs font-semibold mb-1">Запрос</label>
+                    <input type="text" id="bddStaffQuery" autocomplete="off" class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-sky-500/50" placeholder="SteamID / Discord ID / ник Discord" onkeydown="if(event.key==='Enter'){runBddStaffSearch()}">
+                </div>
+                <button type="button" onclick="runBddStaffSearch()" class="px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-600 text-white text-sm font-semibold shrink-0">Найти</button>
+            </div>
+            <div id="bddStaffResults" class="text-gray-500 text-sm min-h-[48px]">Введите запрос и нажмите «Найти».</div>
+        </div>`;
+}
+
+function formatBddStaffDate(v) {
+    if (v == null || v === '') return '—';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('ru');
+}
+
+function bddStaffScalarText(v) {
+    if (v === null || v === undefined || v === '') return '—';
+    if (typeof v === 'boolean') return v ? 'да' : 'нет';
+    if (v instanceof Date) return formatBddStaffDate(v);
+    const t = typeof v;
+    if (t === 'number' || t === 'bigint') return String(v);
+    if (t === 'string') return v;
+    return '—';
+}
+
+function bddStaffJsonBlock(raw) {
+    if (raw == null || raw === '') {
+        return '<p class="text-gray-500 text-xs py-1">Нет данных</p>';
+    }
+    let s;
+    try {
+        s = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+    } catch (_) {
+        s = String(raw);
+    }
+    return `<pre class="mt-2 p-3 rounded-lg bg-black/40 border border-white/10 text-[11px] font-mono text-gray-300 overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all">${escapeHtml(s)}</pre>`;
+}
+
+function bddStaffAvatarThumb(url) {
+    const u = String(url || '').trim();
+    if (!/^https?:\/\//i.test(u)) return '';
+    return `<img src="${escapeHtml(u)}" alt="" class="w-14 h-14 rounded-full border border-white/10 object-cover shrink-0" loading="lazy" onerror="this.style.display='none'">`;
+}
+
+function buildBddStaffResultsFull(rows) {
+    const scalarFields = [
+        ['admin_id', 'ID админа'],
+        ['steamid', 'SteamID'],
+        ['group_id', 'ID группы'],
+        ['group_display_name', 'Группа (отображаемое имя)'],
+        ['group_name', 'Группа (системное имя)'],
+        ['immunity', 'Иммунитет'],
+        ['is_frozen', 'Заморозка'],
+        ['admin_updated_at', 'Обновление записи админа'],
+        ['profile_name', 'Имя в профиле'],
+        ['discord_id', 'Discord ID'],
+        ['discord_nickname', 'Discord (ник / username)'],
+        ['last_activity', 'Последняя активность'],
+        ['rank', 'Ранг'],
+        ['kills', 'Убийства'],
+        ['deaths', 'Смерти'],
+        ['playtime', 'Награно (playtime)'],
+        ['ban_is_banned', 'Бан'],
+        ['vip_is_vip', 'VIP'],
+        ['profile_updated_at', 'Обновление профиля'],
+        ['sort_ts', 'Сводная дата обновления']
+    ];
+    return rows.map((r, idx) => {
+        const sid = String(r.steamid || '').trim();
+        const sidOk = /^\d{17}$/.test(sid);
+        const links = sidOk
+            ? `<div class="flex flex-wrap gap-2">
+                <a href="https://steamcommunity.com/profiles/${escapeHtml(sid)}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-[#171a21]/90 hover:bg-[#1b2838] text-white text-xs font-semibold">Steam</a>
+                <a href="https://fearproject.ru/profile/${escapeHtml(sid)}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-[#5865F2]/80 hover:bg-[#4752C4] text-white text-xs font-semibold">FEAR</a>
+            </div>`
+            : '';
+        const av1 = bddStaffAvatarThumb(r.admin_avatar_full);
+        const av2 = bddStaffAvatarThumb(r.profile_avatar_full);
+        const avRow = (av1 || av2)
+            ? `<div class="flex flex-wrap items-center gap-3 mb-3 pb-3 border-b border-white/10">
+                ${av1 ? `<div class="flex items-center gap-2"><span class="text-gray-500 text-[10px] uppercase tracking-wide">Аватар админа</span>${av1}</div>` : ''}
+                ${av2 ? `<div class="flex items-center gap-2"><span class="text-gray-500 text-[10px] uppercase tracking-wide">Аватар профиля</span>${av2}</div>` : ''}
+            </div>`
+            : '';
+        const grid = scalarFields.map(([key, label]) => {
+            const val = bddStaffScalarText(r[key]);
+            return `<div class="flex flex-col gap-0.5 py-1.5 border-b border-white/[0.06] sm:grid sm:grid-cols-[minmax(0,11rem)_1fr] sm:gap-x-3">
+                <span class="text-gray-500 text-[11px]">${escapeHtml(label)}</span>
+                <span class="text-gray-100 text-xs font-mono break-all">${escapeHtml(val)}</span>
+            </div>`;
+        }).join('');
+        const urlAdmin = String(r.admin_avatar_full || '').trim();
+        const urlProf = String(r.profile_avatar_full || '').trim();
+        const urlExtras = [];
+        if (/^https?:\/\//i.test(urlAdmin)) {
+            urlExtras.push(`<div class="flex flex-col gap-0.5 py-1.5 border-b border-white/[0.06] sm:grid sm:grid-cols-[minmax(0,11rem)_1fr] sm:gap-x-3">
+                <span class="text-gray-500 text-[11px]">URL аватара админа</span>
+                <a href="${escapeHtml(urlAdmin)}" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:text-sky-300 text-xs font-mono break-all">${escapeHtml(urlAdmin)}</a>
+            </div>`);
+        }
+        if (/^https?:\/\//i.test(urlProf)) {
+            urlExtras.push(`<div class="flex flex-col gap-0.5 py-1.5 border-b border-white/[0.06] sm:grid sm:grid-cols-[minmax(0,11rem)_1fr] sm:gap-x-3">
+                <span class="text-gray-500 text-[11px]">URL аватара профиля</span>
+                <a href="${escapeHtml(urlProf)}" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:text-sky-300 text-xs font-mono break-all">${escapeHtml(urlProf)}</a>
+            </div>`);
+        }
+        return `<article class="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-4 last:mb-0">
+            <div class="flex flex-wrap items-start justify-between gap-3 mb-1">
+                <h3 class="text-white text-sm font-semibold">Запись ${idx + 1}${sidOk ? ` · <span class="font-mono text-gray-300">${escapeHtml(sid)}</span>` : ''}</h3>
+                ${links}
+            </div>
+            ${avRow}
+            <div class="space-y-0">${urlExtras.join('')}${grid}</div>
+            <details class="mt-3 group">
+                <summary class="cursor-pointer text-sky-400 text-xs font-semibold hover:text-sky-300 select-none">Сырой JSON: админ (admins.raw_json)</summary>
+                ${bddStaffJsonBlock(r.admin_raw_json)}
+            </details>
+            <details class="mt-2 group">
+                <summary class="cursor-pointer text-sky-400 text-xs font-semibold hover:text-sky-300 select-none">Сырой JSON: профиль (profiles.raw_json)</summary>
+                ${bddStaffJsonBlock(r.profile_raw_json)}
+            </details>
+        </article>`;
+    }).join('');
+}
+
+async function runBddStaffSearch() {
+    const input = document.getElementById('bddStaffQuery');
+    const out = document.getElementById('bddStaffResults');
+    if (!input || !out) return;
+    const q = input.value.trim();
+    if (q.length < 2) {
+        out.innerHTML = '<span class="text-amber-400 text-sm">Минимум 2 символа.</span>';
+        return;
+    }
+    out.innerHTML = '<div class="flex items-center gap-2 py-2"><div class="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin"></div><span class="text-gray-500 text-sm">Загрузка…</span></div>';
+    try {
+        const res = await fetch('/api/bdd-staff/search?q=' + encodeURIComponent(q), {
+            credentials: 'include',
+            headers: apiAuthHeaders()
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 503) {
+            out.innerHTML = `<p class="text-amber-300 text-sm leading-relaxed">${escapeHtml(data.error || 'База стаффа не подключена')}</p>
+                <p class="text-gray-500 text-xs mt-2 leading-relaxed">На Railway: в сервисе web добавь переменную DATABASE_URL или BDD_DATABASE_URL — тот же URL, что у Postgres (и что использует VibeCodingBdd).</p>`;
+            return;
+        }
+        if (res.status === 403) {
+            out.innerHTML = `<p class="text-amber-400 text-sm">${escapeHtml(data.error || 'Недостаточно прав (нужен уровень 3+)')}</p>`;
+            return;
+        }
+        if (!res.ok) {
+            out.innerHTML = `<p class="text-rose-400 text-sm">${escapeHtml(data.error || ('Ошибка ' + res.status))}</p>`;
+            return;
+        }
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        if (rows.length === 0) {
+            out.innerHTML = '<p class="text-gray-400 text-sm">Ничего не найдено.</p>';
+            return;
+        }
+        out.innerHTML = `<p class="text-gray-500 text-xs mb-3">Найдено: ${rows.length}</p><div class="space-y-2 max-h-[min(70vh,720px)] overflow-y-auto hide-scrollbar pr-1">${buildBddStaffResultsFull(rows)}</div>`;
+    } catch (e) {
+        out.innerHTML = `<p class="text-rose-400 text-sm">${escapeHtml(String(e.message || e))}</p>`;
+    }
 }
 
 function toggleSuspiciousFilter(key) {
@@ -3566,20 +3774,16 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (loginButton) loginButton.style.display = 'none';
 
             applyLevelRestrictions(level);
+            // По умолчанию сразу открываем раздел "Игроки" при входе.
+            if (!state.openCategory) {
+                openSidePanel('Игроки');
+            }
         } else {
             if (adminPanel) adminPanel.classList.add('hidden');
         }
         clearTimeout(preloadTimer);
         revealUi();
         checkUpdateNotice();
-        setTimeout(() => {
-            try {
-                // #region agent log
-                fetch('http://127.0.0.1:7606/ingest/8eb7c909-b287-4c23-9dd2-e858bf2a1ece',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dcb7ae'},body:JSON.stringify({sessionId:'dcb7ae',runId:'pre-fix',hypothesisId:'H4',location:'public/script.js:DOMContentLoaded auto-open',message:'Attempt auto-open players',data:{openCategoryBefore:state?.openCategory ?? null},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
-                if (!state.openCategory) openSidePanel('Игроки');
-            } catch (_) {}
-        }, 0);
     } catch (err) {
         clearTimeout(preloadTimer);
         revealUi();
@@ -3591,6 +3795,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 function applyLevelRestrictions(level) {
     if (level === 3) {
         state.punishments.staffTableMode = 'old';
+    }
+    if (level < 3 && state.openCategory === 'Админы') {
+        closeSidePanel();
+    }
+    const adminsNav = document.getElementById('navItemAdmins');
+    if (adminsNav) {
+        if (level >= 3) adminsNav.classList.remove('hidden');
+        else adminsNav.classList.add('hidden');
     }
     // Уровни 1-2: нет логов, настройки только локальные (без управления пользователями)
     if (level < 3) {

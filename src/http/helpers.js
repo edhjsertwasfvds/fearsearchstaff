@@ -52,6 +52,7 @@ function getAllowedMethodsForApiPath(pathname) {
     if (pathname === '/api/update-notice') return 'GET, POST, OPTIONS';
     if (pathname === '/api/settings') return 'GET, POST, OPTIONS';
     if (pathname === '/api/me') return 'GET, OPTIONS';
+    if (pathname === '/api/bdd-staff/search') return 'GET, OPTIONS';
     if (pathname === '/api/runtime-metrics') return 'GET, OPTIONS';
     if (pathname === '/api/clear-cache') return 'POST, OPTIONS';
     if (pathname === '/api/comments') return 'POST, OPTIONS';
