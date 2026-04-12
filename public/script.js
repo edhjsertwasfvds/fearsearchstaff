@@ -3013,7 +3013,7 @@ function mergeAllPlayersWithBans(players) {
 function buildBddStaffSearchPanel() {
     return `
         <div class="space-y-4">
-            <p class="text-gray-400 text-sm leading-relaxed">Поиск по базе стаффа (PostgreSQL: <span class="text-gray-300 font-mono text-xs">admins</span> + <span class="text-gray-300 font-mono text-xs">profiles</span>, <a href="https://github.com/VibeCodingMeta/VibeCodingBdd" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:text-sky-300">VibeCodingBdd</a>). Укажите SteamID64, Discord&nbsp;ID или ник Discord (username) / имя профиля.</p>
+            <p class="text-gray-400 text-sm leading-relaxed">Поиск по базе стаффа (PostgreSQL: <span class="text-gray-300 font-mono text-xs">admins</span> + <span class="text-gray-300 font-mono text-xs">profiles</span>, синхронизация VibeCodingBdd). Укажите SteamID64, Discord&nbsp;ID или ник Discord (username) / имя профиля.</p>
             <div class="flex flex-wrap gap-2 items-end">
                 <div class="flex-1 min-w-[220px]">
                     <label class="block text-gray-500 text-xs font-semibold mb-1">Запрос</label>

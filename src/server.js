@@ -2162,10 +2162,22 @@ const server = http.createServer(async (req, res) => {
             sendJson(res, 200, { ok: true, rows });
         } catch (e) {
             console.error('[bdd-staff/search]', e && e.message, e && e.code);
-            const msg =
-                e && e.code === '42P01'
-                    ? 'Таблицы admins/profiles не найдены. Запусти VibeCodingBdd хотя бы раз или примени db/init.sql.'
-                    : 'Ошибка запроса к PostgreSQL';
+            const errCode = e && (e.code || (e.cause && e.cause.code));
+            const errMsg = String((e && e.message) || '');
+            let msg = 'Ошибка запроса к PostgreSQL';
+            if (e && errCode === '42P01') {
+                msg =
+                    'Таблицы admins/profiles не найдены. Запусти VibeCodingBdd хотя бы раз или примени db/init.sql.';
+            } else if (
+                errCode === 'ENOTFOUND' ||
+                /ENOTFOUND/i.test(errMsg) ||
+                /getaddrinfo ENOTFOUND/i.test(errMsg)
+            ) {
+                msg =
+                    'Не удалось найти сервер БД по адресу из строки подключения (ошибка DNS). На Railway открой Postgres → скопируй полный DATABASE_URL в переменные веб-сервиса (BDD_DATABASE_URL или DATABASE_URL). Частая ошибка: в URL остаётся placeholder вроде хоста «base» или не подставилась ссылка вида ${{ Postgres.DATABASE_URL }}.';
+            } else if (errCode === 'ECONNREFUSED') {
+                msg = 'Подключение к PostgreSQL отклонено: проверь хост, порт и что база запущена.';
+            }
             sendJson(res, 500, { code: 'BDD_PG_ERROR', error: msg });
         }
         return;
