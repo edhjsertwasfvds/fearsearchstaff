@@ -2230,7 +2230,7 @@ function buildAllPlayersTable(players) {
     const help = (text) => `<button type="button" class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-white/[0.06] text-[10px] font-bold text-gray-400 hover:bg-white/[0.12] hover:text-white align-middle" title="${escapeHtml(text)}">?</button>`;
 
     const filtersMenu = state.filtersMenuOpen ? `
-                        <div data-players-filters-menu="1" class="relative z-30 p-4 bg-white/[0.03] rounded-xl border border-white/[0.06] space-y-4">
+                        <div data-players-filters-menu="1" class="relative z-30 p-4 bg-white/[0.03] rounded-xl border border-white/[0.06] space-y-4 overflow-hidden">
             <div class="flex items-center justify-between gap-3">
                 <div>
                     <div class="text-[10px] uppercase tracking-wide text-gray-500">Фильтры</div>
@@ -2253,7 +2253,7 @@ function buildAllPlayersTable(players) {
                     <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400">Скрытие ${help('Этот блок скрывает игроков из списка. Если Скрытие выключено, значения сохраняются, но не применяются.')}</div>
                     <button type="button" onclick="toggleHideFiltersEnabled()" class="px-3 py-1.5 rounded-lg text-xs font-semibold ${hf.enabled ? 'bg-rose-500/30 text-rose-200' : 'bg-white/[0.06] text-gray-400 hover:bg-white/[0.1]'}">Скрытие ${hf.enabled ? 'вкл' : 'выкл'}</button>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                     <div>
                         <label class="text-gray-500 text-[11px] flex items-center gap-2 mb-1">Faceit ≥ ${help('Показывать только игроков с таким уровнем Faceit и выше. Если Faceit не найден, игрок скрывается при активном фильтре.')}</label>
                         <input type="number" id="hideMinFaceit" min="0" max="10" value="${hf.minFaceit || ''}" placeholder="—" onchange="applyHideFiltersFromInputs()" class="w-full bg-white/5 border border-white/10 rounded px-2 py-1.5 text-white text-sm">
@@ -2290,7 +2290,7 @@ function buildAllPlayersTable(players) {
                     <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400">Свои фильтры ${help('Дополнительный ручной отбор по игровым значениям. Срабатывает только когда блок включён.')}</div>
                     <button type="button" onclick="toggleCustomFiltersEnabled()" class="px-3 py-1.5 rounded-lg text-xs font-semibold ${cf.enabled ? 'bg-indigo-500/30 text-indigo-200' : 'bg-white/[0.06] text-gray-400 hover:bg-white/[0.1]'}">Свои фильтры ${cf.enabled ? 'вкл' : 'выкл'}</button>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                     <div>
                         <label class="text-gray-500 text-[11px] flex items-center gap-2 mb-1">Мин. K/D ${help('Оставляет игроков с K/D не ниже указанного значения.')}</label>
                         <input type="number" id="customFilterMinKd" min="0" step="0.01" value="${cf.minKd}" onchange="applyCustomFiltersFromInputs()" class="w-full bg-white/5 border border-white/10 rounded px-2 py-1.5 text-white text-sm">
@@ -2326,9 +2326,9 @@ function buildAllPlayersTable(players) {
                 <span>${flagsSummary}</span>
                 ${countText}
             </div>
-            <div class="flex gap-2 items-center justify-between w-full">
-                <div class="flex gap-2">${sortButtons}</div>
-                <div class="flex gap-2 items-center">
+            <div class="flex flex-wrap gap-2 items-center justify-between w-full">
+                <div class="flex flex-wrap gap-2">${sortButtons}</div>
+                <div class="flex gap-2 items-center ml-auto">
                     <div class="relative" data-columns-dropdown="1">
                         <button type="button" onclick="togglePlayersColumnsMenu(event)" class="px-3 py-2 text-xs font-semibold rounded-lg bg-white/[0.08] text-gray-300 hover:bg-white/[0.12] flex items-center gap-1.5">
                             Исключения <i class="ph ph-caret-down text-[10px]"></i>
