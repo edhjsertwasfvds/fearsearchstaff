@@ -34,6 +34,7 @@ let playersLoadRetryTimer = null;
 let playersLoadRetryLeft = 0;
 let uiOpenSelectMenu = null;
 let rolesAutoResolveTimer = null;
+let staffStatsPollTimer = null;
 
 const DEFAULT_AVATAR = 'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
 
@@ -1247,12 +1248,13 @@ function renderPanel() {
                                 <th class="py-3 px-2 font-semibold text-rose-400">Баны</th>
                                 <th class="py-3 px-2 font-semibold text-amber-400">Муты</th>
                                 <th class="py-3 px-2 font-semibold text-emerald-400">Сумма</th>
+                                ${!isOldTable ? '<th class="py-3 px-2 font-semibold text-gray-300">Действия</th>' : ''}
                                 ${secure && !isOldTable ? '<th class="py-3 px-2 font-semibold text-indigo-300">Тикеты</th><th class="py-3 px-2 font-semibold text-white">Выплата</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
                             ${statsRows.length === 0
-                                ? `<tr><td colspan="${secure && !isOldTable ? 8 : 6}" class="py-6 text-center text-gray-500">Список стафа загружается...</td></tr>`
+                                ? `<tr><td colspan="${secure && !isOldTable ? 9 : (isOldTable ? 6 : 7)}" class="py-6 text-center text-gray-500">Список стафа загружается...</td></tr>`
                                 : statsRows.map((r, i) => `
                                 <tr class="border-b border-white/5 hover:bg-white/[0.03] row-new">
                                     <td class="py-3 px-2 text-gray-500 font-mono">${i + 1}</td>
@@ -1269,6 +1271,20 @@ function renderPanel() {
                                     <td class="py-3 px-2 text-rose-400 font-semibold">${r.bans || '<span class="text-gray-600">0</span>'}</td>
                                     <td class="py-3 px-2 text-amber-400 font-semibold">${r.mutes || '<span class="text-gray-600">0</span>'}</td>
                                     <td class="py-3 px-2 ${r.sum > 0 ? 'text-emerald-400 font-bold' : 'text-gray-600'}">${r.sum}</td>
+                                    ${!isOldTable ? `<td class="py-3 px-2">
+                                        <button
+                                            type="button"
+                                            onclick="openStaffPeriodPunishments('${escapeHtml(String(r.admin_steamid || ''))}')"
+                                            class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/[0.06] text-gray-300 hover:bg-indigo-500/25 hover:text-indigo-200 transition-colors"
+                                            title="Посмотреть наказания за выбранный период"
+                                            aria-label="Посмотреть наказания за выбранный период"
+                                        >
+                                            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current" aria-hidden="true">
+                                                <path d="M14 3a8 8 0 1 0 4.9 14.3l3.4 3.4a1 1 0 0 0 1.4-1.4l-3.4-3.4A8 8 0 0 0 14 3Zm0 2a6 6 0 1 1 0 12a6 6 0 0 1 0-12Z"/>
+                                                <path d="M11 11h6v2h-6zM11 8h4v2h-4zM11 14h3v2h-3z"/>
+                                            </svg>
+                                        </button>
+                                    </td>` : ''}
                                     ${secure && !isOldTable ? (() => {
                                         const sid = String(r.admin_steamid || '');
                                         const cur = (ticketsMap && ticketsMap[sid] != null) ? ticketsMap[sid] : 0;
@@ -1511,14 +1527,20 @@ function setPunishmentsMonth(value) {
     state.punishments.statsPeriodMode = 'month';
     state.punishments.selectedWeekStart = null;
     if (state.punishments.view === 'stats') {
+        const isOldTable = state?.punishments?.staffTableMode === 'old' || getUserLevel() === 3;
         loadStaffTicketsForSelectedMonth();
-        state.punishments.staffStatsRows = null;
-        if (Array.isArray(state.punishments.staffList) && Object.keys(state.punishments.staffStatsData || {}).length > 0) {
-            state.punishments.staffStatsRows = computeStaffStatsRows(
-                state.punishments.staffList,
-                state.punishments.staffStatsData,
-                state.punishments.selectedMonth
-            );
+        if (!isOldTable) {
+            state.punishments.staffStatsRows = null;
+            loadStaffStatsFromServer();
+        } else {
+            state.punishments.staffStatsRows = null;
+            if (Array.isArray(state.punishments.staffList) && Object.keys(state.punishments.staffStatsData || {}).length > 0) {
+                state.punishments.staffStatsRows = computeStaffStatsRows(
+                    state.punishments.staffList,
+                    state.punishments.staffStatsData,
+                    state.punishments.selectedMonth
+                );
+            }
         }
     }
     scheduleRenderPanel();
@@ -1535,7 +1557,10 @@ function setPunishmentsWeekStart(startYmd) {
     state.punishments.selectedWeekStart = s;
     state.punishments.staffStatsRows = null;
     if (state.punishments.view === 'stats') {
-        if (Array.isArray(state.punishments.staffList) && Object.keys(state.punishments.staffStatsData || {}).length > 0) {
+        const isOldTable = state?.punishments?.staffTableMode === 'old' || getUserLevel() === 3;
+        if (!isOldTable) {
+            loadStaffStatsFromServer();
+        } else if (Array.isArray(state.punishments.staffList) && Object.keys(state.punishments.staffStatsData || {}).length > 0) {
             state.punishments.staffStatsRows = computeStaffStatsRows(
                 state.punishments.staffList,
                 state.punishments.staffStatsData,
@@ -1699,13 +1724,8 @@ function setStaffStatsTableMode(mode) {
     const m = mode === 'old' ? 'old' : 'new';
     state.punishments.staffTableMode = m;
     if (state.openCategory === 'Наказания' && state.punishments.view === 'stats') {
-        if (Array.isArray(state.punishments.staffList) && Object.keys(state.punishments.staffStatsData || {}).length > 0) {
-            state.punishments.staffStatsRows = computeStaffStatsRows(
-                state.punishments.staffList,
-                state.punishments.staffStatsData,
-                state.punishments.selectedMonth
-            );
-        }
+        // И для old, и для new режимов делаем серверную перезагрузку текущего режима.
+        loadStaffStatsFromServer();
         scheduleRenderPanel();
     }
 }
@@ -1714,31 +1734,180 @@ async function loadStaffStatsFromServer() {
     if (getUserLevel() < 3) return;
     if (getUserLevel() >= 4) await ensureStaffSecureLoaded();
     try {
-        let res = await fetch('/api/punishments/staff-stats', { headers: apiAuthHeaders() });
+        state.punishments.staffStatsLoading = true;
+        // Для новой статистики первым запросом тянем "за всё время", если период ещё не выбран.
+        const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
+            ? ('week:' + String(state.punishments.selectedWeekStart))
+            : String(state.punishments.selectedMonth || '');
+        const isOldTable = state?.punishments?.staffTableMode === 'old' || getUserLevel() === 3;
+        const qs = isOldTable ? '' : (`?mode=new&period=${encodeURIComponent(period)}`);
+        let res = await fetch('/api/punishments/staff-stats' + qs, { headers: apiAuthHeaders() });
         if (res.status === 403) return;
         let data = await res.json().catch(() => ({}));
-        if (!data.lastUpdated || !data.staffStatsData || Object.keys(data.staffStatsData || {}).length === 0) {
-            const retry = await fetch('/api/punishments/staff-stats?force=1', { headers: apiAuthHeaders() });
-            if (retry.ok) {
-                data = await retry.json().catch(() => data);
+        if (isOldTable) {
+            const hasFullStatsData = !!(data.lastUpdated && data.staffStatsData && Object.keys(data.staffStatsData || {}).length > 0);
+            if (!hasFullStatsData) {
+                const retry = await fetch('/api/punishments/staff-stats?force=1', { headers: apiAuthHeaders() });
+                if (retry.ok) {
+                    data = await retry.json().catch(() => data);
+                }
             }
         }
         const staffList = Array.isArray(data.staffList) && data.staffList.length > 0
             ? data.staffList
             : (state.punishments.staffList || []);
         state.punishments.staffList = staffList;
-        state.punishments.staffStatsData = data.staffStatsData || {};
-        state.punishments.staffStatsRows = computeStaffStatsRows(
-            staffList,
-            state.punishments.staffStatsData,
-            state.punishments.selectedMonth
-        );
+        if (!isOldTable && Array.isArray(data.staffStatsRows)) {
+            state.punishments.staffStatsRows = data.staffStatsRows;
+        } else {
+            state.punishments.staffStatsData = data.staffStatsData || {};
+            state.punishments.staffStatsRows = computeStaffStatsRows(
+                staffList,
+                state.punishments.staffStatsData,
+                state.punishments.selectedMonth
+            );
+        }
+        state.punishments.staffStatsLoading = !!data.loading;
+        if (staffStatsPollTimer) {
+            clearTimeout(staffStatsPollTimer);
+            staffStatsPollTimer = null;
+        }
+        const hasRows = Object.keys(state.punishments.staffStatsData || {}).length > 0;
+        if (state.punishments.staffStatsLoading && !hasRows && state.punishments.view === 'stats') {
+            staffStatsPollTimer = setTimeout(() => {
+                staffStatsPollTimer = null;
+                if (state.openCategory === 'Наказания' && state.punishments.view === 'stats') {
+                    loadStaffStatsFromServer();
+                }
+            }, 1200);
+        }
         if (state.openCategory === 'Наказания') scheduleRenderPanel();
-    } catch (_) {}
+    } catch (_) {
+        state.punishments.staffStatsLoading = false;
+    } finally {
+        if (!state.punishments.staffStatsLoading) {
+            if (staffStatsPollTimer) {
+                clearTimeout(staffStatsPollTimer);
+                staffStatsPollTimer = null;
+            }
+        }
+    }
+}
+
+function closeStaffPeriodPunishmentsModal() {
+    const modal = document.getElementById('staffPeriodPunishmentsModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function openStaffPeriodPunishments(steamId) {
+    const sid = String(steamId || '').trim();
+    if (!sid) return;
+    const statsData = state.punishments.staffStatsData || {};
+    const staffList = Array.isArray(state.punishments.staffList) ? state.punishments.staffList : [];
+    const row = staffList.find(s => String(s?.steamid || '') === sid) || null;
+    const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
+        ? ('week:' + String(state.punishments.selectedWeekStart))
+        : state.punishments.selectedMonth;
+    let staffPunishments = Array.isArray(statsData[sid]) ? statsData[sid] : null;
+    if (!Array.isArray(staffPunishments)) {
+        try {
+            const res = await fetch('/api/punishments?steamId=' + encodeURIComponent(sid), { headers: apiAuthHeaders() });
+            const data = await res.json().catch(() => ({}));
+            staffPunishments = Array.isArray(data.punishments) ? data.punishments : [];
+            state.punishments.staffStatsData = { ...(state.punishments.staffStatsData || {}), [sid]: staffPunishments };
+        } catch (_) {
+            staffPunishments = [];
+        }
+    }
+    const list = (Array.isArray(staffPunishments) ? staffPunishments : [])
+        .filter((p) => {
+            if (Number(p?.type) !== 1 && Number(p?.type) !== 2) return false;
+            return punishmentInSelectedPeriod(p, period);
+        })
+        .sort((a, b) => (getPunishmentCreatedTs(b) || 0) - (getPunishmentCreatedTs(a) || 0));
+
+    const typeLabel = (t) => (Number(t) === 1 ? 'Бан' : 'Мут');
+    const statusLabel = (s) => {
+        const n = Number(s);
+        if (n === 4) return { text: 'Истек срок', class: 'bg-gray-500/20 text-gray-400' };
+        if (n === 2) return { text: 'Разбанен', class: 'bg-emerald-500/20 text-emerald-400' };
+        if (n === 1) return { text: 'Активен', class: 'bg-rose-500/20 text-rose-400' };
+        return { text: '—', class: 'bg-white/5 text-gray-500' };
+    };
+    const formatTs = (ts) => {
+        if (!ts || !Number.isFinite(Number(ts))) return '—';
+        return new Date(Number(ts) * 1000).toLocaleString('ru');
+    };
+    const periodLabel = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
+        ? `Неделя ${state.punishments.selectedWeekStart}`
+        : (state.punishments.selectedMonth || 'Все время');
+    const headerName = row?.name ? escapeHtml(row.name) : 'Стафф';
+    const headerSid = escapeHtml(sid);
+
+    let modal = document.getElementById('staffPeriodPunishmentsModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'staffPeriodPunishmentsModal';
+        modal.className = 'fixed inset-0 z-[220] hidden';
+        modal.innerHTML = `
+            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeStaffPeriodPunishmentsModal()"></div>
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(900px,94vw)]">
+                <button type="button" onclick="closeStaffPeriodPunishmentsModal()" class="absolute top-3 right-3 z-10 w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center"><i class="ph ph-x text-gray-300"></i></button>
+                <div data-smooth-scroll-container="1" class="max-h-[82vh] overflow-y-auto hide-scrollbar">
+                    <div class="glass-panel rounded-2xl p-5 pr-12" id="staffPeriodPunishmentsModalContent"></div>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
+    const content = document.getElementById('staffPeriodPunishmentsModalContent');
+    if (!content) return;
+    content.innerHTML = `
+        <div class="flex items-start justify-between gap-3 mb-4">
+            <div>
+                <div class="text-white text-lg font-bold">${headerName}</div>
+                <div class="text-gray-500 text-xs font-mono">${headerSid}</div>
+                <div class="text-gray-400 text-xs mt-1">Период: ${escapeHtml(periodLabel)} • Баны и муты вместе</div>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead>
+                    <tr class="text-gray-400 border-b border-white/10">
+                        <th class="py-2.5 px-2 font-semibold">Игрок</th>
+                        <th class="py-2.5 px-2 font-semibold">Причина</th>
+                        <th class="py-2.5 px-2 font-semibold">Тип</th>
+                        <th class="py-2.5 px-2 font-semibold">Статус</th>
+                        <th class="py-2.5 px-2 font-semibold">Создано</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${list.length === 0
+                        ? '<tr><td colspan="5" class="py-8 px-2 text-center text-gray-500">Наказаний за выбранную метку не найдено</td></tr>'
+                        : list.map((p) => {
+                            const st = statusLabel(p?.status);
+                            return `
+                            <tr class="border-b border-white/5 hover:bg-white/[0.03]">
+                                <td class="py-2.5 px-2">
+                                    <div class="text-white text-sm">${escapeHtml(String(p?.name || '—'))}</div>
+                                    <div class="text-gray-500 text-[11px] font-mono">${escapeHtml(String(p?.steamid || ''))}</div>
+                                </td>
+                                <td class="py-2.5 px-2 text-gray-300 max-w-[280px] truncate" title="${escapeHtml(String(p?.reason || '—'))}">${escapeHtml(String(p?.reason || '—'))}</td>
+                                <td class="py-2.5 px-2"><span class="px-2 py-0.5 rounded text-xs font-medium ${Number(p?.type) === 1 ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'}">${typeLabel(p?.type)}</span></td>
+                                <td class="py-2.5 px-2"><span class="px-2 py-0.5 rounded text-xs font-medium ${st.class}">${st.text}</span></td>
+                                <td class="py-2.5 px-2 text-gray-500 text-xs">${formatTs(getPunishmentCreatedTs(p))}</td>
+                            </tr>`;
+                        }).join('')}
+                </tbody>
+            </table>
+        </div>`;
+    modal.classList.remove('hidden');
 }
 
 async function loadPunishmentsStaffList() {
     if (Array.isArray(state.punishments.staffList)) {
+        if (getUserLevel() >= 3 && Object.keys(state.punishments.staffStatsData || {}).length === 0) {
+            loadStaffStatsFromServer();
+        }
         if (state.punishments.view === 'stats') loadStaffStatsFromServer();
         return;
     }
@@ -1752,7 +1921,7 @@ async function loadPunishmentsStaffList() {
     }
     if (state.openCategory === 'Наказания') {
         scheduleRenderPanel();
-        if (state.punishments.view === 'stats') loadStaffStatsFromServer();
+        if (getUserLevel() >= 3) loadStaffStatsFromServer();
     }
 }
 

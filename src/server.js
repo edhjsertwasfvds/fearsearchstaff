@@ -2850,7 +2850,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- Staff punishment stats (кэш с запуска и каждый час) ---
-    if (req.url === '/api/punishments/staff-stats' && req.method === 'GET') {
+    const staffStatsUrl = (req.method === 'GET' && req.url && req.url.startsWith('/api/punishments/staff-stats'))
+        ? new URL(req.url, `http://${req.headers.host || 'localhost'}`)
+        : null;
+    if (staffStatsUrl && staffStatsUrl.pathname === '/api/punishments/staff-stats') {
         const session = getSessionFromReq(req);
         if (!session) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
@@ -2863,18 +2866,107 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         try {
-            const parsed = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
-            const forceRefresh = parsed.searchParams.get('force') === '1';
+            const forceRefresh = staffStatsUrl.searchParams.get('force') === '1';
             const noCacheYet = !staffPunishmentsCache.lastUpdated || !staffPunishmentsCache.dataBySteamId || Object.keys(staffPunishmentsCache.dataBySteamId).length === 0;
             if ((forceRefresh || noCacheYet) && !staffPunishmentsCache.loading) {
-                await refreshStaffPunishmentsCache();
+                // Не блокируем ответ: отдаем текущий срез сразу и обновляем кэш в фоне.
+                refreshStaffPunishmentsCache().catch((e) => {
+                    console.warn('[Staff stats] background refresh failed:', e && e.message);
+                });
             }
         } catch (_) {}
+        const mode = String(staffStatsUrl.searchParams.get('mode') || '').trim();
+        const period = String(staffStatsUrl.searchParams.get('period') || '').trim();
+        if (mode === 'new') {
+            const getCreatedTs = (p) => {
+                const raw = p && (p.created ?? p.created_at ?? p.date ?? p.timestamp ?? p.time ?? p.punish_time ?? p.ban_time ?? p.issue_time ?? p.start_time);
+                if (raw == null || raw === '') return null;
+                if (typeof raw === 'number') return raw > 1e12 ? Math.floor(raw / 1000) : raw;
+                if (typeof raw === 'string') {
+                    const trimmed = raw.trim();
+                    const asNum = parseInt(trimmed, 10);
+                    if (Number.isFinite(asNum)) return asNum > 1e12 ? Math.floor(asNum / 1000) : asNum;
+                    const ms = Date.parse(trimmed.replace(' ', 'T'));
+                    if (!Number.isNaN(ms)) return Math.floor(ms / 1000);
+                }
+                return null;
+            };
+            const inPeriod = (p, selectedPeriod) => {
+                if (!selectedPeriod) return true;
+                const ts = getCreatedTs(p);
+                if (!ts) return false;
+                const d = new Date(ts * 1000);
+                if (selectedPeriod.startsWith('week:')) {
+                    const startStr = selectedPeriod.slice(5).trim();
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(startStr)) return false;
+                    const [yy, mm, dd] = startStr.split('-').map(n => parseInt(n, 10));
+                    const start = new Date(yy, (mm || 1) - 1, dd || 1, 0, 0, 0, 0);
+                    if (Number.isNaN(start.getTime())) return false;
+                    const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+                    return d >= start && d < end;
+                }
+                const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+                return ym === selectedPeriod;
+            };
+            const excludedReason = (reason) => {
+                const r = String(reason || '').trim().toLowerCase();
+                if (!r) return false;
+                const compact = r.replace(/\s+/g, ' ').trim();
+                const noSpace = compact.replace(/\s/g, '');
+                if (compact.includes('напиши тикет в дс')) return true;
+                if (noSpace.includes('напишитикетвдс')) return true;
+                const hasTicket = r.includes('тикет') || r.includes('ticket');
+                const hasDs = r.includes('дс') || r.includes('ds') || r.includes('discord') || r.includes('дискорд');
+                const hasWrite = r.includes('напиши') || r.includes('пиши') || r.includes('напишите');
+                if (hasTicket && hasDs) return true;
+                if (hasWrite && hasDs) return true;
+                if (/напиши.*(тикет|ticket).*(дс|ds|discord|дискорд)/i.test(r)) return true;
+                if (/(тикет|ticket).*(дс|ds|discord|дискорд)/i.test(r)) return true;
+                return false;
+            };
+            const staffList = Array.isArray(staffPunishmentsCache.staffList) ? staffPunishmentsCache.staffList : [];
+            const dataBySteamId = staffPunishmentsCache.dataBySteamId || {};
+            const staffStatsRows = staffList.map((s) => {
+                const sid = String(s?.steamid || '');
+                const arr = Array.isArray(dataBySteamId[sid]) ? dataBySteamId[sid] : [];
+                const counted = arr.filter((p) => {
+                    if (!inPeriod(p, period)) return false;
+                    const st = Number(p?.status);
+                    if (!(st === 1 || st === 4)) return false;
+                    const reason = String(p?.reason ?? p?.ban_reason ?? p?.message ?? p?.comment ?? p?.desc ?? p?.punish_reason ?? p?.text ?? '').trim();
+                    if (excludedReason(reason)) return false;
+                    return true;
+                });
+                const bans = counted.filter((p) => Number(p?.type) === 1).length;
+                const mutes = counted.filter((p) => Number(p?.type) === 2).length;
+                return {
+                    admin_steamid: sid,
+                    admin: s?.name || '—',
+                    admin_avatar: s?.avatar_full || '',
+                    group: s?.group_display_name || '',
+                    bans,
+                    mutes,
+                    sum: bans + mutes
+                };
+            }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                compact: true,
+                mode: 'new',
+                period,
+                staffList,
+                staffStatsRows,
+                lastUpdated: staffPunishmentsCache.lastUpdated,
+                loading: !!staffPunishmentsCache.loading
+            }));
+            return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             staffList: staffPunishmentsCache.staffList,
             staffStatsData: staffPunishmentsCache.dataBySteamId,
-            lastUpdated: staffPunishmentsCache.lastUpdated
+            lastUpdated: staffPunishmentsCache.lastUpdated,
+            loading: !!staffPunishmentsCache.loading
         }));
         return;
     }

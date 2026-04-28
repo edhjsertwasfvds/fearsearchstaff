@@ -18,9 +18,14 @@ const staffPunishmentsCache = {
 
 const STAFF_JSON_PATH = config.path.join(__dirname, '..', '..', 'public', 'data', 'staff.json');
 const STAFF_ADMINS_JSON_PATH = config.path.join(__dirname, '..', '..', 'public', 'data', 'staff-admins.json');
-const PUNISHMENTS_DELAY_MS = 250;
+const STAFF_STATS_FETCH_CONCURRENCY = 5;
+const PUNISHMENTS_DELAY_MS = 40;
 const STAFF_LIST_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const STAFF_STATS_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function refreshStaffList() {
     if (staffPunishmentsCache.staffListLoading) return;
@@ -119,17 +124,31 @@ async function refreshStaffPunishmentsCache() {
         }
 
         const dataBySteamId = {};
-        for (let i = 0; i < staffList.length; i++) {
-            const sid = String(staffList[i].steamid || '');
-            if (!sid) continue;
-            try {
-                const { punishments: list } = await punishments.fetchPunishmentsForSteamId(sid);
-                dataBySteamId[sid] = Array.isArray(list) ? list : [];
-            } catch (_) {
-                dataBySteamId[sid] = [];
+        let cursor = 0;
+        const workerCount = Math.max(1, Math.min(STAFF_STATS_FETCH_CONCURRENCY, staffList.length));
+        const workers = Array.from({ length: workerCount }, async () => {
+            while (true) {
+                const i = cursor++;
+                if (i >= staffList.length) return;
+                const sid = String(staffList[i]?.steamid || '');
+                if (!sid) continue;
+                const fromCache = punishments.getPunishmentsFromCache(sid);
+                if (Array.isArray(fromCache)) {
+                    dataBySteamId[sid] = fromCache;
+                    continue;
+                }
+                try {
+                    const { punishments: list } = await punishments.fetchPunishmentsForSteamId(sid);
+                    const normalizedList = Array.isArray(list) ? list : [];
+                    dataBySteamId[sid] = normalizedList;
+                    punishments.setPunishmentsToCache(sid, normalizedList);
+                } catch (_) {
+                    dataBySteamId[sid] = [];
+                }
+                if (PUNISHMENTS_DELAY_MS > 0) await sleep(PUNISHMENTS_DELAY_MS);
             }
-            if (i < staffList.length - 1) await new Promise(r => setTimeout(r, PUNISHMENTS_DELAY_MS));
-        }
+        });
+        await Promise.all(workers);
         staffPunishmentsCache.dataBySteamId = dataBySteamId;
         staffPunishmentsCache.lastUpdated = Date.now();
         console.log('[Staff stats] Обновлена статистика наказаний стафа:', staffList.length, 'чел.');
