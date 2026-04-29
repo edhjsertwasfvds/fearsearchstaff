@@ -36,12 +36,22 @@ function fetchPunishmentsForSteamId(steamId) {
         r.on('error', () => resolve(null));
         r.setTimeout(15000, () => { r.destroy(); resolve(null); });
     });
+    const withTypeFallback = (arr, fallbackType) => {
+        if (!Array.isArray(arr)) return [];
+        return arr.map((p) => {
+            const t = Number(p?.type);
+            if (t === 1 || t === 2) return p;
+            return { ...p, type: fallbackType };
+        });
+    };
     return Promise.all([
         fetchJson(baseUrl + '?type=1&limit=10000'),
         fetchJson(baseUrl + '?type=2&limit=10000')
     ]).then(([r1, r2]) => {
-        const list1 = (r1 && r1.status === 'ok' && Array.isArray(r1.punishments)) ? r1.punishments : [];
-        const list2 = (r2 && r2.status === 'ok' && Array.isArray(r2.punishments)) ? r2.punishments : [];
+        const list1Raw = (r1 && r1.status === 'ok' && Array.isArray(r1.punishments)) ? r1.punishments : [];
+        const list2Raw = (r2 && r2.status === 'ok' && Array.isArray(r2.punishments)) ? r2.punishments : [];
+        const list1 = withTypeFallback(list1Raw, 1);
+        const list2 = withTypeFallback(list2Raw, 2);
         const punishments = [...list1, ...list2].map(normalizePunishmentCreated);
         return { punishments };
     });

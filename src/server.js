@@ -2875,9 +2875,10 @@ const server = http.createServer(async (req, res) => {
                 });
             }
         } catch (_) {}
-        const mode = String(staffStatsUrl.searchParams.get('mode') || '').trim();
+        const modeRaw = String(staffStatsUrl.searchParams.get('mode') || '').trim().toLowerCase();
+        const mode = modeRaw === 'new' ? 'new' : 'old';
         const period = String(staffStatsUrl.searchParams.get('period') || '').trim();
-        if (mode === 'new') {
+        {
             const getCreatedTs = (p) => {
                 const raw = p && (p.created ?? p.created_at ?? p.date ?? p.timestamp ?? p.time ?? p.punish_time ?? p.ban_time ?? p.issue_time ?? p.start_time);
                 if (raw == null || raw === '') return null;
@@ -2890,6 +2891,30 @@ const server = http.createServer(async (req, res) => {
                     if (!Number.isNaN(ms)) return Math.floor(ms / 1000);
                 }
                 return null;
+            };
+            const staffPeriodsCatalog = () => {
+                const months = new Set();
+                const weeks = new Set();
+                const addTs = (ts) => {
+                    if (!ts || ts <= 0) return;
+                    const d = new Date(ts * 1000);
+                    const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+                    months.add(ym);
+                    d.setHours(12, 0, 0, 0);
+                    const day = (d.getDay() - 3 + 7) % 7;
+                    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day, 12, 0, 0, 0);
+                    const ymd = start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0');
+                    weeks.add(ymd);
+                };
+                const dataBySteamId = staffPunishmentsCache.dataBySteamId || {};
+                Object.values(dataBySteamId).forEach((arr) => {
+                    if (!Array.isArray(arr)) return;
+                    for (const p of arr) addTs(getCreatedTs(p));
+                });
+                return {
+                    months: Array.from(months).sort().reverse(),
+                    weeks: Array.from(weeks).sort().reverse().slice(0, 24)
+                };
             };
             const inPeriod = (p, selectedPeriod) => {
                 if (!selectedPeriod) return true;
@@ -2926,17 +2951,29 @@ const server = http.createServer(async (req, res) => {
             };
             const staffList = Array.isArray(staffPunishmentsCache.staffList) ? staffPunishmentsCache.staffList : [];
             const dataBySteamId = staffPunishmentsCache.dataBySteamId || {};
+            const isNew = mode === 'new';
             const staffStatsRows = staffList.map((s) => {
                 const sid = String(s?.steamid || '');
                 const arr = Array.isArray(dataBySteamId[sid]) ? dataBySteamId[sid] : [];
-                const counted = arr.filter((p) => {
-                    if (!inPeriod(p, period)) return false;
+                const counted = [];
+                const seen = new Set();
+                for (const p of arr) {
+                    if (!inPeriod(p, period)) continue;
+                    const type = Number(p?.type);
+                    if (!(type === 1 || type === 2)) continue;
                     const st = Number(p?.status);
-                    if (!(st === 1 || st === 4)) return false;
                     const reason = String(p?.reason ?? p?.ban_reason ?? p?.message ?? p?.comment ?? p?.desc ?? p?.punish_reason ?? p?.text ?? '').trim();
-                    if (excludedReason(reason)) return false;
-                    return true;
-                });
+                    if (isNew) {
+                        if (!(st === 1 || st === 4)) continue;
+                        if (excludedReason(reason)) continue;
+                    }
+                    const created = getCreatedTs(p) || 0;
+                    const playerSid = String(p?.steamid ?? p?.steam_id ?? '').trim();
+                    const key = `${type}|${st}|${created}|${playerSid}|${reason.trim().toLowerCase()}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    counted.push(p);
+                }
                 const bans = counted.filter((p) => Number(p?.type) === 1).length;
                 const mutes = counted.filter((p) => Number(p?.type) === 2).length;
                 return {
@@ -2946,14 +2983,15 @@ const server = http.createServer(async (req, res) => {
                     group: s?.group_display_name || '',
                     bans,
                     mutes,
-                    sum: bans + mutes
+                    sum: isNew ? (bans + mutes) : counted.length
                 };
             }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
                 compact: true,
-                mode: 'new',
+                mode,
                 period,
+                periods: staffPeriodsCatalog(),
                 staffList,
                 staffStatsRows,
                 lastUpdated: staffPunishmentsCache.lastUpdated,
@@ -2961,14 +2999,6 @@ const server = http.createServer(async (req, res) => {
             }));
             return;
         }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            staffList: staffPunishmentsCache.staffList,
-            staffStatsData: staffPunishmentsCache.dataBySteamId,
-            lastUpdated: staffPunishmentsCache.lastUpdated,
-            loading: !!staffPunishmentsCache.loading
-        }));
-        return;
     }
 
     // --- Staff tickets (ручной ввод) ---
@@ -3363,8 +3393,9 @@ const server = http.createServer(async (req, res) => {
         const etag = '"' + crypto.createHash('sha1').update(String(st.size) + ':' + String(st.mtimeMs)).digest('hex') + '"';
 
         const isHtml = ext === '.html';
-        const cacheControl = isHtml
-            ? 'public, max-age=0, must-revalidate'
+        const isHotAsset = isHtml || ext === '.js' || ext === '.css' || ext === '.json' || ext === '.map';
+        const cacheControl = isHotAsset
+            ? 'no-cache, no-store, must-revalidate'
             : 'public, max-age=604800, immutable';
 
         res.setHeader('Content-Type', contentType);

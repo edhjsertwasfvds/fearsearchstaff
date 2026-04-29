@@ -1555,6 +1555,7 @@ function setPunishmentsWeekStart(startYmd) {
     if (trigger) trigger.classList.remove('open');
     state.punishments.statsPeriodMode = 'week';
     state.punishments.selectedWeekStart = s;
+    state.punishments.selectedMonth = null;
     state.punishments.staffStatsRows = null;
     if (state.punishments.view === 'stats') {
         const isOldTable = state?.punishments?.staffTableMode === 'old' || getUserLevel() === 3;
@@ -1735,19 +1736,22 @@ async function loadStaffStatsFromServer() {
     if (getUserLevel() >= 4) await ensureStaffSecureLoaded();
     try {
         state.punishments.staffStatsLoading = true;
-        // Для новой статистики первым запросом тянем "за всё время", если период ещё не выбран.
+        // Для old/new статистики передаем единый период в API.
         const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
             ? ('week:' + String(state.punishments.selectedWeekStart))
             : String(state.punishments.selectedMonth || '');
         const isOldTable = state?.punishments?.staffTableMode === 'old' || getUserLevel() === 3;
-        const qs = isOldTable ? '' : (`?mode=new&period=${encodeURIComponent(period)}`);
+        const qs = isOldTable
+            ? (`?mode=old&period=${encodeURIComponent(period)}`)
+            : (`?mode=new&period=${encodeURIComponent(period)}`);
         let res = await fetch('/api/punishments/staff-stats' + qs, { headers: apiAuthHeaders() });
         if (res.status === 403) return;
         let data = await res.json().catch(() => ({}));
         if (isOldTable) {
+            const hasRowsPayload = Array.isArray(data.staffStatsRows);
             const hasFullStatsData = !!(data.lastUpdated && data.staffStatsData && Object.keys(data.staffStatsData || {}).length > 0);
-            if (!hasFullStatsData) {
-                const retry = await fetch('/api/punishments/staff-stats?force=1', { headers: apiAuthHeaders() });
+            if (!hasRowsPayload && !hasFullStatsData) {
+                const retry = await fetch('/api/punishments/staff-stats' + qs + '&force=1', { headers: apiAuthHeaders() });
                 if (retry.ok) {
                     data = await retry.json().catch(() => data);
                 }
@@ -1757,8 +1761,13 @@ async function loadStaffStatsFromServer() {
             ? data.staffList
             : (state.punishments.staffList || []);
         state.punishments.staffList = staffList;
-        if (!isOldTable && Array.isArray(data.staffStatsRows)) {
+        if (Array.isArray(data.staffStatsRows)) {
             state.punishments.staffStatsRows = data.staffStatsRows;
+            if (data.periods && typeof data.periods === 'object') {
+                const months = Array.isArray(data.periods.months) ? data.periods.months : [];
+                const weeks = Array.isArray(data.periods.weeks) ? data.periods.weeks : [];
+                state.punishments.staffPeriods = { months, weeks };
+            }
         } else {
             state.punishments.staffStatsData = data.staffStatsData || {};
             state.punishments.staffStatsRows = computeStaffStatsRows(
@@ -1772,7 +1781,9 @@ async function loadStaffStatsFromServer() {
             clearTimeout(staffStatsPollTimer);
             staffStatsPollTimer = null;
         }
-        const hasRows = Object.keys(state.punishments.staffStatsData || {}).length > 0;
+        const hasRows = Array.isArray(state.punishments.staffStatsRows)
+            ? state.punishments.staffStatsRows.length > 0
+            : Object.keys(state.punishments.staffStatsData || {}).length > 0;
         if (state.punishments.staffStatsLoading && !hasRows && state.punishments.view === 'stats') {
             staffStatsPollTimer = setTimeout(() => {
                 staffStatsPollTimer = null;
@@ -1905,7 +1916,9 @@ async function openStaffPeriodPunishments(steamId) {
 
 async function loadPunishmentsStaffList() {
     if (Array.isArray(state.punishments.staffList)) {
-        if (getUserLevel() >= 3 && Object.keys(state.punishments.staffStatsData || {}).length === 0) {
+        const hasRows = Array.isArray(state.punishments.staffStatsRows) && state.punishments.staffStatsRows.length > 0;
+        const hasLegacyData = Object.keys(state.punishments.staffStatsData || {}).length > 0;
+        if (getUserLevel() >= 3 && !hasRows && !hasLegacyData) {
             loadStaffStatsFromServer();
         }
         if (state.punishments.view === 'stats') loadStaffStatsFromServer();
