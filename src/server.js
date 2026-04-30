@@ -247,7 +247,7 @@ const checkedPlayers = {
     accountAge: new Map(),
     faceit: new Map()
 };
-const CHECK_CACHE_TTL = 30 * 60 * 1000;
+const CHECK_CACHE_TTL = Math.max(60_000, BG_CYCLE_MS);
 
 // Кэш для /api/steam-avatar/: чтобы не дергать Steam API при каждом открытии страницы.
 const steamAvatarCache = new Map(); // steamId -> { avatar, ts }
@@ -3404,12 +3404,14 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('ETag', etag);
         res.setHeader('Vary', 'Accept-Encoding');
 
-        const inm = String(req.headers['if-none-match'] || '');
-        const ims = String(req.headers['if-modified-since'] || '');
-        if ((inm && inm === etag) || (ims && ims === lastModified)) {
-            res.writeHead(304);
-            res.end();
-            return;
+        if (!isHotAsset) {
+            const inm = String(req.headers['if-none-match'] || '');
+            const ims = String(req.headers['if-modified-since'] || '');
+            if ((inm && inm === etag) || (ims && ims === lastModified)) {
+                res.writeHead(304);
+                res.end();
+                return;
+            }
         }
 
         const shouldGzip = wantsGzip(req) && isTextLikeContentType(contentType);
@@ -4058,8 +4060,7 @@ function createBackgroundJobsForCycle(cycleNo, dataForChecks) {
     ];
 
     if (!RAILWAY_LIGHT_MODE) return [...criticalJobs, ...heavyJobs];
-    const shouldRunHeavy = cycleNo % 3 === 0;
-    return shouldRunHeavy ? [...criticalJobs, ...heavyJobs] : criticalJobs;
+    return [...criticalJobs, ...heavyJobs];
 }
 
 function scheduleBackgroundJobs(cycleNo, dataForChecks) {
@@ -4125,6 +4126,7 @@ function updateDataInBackground() {
         broadcastUpdate('vac_bans_update', {});
         broadcastUpdate('yooma_bans_update', {});
         broadcastUpdate('suspicious_bans_update', {});
+        broadcastUpdate('all_players_update', {});
                 
         const dataForChecks = hasValidData ? servers : (prev || servers);
         console.log('[Background] Запуск проверок банов (staggered)...');

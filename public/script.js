@@ -173,6 +173,10 @@ async function loadBoundSteamAvatar(steamId) {
 const LOCAL_SETTINGS_KEY = 'localUiSettings';
 const PLAYERS_COLUMNS_KEY = 'playersTableColumns';
 const PLAYERS_EXCLUSIONS_KEY = 'playersTableExclusions';
+const TRACKED_PLAYERS_KEY = 'trackedPlayersList';
+const TRACKED_PLAYERS_LIMIT = 100;
+let trackedPlayersPresenceInitialized = false;
+let trackedPlayersOnlineSet = new Set();
 
 const PLAYERS_COLUMNS_DEF = [
     { id: 'num', label: '№', default: true },
@@ -238,6 +242,98 @@ function applyPlayersExclusions(players) {
         const g = String(p?.serverGame || '').trim().toUpperCase();
         return !(g.includes('CSGO') || g.includes('CS:GO'));
     });
+}
+
+function normalizeTrackedSteamId(raw) {
+    return String(raw || '').replace(/\D/g, '').trim();
+}
+
+function getTrackedPlayers() {
+    try {
+        const raw = localStorage.getItem(TRACKED_PLAYERS_KEY);
+        const parsed = JSON.parse(raw || '[]');
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map((row) => ({
+                steamId: normalizeTrackedSteamId(row?.steamId),
+                comment: String(row?.comment || '').trim().slice(0, 120)
+            }))
+            .filter((row) => /^\d{17}$/.test(row.steamId))
+            .slice(0, TRACKED_PLAYERS_LIMIT);
+    } catch (_) {
+        return [];
+    }
+}
+
+function setTrackedPlayers(list) {
+    const safe = (Array.isArray(list) ? list : [])
+        .map((row) => ({
+            steamId: normalizeTrackedSteamId(row?.steamId),
+            comment: String(row?.comment || '').trim().slice(0, 120)
+        }))
+        .filter((row) => /^\d{17}$/.test(row.steamId))
+        .slice(0, TRACKED_PLAYERS_LIMIT);
+    localStorage.setItem(TRACKED_PLAYERS_KEY, JSON.stringify(safe));
+}
+
+function showTrackedPlayerToast(steamId, comment) {
+    const stackId = 'trackedPresenceToastStack';
+    let stack = document.getElementById(stackId);
+    if (!stack) {
+        stack = document.createElement('div');
+        stack.id = stackId;
+        stack.className = 'fixed right-5 bottom-5 z-[220] flex flex-col gap-2 w-[min(460px,calc(100vw-32px))] pointer-events-none';
+        document.body.appendChild(stack);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'pointer-events-auto glass-panel rounded-xl border border-rose-500/30 p-4 shadow-2xl';
+    const c = String(comment || '').trim();
+    toast.innerHTML = `
+        <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-lg bg-rose-500/15 text-rose-300 flex items-center justify-center shrink-0">
+                <i class="ph ph-warning text-lg"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+                <div class="text-rose-300 text-sm font-semibold mb-1">Отслеживание игроков</div>
+                <div class="text-gray-200 text-sm leading-relaxed break-words">подозреваемый зашел в сеть [${escapeHtml(steamId)}]${c ? ` [${escapeHtml(c)}]` : ''}</div>
+            </div>
+            <button type="button" class="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-gray-200 flex items-center justify-center shrink-0" aria-label="Закрыть">
+                <i class="ph ph-x text-sm"></i>
+            </button>
+        </div>
+    `;
+    const close = toast.querySelector('button');
+    if (close) close.addEventListener('click', () => toast.remove());
+    stack.appendChild(toast);
+    setTimeout(() => {
+        toast.remove();
+        if (stack && stack.childElementCount === 0) stack.remove();
+    }, 10000);
+}
+
+function syncTrackedPlayersPresence(players) {
+    const tracked = getTrackedPlayers();
+    if (tracked.length === 0) {
+        trackedPlayersOnlineSet = new Set();
+        trackedPlayersPresenceInitialized = true;
+        return;
+    }
+    const trackedMap = new Map(tracked.map((row) => [row.steamId, row.comment]));
+    const onlineSet = new Set();
+    (Array.isArray(players) ? players : []).forEach((p) => {
+        const sid = normalizeTrackedSteamId(p?.steamId);
+        if (trackedMap.has(sid)) onlineSet.add(sid);
+    });
+    if (trackedPlayersPresenceInitialized) {
+        onlineSet.forEach((sid) => {
+            if (!trackedPlayersOnlineSet.has(sid)) {
+                showTrackedPlayerToast(sid, trackedMap.get(sid) || '');
+            }
+        });
+    } else {
+        trackedPlayersPresenceInitialized = true;
+    }
+    trackedPlayersOnlineSet = onlineSet;
 }
 
 function getLocalSettings() {
@@ -586,6 +682,7 @@ function applyMessage(data) {
         case 'all_players':
             if (!data.loading) {
                 state.allPlayers = { loading: false, players: Array.isArray(data.players) ? data.players : [] };
+                syncTrackedPlayersPresence(state.allPlayers.players);
                 if (playersLoadRetryTimer) {
                     clearTimeout(playersLoadRetryTimer);
                     playersLoadRetryTimer = null;
@@ -2522,9 +2619,35 @@ function buildAllPlayersTable(players) {
                 ${savedPresetsHtml}
             </div>
         </div>` : '';
+    const trackedPlayers = getTrackedPlayers();
+    const trackedPlayersHtml = `
+        <div class="rounded-xl border border-rose-500/20 bg-rose-500/[0.04] p-3 mb-2">
+            <div class="flex flex-wrap items-center gap-2 justify-between">
+                <div>
+                    <div class="text-[10px] uppercase tracking-wide text-rose-300/80">Отслеживание игроков</div>
+                    <div class="text-sm font-semibold text-white">Список подозреваемых (${trackedPlayers.length})</div>
+                </div>
+            </div>
+            <div class="mt-2 flex flex-wrap gap-2">
+                <input type="text" id="trackedPlayerSteamId" maxlength="17" placeholder="SteamID64" onkeydown="if(event.key==='Enter'){addTrackedPlayerFromInputs()}" class="flex-1 min-w-[180px] bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-xs font-mono placeholder-gray-500 focus:outline-none focus:border-rose-400/60">
+                <input type="text" id="trackedPlayerComment" maxlength="120" placeholder="Комментарий" onkeydown="if(event.key==='Enter'){addTrackedPlayerFromInputs()}" class="flex-1 min-w-[180px] bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-rose-400/60">
+                <button type="button" onclick="addTrackedPlayerFromInputs()" class="px-3 py-2 rounded-lg bg-rose-500/25 hover:bg-rose-500/35 text-rose-100 text-xs font-semibold">Добавить</button>
+            </div>
+            <div class="mt-2 max-h-[140px] overflow-y-auto hide-scrollbar space-y-1">
+                ${trackedPlayers.length > 0
+                    ? trackedPlayers.map((row) => `<div class="flex items-center gap-2 rounded-lg bg-white/[0.03] border border-white/[0.06] px-2.5 py-2">
+                        <span class="text-[11px] text-gray-200 font-mono">${escapeHtml(row.steamId)}</span>
+                        <span class="text-[11px] text-gray-400 truncate">${escapeHtml(row.comment || 'Без комментария')}</span>
+                        <button type="button" onclick="removeTrackedPlayer('${escapeHtml(row.steamId)}')" class="ml-auto text-[11px] px-2 py-1 rounded bg-white/5 hover:bg-rose-500/20 text-gray-400 hover:text-rose-300">Удалить</button>
+                    </div>`).join('')
+                    : '<div class="text-[11px] text-gray-500">Список пуст. Добавьте SteamID, чтобы получать уведомления при появлении игрока в онлайне.</div>'}
+            </div>
+        </div>
+    `;
 
     return `
         <div class="px-1 -mt-3 space-y-1.5 mb-2">
+            ${trackedPlayersHtml}
             <div class="flex items-center gap-2 text-[11px] text-gray-500">
                 <span>${flagsSummary}</span>
                 ${countText}
@@ -3371,6 +3494,34 @@ function refreshAllPlayersPanel(withAnimation = true) {
     content.innerHTML = buildAllPlayersTable(merged);
     if (withAnimation) staggerRows(content);
     requestAccountAgeFor(merged, 'steamId');
+}
+
+function addTrackedPlayerFromInputs() {
+    const steamInput = document.getElementById('trackedPlayerSteamId');
+    const commentInput = document.getElementById('trackedPlayerComment');
+    if (!steamInput || !commentInput) return;
+    const steamId = normalizeTrackedSteamId(steamInput.value);
+    if (!/^\d{17}$/.test(steamId)) {
+        steamInput.focus();
+        return;
+    }
+    const comment = String(commentInput.value || '').trim().slice(0, 120);
+    const list = getTrackedPlayers().filter((row) => row.steamId !== steamId);
+    list.unshift({ steamId, comment });
+    setTrackedPlayers(list);
+    steamInput.value = '';
+    commentInput.value = '';
+    syncTrackedPlayersPresence(state.allPlayers.players);
+    if (isPlayersCategoryOpen()) refreshAllPlayersPanel(false);
+}
+
+function removeTrackedPlayer(steamId) {
+    const sid = normalizeTrackedSteamId(steamId);
+    if (!sid) return;
+    const list = getTrackedPlayers().filter((row) => row.steamId !== sid);
+    setTrackedPlayers(list);
+    syncTrackedPlayersPresence(state.allPlayers.players);
+    if (isPlayersCategoryOpen()) refreshAllPlayersPanel(false);
 }
 
 // ——— Проверка игрока ———
