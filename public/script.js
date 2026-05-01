@@ -2686,7 +2686,7 @@ function buildAllPlayersTable(players) {
         </div>` : '';
     const trackedPlayers = getTrackedPlayers();
     const trackedPlayersMenu = `
-        <div id="trackedPlayersMenu" class="${state.trackedMenuOpen ? '' : 'hidden'} ui-select-menu absolute right-0 bottom-full mb-1 rounded-xl shadow-xl z-[120] p-3 w-[520px] max-w-[calc(100vw-120px)]">
+        <div id="trackedPlayersMenu" class="${state.trackedMenuOpen ? '' : 'hidden'} ui-select-menu absolute right-0 top-full mt-2 rounded-xl shadow-2xl z-[9999] p-3 w-[520px] max-w-[calc(100vw-120px)]">
             <div class="text-[10px] uppercase tracking-wide text-rose-300/80 mb-1">Отслеживание игроков</div>
             <div class="text-xs text-white font-semibold mb-2">Список подозреваемых (${trackedPlayers.length})</div>
             <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
@@ -3064,7 +3064,7 @@ function closeSidePanel() {
     state.customFiltersOpen = false;
     state.filtersMenuOpen = false;
     state.columnsMenuOpen = false;
-    state.trackedMenuOpen = false;
+    closeTrackedPlayersMenu();
     document.querySelectorAll('.dropdown-item[data-category]').forEach(el => el.classList.remove('active'));
 }
 
@@ -3099,11 +3099,22 @@ function clearPlayersFiltersUiMeta() {
     setPlayersFiltersUiMeta({ activeTemplate: null, activePresetId: null });
 }
 
+function setTrackedMenuOverlayEnabled(enabled) {
+    const panelContent = document.getElementById('panelContent');
+    if (!panelContent) return;
+    panelContent.style.overflow = enabled ? 'visible' : '';
+}
+
+function closeTrackedPlayersMenu() {
+    state.trackedMenuOpen = false;
+    setTrackedMenuOverlayEnabled(false);
+}
+
 function togglePlayersFiltersMenu() {
     state.filtersMenuOpen = !state.filtersMenuOpen;
     if (state.filtersMenuOpen) {
         state.columnsMenuOpen = false;
-        state.trackedMenuOpen = false;
+        closeTrackedPlayersMenu();
     }
     scheduleRenderPanel();
 }
@@ -3112,7 +3123,7 @@ function togglePlayersColumnsMenu(e) {
     e?.stopPropagation?.();
     state.columnsMenuOpen = !state.columnsMenuOpen;
     if (state.columnsMenuOpen) {
-        state.trackedMenuOpen = false;
+        closeTrackedPlayersMenu();
         state.filtersMenuOpen = false;
     }
     scheduleRenderPanel();
@@ -3124,7 +3135,10 @@ function toggleTrackedPlayersMenu(e) {
     if (state.trackedMenuOpen) {
         state.columnsMenuOpen = false;
         state.filtersMenuOpen = false;
+        setTrackedMenuOverlayEnabled(true);
         void loadTrackedPlayersShared();
+    } else {
+        setTrackedMenuOverlayEnabled(false);
     }
     scheduleRenderPanel();
 }
@@ -4258,7 +4272,7 @@ document.addEventListener('keydown', (e) => {
             return;
         }
         if (state.trackedMenuOpen) {
-            state.trackedMenuOpen = false;
+            closeTrackedPlayersMenu();
             scheduleRenderPanel();
             return;
         }
@@ -4280,7 +4294,7 @@ document.addEventListener('click', (e) => {
         return;
     }
     if (state.trackedMenuOpen && !e.target.closest('[data-tracked-dropdown]')) {
-        state.trackedMenuOpen = false;
+        closeTrackedPlayersMenu();
         scheduleRenderPanel();
         return;
     }
