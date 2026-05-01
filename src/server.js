@@ -3973,6 +3973,7 @@ function sendAllPlayers(ws) {
             serverGame: d ? d.serverGame : null,
             serverIp: d ? d.serverIp : null,
             serverPort: d ? d.serverPort : null,
+            ping: d ? d.ping : null,
             whitelisted: wl,
             whitelistAddedBy: wlEntry ? wlEntry.added_by_discord_id : null
         };

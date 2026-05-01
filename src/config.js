@@ -28,7 +28,7 @@ const REQUEST_TIMEOUT_FAST = 5000;
 const REQUEST_TIMEOUT_SLOW = 15000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 const RAILWAY_LIGHT_MODE = (process.env.RAILWAY_LIGHT_MODE || (IS_PROD ? 'true' : 'false')) === 'true';
-const BG_CYCLE_MS = Math.max(60_000, Number(process.env.BG_CYCLE_MS || CACHE_TTL_MS));
+const BG_CYCLE_MS = Math.max(60_000, Number(process.env.BG_CYCLE_MS || 60_000));
 const BG_STAGGER_MS = Math.max(0, Number(process.env.BG_STAGGER_MS || (RAILWAY_LIGHT_MODE ? 2500 : 800)));
 const PUNISHMENTS_REQ_TIMEOUT_MS = Math.max(1500, Number(process.env.PUNISHMENTS_REQ_TIMEOUT_MS || 4500));
 const MAX_REQUEST_BODY_BYTES = 1024 * 1024; // 1 MB

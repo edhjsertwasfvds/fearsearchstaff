@@ -31,6 +31,8 @@ const ROLES_EDITOR_ACCESS_TOKEN_KEY = 'rolesEditorAccessToken';
 let ws = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
+let frontendMinuteRefreshTimer = null;
+let frontendSyncHandlersBound = false;
 let playersPanelRefreshQueued = false;
 let playersPanelRefreshTimer = null;
 let playersLoadRetryTimer = null;
@@ -334,6 +336,14 @@ function showTrackedPlayerToast(steamId, comment) {
     }, 10000);
 }
 
+function getTrackedPlayerPresence(steamId) {
+    const sid = normalizeTrackedSteamId(steamId);
+    if (!sid) return { key: 'offline', label: 'Не в сети', className: 'bg-white/5 text-gray-400 border border-white/10' };
+    const row = (state.allPlayers.players || []).find((p) => normalizeTrackedSteamId(p?.steamId) === sid);
+    if (!row) return { key: 'offline', label: 'Не в сети', className: 'bg-white/5 text-gray-400 border border-white/10' };
+    return { key: 'online', label: 'В сети', className: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' };
+}
+
 function syncTrackedPlayersPresence(players) {
     const tracked = getTrackedPlayers();
     if (tracked.length === 0) {
@@ -534,6 +544,35 @@ function staffStatsPunishmentStatus(p) {
     return -1;
 }
 
+function stopFrontendMinuteRefresh() {
+    if (frontendMinuteRefreshTimer) {
+        clearInterval(frontendMinuteRefreshTimer);
+        frontendMinuteRefreshTimer = null;
+    }
+}
+
+function startFrontendMinuteRefresh() {
+    stopFrontendMinuteRefresh();
+    frontendMinuteRefreshTimer = setInterval(() => {
+        requestAll();
+        if (isPlayersCategoryOpen()) requestPlayersDataNow();
+    }, 60000);
+}
+
+function bindFrontendRealtimeSyncHandlers() {
+    if (frontendSyncHandlersBound) return;
+    frontendSyncHandlersBound = true;
+    window.addEventListener('focus', () => {
+        requestAll();
+        if (isPlayersCategoryOpen()) requestPlayersDataNow();
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        requestAll();
+        if (isPlayersCategoryOpen()) requestPlayersDataNow();
+    });
+}
+
 // ——— WebSocket ———
 
 function connectWebSocket() {
@@ -548,6 +587,8 @@ function connectWebSocket() {
         }
         reconnectAttempts = 0;
         requestAll();
+        startFrontendMinuteRefresh();
+        bindFrontendRealtimeSyncHandlers();
         if (isPlayersCategoryOpen()) {
             requestPlayersDataNow();
             schedulePlayersLoadRetry();
@@ -565,6 +606,7 @@ function connectWebSocket() {
     
     ws.onerror = () => {};
     ws.onclose = () => {
+        stopFrontendMinuteRefresh();
         if (reconnectTimer) return;
         const baseDelay = 1000;
         const maxDelay = 30000;
@@ -2644,21 +2686,27 @@ function buildAllPlayersTable(players) {
         </div>` : '';
     const trackedPlayers = getTrackedPlayers();
     const trackedPlayersMenu = `
-        <div id="trackedPlayersMenu" class="${state.trackedMenuOpen ? '' : 'hidden'} ui-select-menu absolute right-0 top-full mt-1 rounded-xl shadow-xl z-50 p-3 min-w-[420px] max-w-[520px]">
+        <div id="trackedPlayersMenu" class="${state.trackedMenuOpen ? '' : 'hidden'} ui-select-menu absolute right-0 top-full mt-1 rounded-xl shadow-xl z-50 p-3 w-[min(560px,calc(100vw-80px))]">
             <div class="text-[10px] uppercase tracking-wide text-rose-300/80 mb-1">Отслеживание игроков</div>
             <div class="text-xs text-white font-semibold mb-2">Список подозреваемых (${trackedPlayers.length})</div>
-            <div class="flex flex-wrap gap-2">
-                <input type="text" id="trackedPlayerSteamId" maxlength="17" placeholder="SteamID64" onkeydown="if(event.key==='Enter'){addTrackedPlayerFromInputs()}" class="flex-1 min-w-[140px] bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-white text-xs font-mono placeholder-gray-500 focus:outline-none focus:border-rose-400/60">
-                <input type="text" id="trackedPlayerComment" maxlength="120" placeholder="Комментарий" onkeydown="if(event.key==='Enter'){addTrackedPlayerFromInputs()}" class="flex-1 min-w-[140px] bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-rose-400/60">
+            <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
+                <input type="text" id="trackedPlayerSteamId" maxlength="17" placeholder="SteamID64" onkeydown="if(event.key==='Enter'){addTrackedPlayerFromInputs()}" class="bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-white text-xs font-mono placeholder-gray-500 focus:outline-none focus:border-rose-400/60">
+                <input type="text" id="trackedPlayerComment" maxlength="120" placeholder="Комментарий" onkeydown="if(event.key==='Enter'){addTrackedPlayerFromInputs()}" class="bg-white/5 border border-white/10 rounded-lg px-2.5 py-2 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-rose-400/60">
                 <button type="button" onclick="addTrackedPlayerFromInputs()" class="px-3 py-2 rounded-lg bg-rose-500/25 hover:bg-rose-500/35 text-rose-100 text-xs font-semibold">Добавить</button>
             </div>
-            <div class="mt-2 max-h-[180px] overflow-y-auto hide-scrollbar space-y-1">
+            <div class="mt-2 max-h-[240px] overflow-y-auto hide-scrollbar space-y-1">
                 ${trackedPlayers.length > 0
-                    ? trackedPlayers.map((row) => `<div class="flex items-center gap-2 rounded-lg bg-white/[0.03] border border-white/[0.06] px-2 py-1.5">
-                        <span class="text-[11px] text-gray-200 font-mono">${escapeHtml(row.steamId)}</span>
-                        <span class="text-[11px] text-gray-400 truncate">${escapeHtml(row.comment || 'Без комментария')}</span>
-                        <button type="button" onclick="removeTrackedPlayer('${escapeHtml(row.steamId)}')" class="ml-auto text-[11px] px-2 py-1 rounded bg-white/5 hover:bg-rose-500/20 text-gray-400 hover:text-rose-300">Удалить</button>
-                    </div>`).join('')
+                    ? trackedPlayers.map((row) => {
+                        const status = getTrackedPlayerPresence(row.steamId);
+                        return `<div class="flex items-center gap-2 rounded-lg bg-white/[0.03] border border-white/[0.06] px-2 py-2">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-[11px] text-gray-200 font-mono">${escapeHtml(row.steamId)}</div>
+                            <div class="text-[11px] text-gray-400 truncate">${escapeHtml(row.comment || 'Без комментария')}</div>
+                        </div>
+                        <span class="text-[10px] px-2 py-1 rounded-full whitespace-nowrap ${status.className}">${status.label}</span>
+                        <button type="button" onclick="removeTrackedPlayer('${escapeHtml(row.steamId)}')" class="text-[11px] px-2 py-1 rounded bg-white/5 hover:bg-rose-500/20 text-gray-400 hover:text-rose-300">Удалить</button>
+                    </div>`;
+                    }).join('')
                     : '<div class="text-[11px] text-gray-500">Список пуст.</div>'}
             </div>
         </div>
