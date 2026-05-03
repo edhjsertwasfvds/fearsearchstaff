@@ -275,37 +275,7 @@ const ongoingChecks = {
     suspicious: false
 };
 
-// Rate limiting
-const rateLimits = new Map();
-const loginRateLimits = new Map();
-const RATE_LIMIT_WINDOW = 60000;
-const MAX_REQUESTS_PER_WINDOW = 30;
-const LOGIN_RATE_LIMIT_WINDOW = 5 * 60000;
-const MAX_LOGIN_ATTEMPTS = 5;
-
-function checkRateLimit(ip) {
-    const now = Date.now();
-    const userLimit = rateLimits.get(ip) || { count: 0, resetTime: now + RATE_LIMIT_WINDOW };
-    if (now > userLimit.resetTime) {
-        userLimit.count = 0;
-        userLimit.resetTime = now + RATE_LIMIT_WINDOW;
-    }
-    userLimit.count++;
-    rateLimits.set(ip, userLimit);
-    return userLimit.count <= MAX_REQUESTS_PER_WINDOW;
-}
-
-function checkLoginRateLimit(ip) {
-    const now = Date.now();
-    const limit = loginRateLimits.get(ip) || { count: 0, resetTime: now + LOGIN_RATE_LIMIT_WINDOW };
-    if (now > limit.resetTime) {
-        limit.count = 0;
-        limit.resetTime = now + LOGIN_RATE_LIMIT_WINDOW;
-    }
-    limit.count++;
-    loginRateLimits.set(ip, limit);
-    return limit.count <= MAX_LOGIN_ATTEMPTS;
-}
+// Rate limiting отключен: сервер не должен отдавать 429.
 
 function truncateForLog(value, max = 180) {
     const s = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
@@ -1345,16 +1315,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Rate limiting для API endpoints
-    // Локальная разработка и легкий endpoint аватарок не должны упираться в 429.
-    const isLocalClient = clientIp === '::1' || clientIp === '127.0.0.1' || clientIp === '::ffff:127.0.0.1';
-    const isAvatarApi = req.url.startsWith('/api/steam-avatar/');
-    if (isApiRequest && !isLocalClient && !isAvatarApi) {
-        if (!checkRateLimit(clientIp)) {
-            sendError(res, 429, 'RATE_LIMIT', 'Too many requests. Please try again later.');
-            return;
-        }
-    }
+    // Глобальный rate limiting отключен по запросу.
     res.on('finish', () => {
         if (!isApiRequest) return;
         trackMetric(runtimeMetrics.api, `${req.method} ${req.url.split('?')[0]}`, nowMs() - reqStartedAt);
@@ -1373,11 +1334,6 @@ const server = http.createServer(async (req, res) => {
 
     // Авторизация по логину/паролю
     if (req.url === '/api/auth/login' && req.method === 'POST') {
-        if (!checkLoginRateLimit(clientIp)) {
-            res.writeHead(429, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Слишком много попыток входа. Подождите 5 минут.' }));
-            return;
-        }
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
