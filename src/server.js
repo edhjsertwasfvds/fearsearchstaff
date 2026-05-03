@@ -127,7 +127,21 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 const db = require('./database');
+const whitelistCache = require('./whitelistCache');
 const auth = require('./auth');
+
+async function getStaffHiddenSiteSteamIdSet() {
+    let raw = await db.getSetting('staff_hidden_site_steam_ids', '[]');
+    if (typeof raw === 'string') {
+        try {
+            raw = JSON.parse(raw);
+        } catch (_) {
+            raw = [];
+        }
+    }
+    const arr = Array.isArray(raw) ? raw : [];
+    return new Set(arr.map((x) => String(x).trim()).filter(Boolean));
+}
 const {
     getSessionFromReq,
     sendJson,
@@ -304,8 +318,8 @@ function sessionLogChunk(session) {
     return `userId=${session.userId} username=${truncateForLog(session.username, 64)} displayName=${truncateForLog(session.displayName, 64)} level=${session.level}`;
 }
 
-function logHttpRequest(req, clientIp) {
-    const session = getSessionFromReq(req);
+async function logHttpRequest(req, clientIp) {
+    const session = await getSessionFromReq(req);
     const ua = truncateForLog(req.headers['user-agent'] || '-', 220);
     const origin = truncateForLog(req.headers.origin || '-', 140);
     const referer = truncateForLog(req.headers.referer || '-', 180);
@@ -477,11 +491,11 @@ function getSessionTokenFromCookie(cookieHeader) {
     return m ? decodeURIComponent(m[1]) : '';
 }
 
-function resolveUserSession(req) {
-    const s = getSessionFromReq(req);
+async function resolveUserSession(req) {
+    const s = await getSessionFromReq(req);
     if (s) return s;
     const ck = getSessionTokenFromCookie(req.headers.cookie || '');
-    return ck ? auth.getSession(ck) : null;
+    return ck ? await auth.getSession(ck) : null;
 }
 
 // Функция для проверки банов на Yooma через WebSocket (быстрая параллельная проверка)
@@ -1266,19 +1280,24 @@ function getPlayerGames(steamId, callback) {
 const server = http.createServer(async (req, res) => {
     const reqStartedAt = nowMs();
     const clientIp = getClientIp(req);
-    logHttpRequest(req, clientIp);
+    await logHttpRequest(req, clientIp);
     const safeLog = (session, actionType, targetSteamId, targetName, details) => {
         try {
             if (!session) return;
             const t = String(actionType || '').trim();
             if (!t) return;
             if (t === 'view_bans') return; // never log this action
-            db.logAction(String(session.userId), String(session.username || session.displayName || 'user'), t,
-                targetSteamId != null ? String(targetSteamId) : null,
-                targetName != null ? String(targetName) : null,
-                details != null ? String(details) : null,
-                clientIp || null
-            );
+            Promise.resolve(
+                db.logAction(
+                    String(session.userId),
+                    String(session.username || session.displayName || 'user'),
+                    t,
+                    targetSteamId != null ? String(targetSteamId) : null,
+                    targetName != null ? String(targetName) : null,
+                    details != null ? String(details) : null,
+                    clientIp || null
+                )
+            ).catch(() => {});
         } catch (_) {}
     };
     
@@ -1341,14 +1360,6 @@ const server = http.createServer(async (req, res) => {
         trackMetric(runtimeMetrics.api, `${req.method} ${req.url.split('?')[0]}`, nowMs() - reqStartedAt);
     });
 
-    // Авторизация по логину/паролю
-    if (req.url === '/api/auth/login' && req.method === 'POST') {
-        if (!checkLoginRateLimit(clientIp)) {
-            res.writeHead(429, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Слишком много попыток входа. Подождите 5 минут.' }));
-        return;
-    }
-
     // Публичная конфигурация страницы авторизации (без секрета)
     if (req.url === '/api/public-config' && req.method === 'GET') {
         const supportUrl = String(process.env.AUTH_SUPPORT_URL || '').trim();
@@ -1359,9 +1370,17 @@ const server = http.createServer(async (req, res) => {
         });
         return;
     }
+
+    // Авторизация по логину/паролю
+    if (req.url === '/api/auth/login' && req.method === 'POST') {
+        if (!checkLoginRateLimit(clientIp)) {
+            res.writeHead(429, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Слишком много попыток входа. Подождите 5 минут.' }));
+            return;
+        }
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { username, password } = JSON.parse(body);
                 if (!username || !password) {
@@ -1369,14 +1388,14 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ error: 'Введите логин и пароль' }));
             return;
         }
-                const user = db.verifyUser(username, password);
+                const user = await db.verifyUser(username, password);
                 if (!user) {
                     console.log(`[Auth] Неудачная попытка входа: ${username} от ${clientIp}`);
                     res.writeHead(401, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Неверный логин или пароль' }));
                     return;
                 }
-                const session = auth.createSession(user);
+                const session = await auth.createSession(user);
                 console.log(`[Auth] Пользователь авторизован: ${user.username} (id=${user.id}), level=${user.level}`);
                 const maxAge = Math.max(0, Math.floor((session.expiresAt - Date.now()) / 1000));
                 const cookieSecure = IS_PROD ? 'Secure; ' : '';
@@ -1398,19 +1417,19 @@ const server = http.createServer(async (req, res) => {
 
     // Управление пользователями (level >= USER_LEVEL_ADMIN — ГА)
     if (req.url === '/api/users' && req.method === 'GET') {
-        const session = requireSession(req, res, USER_LEVEL_ADMIN);
+        const session = await requireSession(req, res, USER_LEVEL_ADMIN);
         if (!session) return;
-        const users = db.getAllUsers();
+        const users = await db.getAllUsers();
         sendJson(res, 200, { users });
         return;
     }
 
     if (req.url === '/api/users' && req.method === 'POST') {
-        const session = requireSession(req, res, USER_LEVEL_ADMIN);
+        const session = await requireSession(req, res, USER_LEVEL_ADMIN);
         if (!session) return;
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { username, password, displayName, level } = JSON.parse(body);
                 if (!username || !password) {
@@ -1429,7 +1448,7 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
                 const newLevel = Math.min(parseInt(level) || 1, Math.min(session.level, 5));
-                const id = db.createUser(username, password, displayName || username, newLevel);
+                const id = await db.createUser(username, password, displayName || username, newLevel);
                 console.log(`[Auth] Создан пользователь: ${username} (id=${id}), level=${newLevel} (by ${session.username})`);
                 safeLog(session, 'user_create', null, String(username), `id=${id} level=${newLevel}`);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1448,7 +1467,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url.match(/^\/api\/users\/\d+$/) && req.method === 'PUT') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
@@ -1457,11 +1476,11 @@ const server = http.createServer(async (req, res) => {
         const userId = parseInt(req.url.split('/api/users/')[1]);
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const payload = JSON.parse(body);
                 const { level, password, steamId: rawSteamId } = payload;
-                const target = db.getUserById(userId);
+                const target = await db.getUserById(userId);
                 if (!target) {
                     res.writeHead(404, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Пользователь не найден' }));
@@ -1474,12 +1493,12 @@ const server = http.createServer(async (req, res) => {
                 }
                 if (level !== undefined) {
                     const newLevel = Math.min(Math.max(parseInt(level), 1), Math.min(session.level, 5));
-                    db.updateUserLevel(userId, newLevel);
+                    await db.updateUserLevel(userId, newLevel);
                     console.log(`[Auth] Уровень ${target.username} изменён: ${target.level} → ${newLevel} (by ${session.username})`);
                     safeLog(session, 'user_level_update', null, String(target.username), `${target.level} -> ${newLevel} (id=${userId})`);
                 }
                 if (password) {
-                    db.updateUserPassword(userId, password);
+                    await db.updateUserPassword(userId, password);
                     console.log(`[Auth] Пароль ${target.username} изменён (by ${session.username})`);
                     safeLog(session, 'user_password_update', null, String(target.username), `id=${userId}`);
                 }
@@ -1496,7 +1515,7 @@ const server = http.createServer(async (req, res) => {
                         res.end(JSON.stringify({ error: 'Некорректный SteamID' }));
                         return;
                     }
-                    db.updateUserSteamId(userId, steamId);
+                    await db.updateUserSteamId(userId, steamId);
                     console.log(`[Auth] SteamID ${target.username} обновлён: ${steamId || '—'} (by ${session.username})`);
                     safeLog(session, 'user_steamid_update', String(steamId || ''), String(target.username), `id=${userId}`);
                 }
@@ -1511,7 +1530,7 @@ const server = http.createServer(async (req, res) => {
                     }
                     
     if (req.url.match(/^\/api\/users\/\d+$/) && req.method === 'DELETE') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
@@ -1528,15 +1547,15 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ error: 'Нельзя удалить себя' }));
             return;
         }
-        const target = db.getUserById(userId);
+        const target = await db.getUserById(userId);
         if (session.level < USER_LEVEL_SUPER && target && target.level >= session.level) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Нельзя удалить пользователя с таким же или выше уровнем' }));
             return;
         }
         // Сначала инвалидируем все сессии пользователя, затем удаляем из БД.
-        try { db.deleteSessionsByUserId(userId); } catch (_) {}
-        db.deleteUser(userId);
+        try { await db.deleteSessionsByUserId(userId); } catch (_) {}
+        await db.deleteUser(userId);
         console.log(`[Auth] Удалён пользователь: ${target?.username || userId} (by ${session.username})`);
         safeLog(session, 'user_delete', null, String(target?.username || userId), `id=${userId}`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1546,15 +1565,15 @@ const server = http.createServer(async (req, res) => {
 
     // Сброс всех пользователей (только level 5)
     if (req.url === '/api/users/reset' && req.method === 'DELETE') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < 5) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав (нужен уровень 5)' }));
             return;
         }
         // Сбрасываем пользователей и их сессии, чтобы никто не оставался залогинен.
-        try { db.deleteAllSessionsDb(); } catch (_) {}
-        db.deleteAllUsers();
+        try { await db.deleteAllSessionsDb(); } catch (_) {}
+        await db.deleteAllUsers();
         console.log(`[Auth] Сброшены ВСЕ пользователи (by ${session.username})`);
         safeLog(session, 'users_reset', null, null, null);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1564,13 +1583,13 @@ const server = http.createServer(async (req, res) => {
 
     // Восстановление пользователей из .env (level 5)
     if (req.url === '/api/users/restore-env' && req.method === 'POST') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < 5) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав (нужен уровень 5)' }));
             return;
         }
-        const restored = db.restoreUsersFromEnv();
+        const restored = await db.restoreUsersFromEnv();
         safeLog(session, 'users_restore_env', null, null, `restored=${restored || 0}`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, restored }));
@@ -1583,14 +1602,14 @@ const server = http.createServer(async (req, res) => {
         if (inviteUrl.pathname !== '/api/invites') {
             // Not this route (e.g. /api/invites/generate)
         } else {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < 5) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав (нужен уровень 5)' }));
             return;
         }
         const includeUsed = inviteUrl.searchParams.get('used') === '1';
-        const codes = db.getInviteCodes(includeUsed);
+        const codes = await db.getInviteCodes(includeUsed);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ codes }));
         return;
@@ -1598,7 +1617,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url === '/api/invites/generate' && req.method === 'POST') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < 5) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав (нужен уровень 5)' }));
@@ -1606,11 +1625,11 @@ const server = http.createServer(async (req, res) => {
         }
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { level } = JSON.parse(body || '{}');
                 const lvl = Math.min(Math.max(parseInt(level) || 1, 1), 5);
-                const code = db.createInviteCode(lvl, session.userId);
+                const code = await db.createInviteCode(lvl, session.userId);
                 console.log(`[Auth] Создан пригласительный код (level=${lvl}) by ${session.username}`);
                 safeLog(session, 'invite_generate', null, null, `level=${lvl} code=${code}`);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1624,7 +1643,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'DELETE' && req.url.startsWith('/api/invites/')) {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < 5) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав (нужен уровень 5)' }));
@@ -1637,7 +1656,7 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify({ error: 'Код не указан' }));
             return;
         }
-        const ok = db.deleteInviteCode(code);
+        const ok = await db.deleteInviteCode(code);
         if (!ok) {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Код не найден' }));
@@ -1653,7 +1672,7 @@ const server = http.createServer(async (req, res) => {
     if (req.url.startsWith('/api/auth/validate-invite') && req.method === 'GET') {
         const u = new URL(req.url, `http://${req.headers.host}`);
         const code = u.searchParams.get('code');
-        const level = code ? db.validateInviteCode(String(code).trim()) : null;
+        const level = code ? await db.validateInviteCode(String(code).trim()) : null;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(level !== null ? { valid: true, level } : { valid: false }));
         return;
@@ -1663,7 +1682,7 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/auth/register-by-invite' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { username, password, inviteCode } = JSON.parse(body || '{}');
                 if (!username || !password || !inviteCode) {
@@ -1671,7 +1690,7 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ error: 'Введите логин, пароль и пригласительный код' }));
                     return;
                 }
-                const level = db.useInviteCode(String(inviteCode).trim());
+                const level = await db.useInviteCode(String(inviteCode).trim());
                 if (level === null) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Недействительный или уже использованный код' }));
@@ -1687,9 +1706,9 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ error: 'Пароль минимум 6 символов' }));
                     return;
                 }
-                const id = db.createUser(username, password, username, level);
+                const id = await db.createUser(username, password, username, level);
                 const userData = { id, username, displayName: username, level };
-                const session = auth.createSession(userData);
+                const session = await auth.createSession(userData);
                 console.log(`[Auth] Регистрация по коду: ${username} (level=${level})`);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({
@@ -1713,7 +1732,7 @@ const server = http.createServer(async (req, res) => {
 
     // Очистка кэша (level >= 4)
     if (req.url === '/api/clear-cache' && req.method === 'POST') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
@@ -1749,10 +1768,10 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/auth/session' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { sessionToken } = JSON.parse(body);
-                const validation = auth.validateSession(sessionToken);
+                const validation = await auth.validateSession(sessionToken);
                 
                 if (validation.valid) {
                     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1782,10 +1801,10 @@ const server = http.createServer(async (req, res) => {
     if (req.url === '/api/auth/logout' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { sessionToken } = JSON.parse(body);
-                auth.deleteSession(sessionToken);
+                await auth.deleteSession(sessionToken);
                 
                 const cookieSecure = IS_PROD ? 'Secure; ' : '';
                 res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `sessionToken=; Path=/; SameSite=Lax; ${cookieSecure}Max-Age=0` });
@@ -1799,26 +1818,26 @@ const server = http.createServer(async (req, res) => {
     }
     
     if (req.url === '/api/logs' && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_WHITELIST) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
             return;
         }
-        const logs = (db.getActionLogs(200, 0) || []).filter(l => l && l.action_type !== 'view_bans').slice(0, 100);
+        const logs = (await db.getActionLogs(200, 0) || []).filter(l => l && l.action_type !== 'view_bans').slice(0, 100);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ logs }));
         return;
     }
     
     if (req.url === '/api/whitelist' && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Не авторизован' }));
             return;
         }
-        const whitelist = db.getWhitelist();
+        const whitelist = await db.getWhitelist();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ whitelist }));
         return;
@@ -1826,7 +1845,7 @@ const server = http.createServer(async (req, res) => {
     
     // --- Activity graph data ---
     if (req.url.startsWith('/api/activity') && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Не авторизован' }));
@@ -1834,7 +1853,7 @@ const server = http.createServer(async (req, res) => {
         }
         const parsed = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
         const range = parsed.searchParams.get('range');
-        const history = db.getServerActivityRange(range === 'day' || range === 'week' || range === 'all' ? range : 'day');
+        const history = await db.getServerActivityRange(range === 'day' || range === 'week' || range === 'all' ? range : 'day');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ activity: history, range: range === 'day' || range === 'week' || range === 'all' ? range : 'day' }));
         return;
@@ -1842,22 +1861,24 @@ const server = http.createServer(async (req, res) => {
 
     // --- Staff list (filtered) ---
     if (req.url === '/api/staff' && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
             return;
         }
+        const hiddenSteamIds = Array.from(await getStaffHiddenSiteSteamIdSet());
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             staffList: staffPunishmentsCache.staffList,
-            lastUpdated: staffPunishmentsCache.staffListLastUpdated
+            lastUpdated: staffPunishmentsCache.staffListLastUpdated,
+            hiddenSteamIds
         }));
         return;
     }
 
     if (req.url === '/api/fear/admins/find' && req.method === 'POST') {
-        const session = requireSession(req, res, 3);
+        const session = await requireSession(req, res, 3);
         if (!session) return;
         let body = '';
         req.on('data', chunk => body += chunk);
@@ -1900,7 +1921,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url === '/api/fear/admins/edit' && req.method === 'POST') {
-        const session = requireSession(req, res, 3);
+        const session = await requireSession(req, res, 3);
         if (!session) return;
         let body = '';
         req.on('data', chunk => body += chunk);
@@ -1943,26 +1964,26 @@ const server = http.createServer(async (req, res) => {
     }
     // --- Maintenance banner (public) ---
     if (req.url === '/api/maintenance' && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (session && session.level >= USER_LEVEL_SUPER) {
             sendJson(res, 200, { active: false, message: '', suppressedForLevel: session.level });
             return;
         }
-        const active = db.getSetting('maintenance_active', 'false') === 'true';
-        const message = db.getSetting('maintenance_message', 'Проводятся технические работы. Приносим извинения за неудобства.') || 'Проводятся технические работы.';
+        const active = await db.getSetting('maintenance_active', 'false') === 'true';
+        const message = await db.getSetting('maintenance_message', 'Проводятся технические работы. Приносим извинения за неудобства.') || 'Проводятся технические работы.';
         sendJson(res, 200, { active, message });
         return;
     }
     if (req.url === '/api/maintenance' && req.method === 'POST') {
-        const session = requireSession(req, res, USER_LEVEL_ADMIN);
+        const session = await requireSession(req, res, USER_LEVEL_ADMIN);
         if (!session) return;
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { active, message } = JSON.parse(body || '{}');
-                db.setSetting('maintenance_active', active ? 'true' : 'false');
-                if (message !== undefined) db.setSetting('maintenance_message', String(message));
+                await db.setSetting('maintenance_active', active ? 'true' : 'false');
+                if (message !== undefined) await db.setSetting('maintenance_message', String(message));
                 safeLog(session, 'maintenance_set', null, null, `active=${active ? 'true' : 'false'}`);
                 sendJson(res, 200, { success: true });
             } catch (_) {
@@ -1974,34 +1995,34 @@ const server = http.createServer(async (req, res) => {
 
     // --- One-time update notice ---
     if (req.url === '/api/update-notice' && req.method === 'GET') {
-        const active = db.getSetting('update_notice_active', 'false') === 'true';
-        const message = db.getSetting('update_notice_message', '') || '';
-        const id = db.getSetting('update_notice_id', '0') || '0';
+        const active = await db.getSetting('update_notice_active', 'false') === 'true';
+        const message = await db.getSetting('update_notice_message', '') || '';
+        const id = await db.getSetting('update_notice_id', '0') || '0';
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ active, message, id }));
         return;
     }
     if (req.url === '/api/update-notice' && req.method === 'POST') {
-        const session = requireSession(req, res, 5);
+        const session = await requireSession(req, res, 5);
         if (!session) return;
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { message } = JSON.parse(body || '{}');
                 const clean = String(message || '').trim();
                 if (!clean) {
-                    db.setSetting('update_notice_active', 'false');
-                    db.setSetting('update_notice_message', '');
-                    db.setSetting('update_notice_id', '0');
+                    await db.setSetting('update_notice_active', 'false');
+                    await db.setSetting('update_notice_message', '');
+                    await db.setSetting('update_notice_id', '0');
                     sendJson(res, 200, { success: true, active: false, id: '0' });
                     safeLog(session, 'update_notice_clear', null, null, null);
                     return;
                 }
                 const nextId = String(Date.now());
-                db.setSetting('update_notice_active', 'true');
-                db.setSetting('update_notice_message', clean);
-                db.setSetting('update_notice_id', nextId);
+                await db.setSetting('update_notice_active', 'true');
+                await db.setSetting('update_notice_message', clean);
+                await db.setSetting('update_notice_id', nextId);
                 sendJson(res, 200, { success: true, active: true, id: nextId });
                 safeLog(session, 'update_notice_set', null, null, `id=${nextId}`);
             } catch (_) {
@@ -2013,10 +2034,10 @@ const server = http.createServer(async (req, res) => {
 
     // --- Shared tracked players list (level >= 1) ---
     if (parsedUrl.pathname === '/api/tracked-players' && req.method === 'GET') {
-        const session = requireSession(req, res, 1);
+        const session = await requireSession(req, res, 1);
         if (!session) return;
         try {
-            const raw = String(db.getSetting('tracked_players_list', '[]') || '[]');
+            const raw = String(await db.getSetting('tracked_players_list', '[]') || '[]');
             const parsed = JSON.parse(raw);
             const players = Array.isArray(parsed) ? parsed : [];
             sendJson(res, 200, { players });
@@ -2026,11 +2047,11 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     if (parsedUrl.pathname === '/api/tracked-players' && req.method === 'POST') {
-        const session = requireSession(req, res, 1);
+        const session = await requireSession(req, res, 1);
         if (!session) return;
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const data = JSON.parse(body || '{}');
                 const input = Array.isArray(data?.players) ? data.players : [];
@@ -2042,7 +2063,7 @@ const server = http.createServer(async (req, res) => {
                     })
                     .filter((row) => /^\d{17}$/.test(row.steamId))
                     .slice(0, 100);
-                db.setSetting('tracked_players_list', JSON.stringify(players));
+                await db.setSetting('tracked_players_list', JSON.stringify(players));
                 safeLog(session, 'tracked_players_update', null, null, `count=${players.length}`);
                 sendJson(res, 200, { ok: true, players });
             } catch (_) {
@@ -2054,19 +2075,19 @@ const server = http.createServer(async (req, res) => {
 
     // --- Settings API (level >= 4) ---
     if (req.url === '/api/settings' && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
             return;
         }
-        const settings = db.getAllSettings();
+        const settings = await db.getAllSettings();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(settings));
         return;
     }
     if (req.url === '/api/settings' && req.method === 'POST') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
@@ -2074,11 +2095,11 @@ const server = http.createServer(async (req, res) => {
         }
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const data = JSON.parse(body);
                 for (const [key, value] of Object.entries(data)) {
-                    db.setSetting(key, value);
+                    await db.setSetting(key, value);
                 }
                 safeLog(session, 'settings_update', null, null, Object.keys(data || {}).join(','));
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2093,18 +2114,18 @@ const server = http.createServer(async (req, res) => {
 
     // --- Staff roles for payouts (ГА / СТА / СТМ / М / МЛ) — только 4+ (новая таблица / выплаты) ---
     if (req.url === '/api/staff-roles' && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
             return;
         }
-        const roles = db.getAllStaffRoles();
+        const roles = await db.getAllStaffRoles();
         sendJson(res, 200, { roles });
         return;
     }
     if (req.url === '/api/staff-roles' && req.method === 'POST') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_SUPER) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав (нужен уровень 5)' }));
@@ -2112,7 +2133,7 @@ const server = http.createServer(async (req, res) => {
         }
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { steamId, role } = JSON.parse(body || '{}');
                 const sid = String(steamId || '').trim();
@@ -2124,9 +2145,9 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
                 if (rawRole === 'AUTO') {
-                    db.deleteStaffRole(sid);
+                    await db.deleteStaffRole(sid);
                 } else {
-                    db.upsertStaffRole(sid, rawRole, session.userId, session.username);
+                    await db.upsertStaffRole(sid, rawRole, session.userId, session.username);
                 }
                 sendJson(res, 200, { ok: true });
                 safeLog(session, 'staff_role_set', sid, null, `role=${rawRole}`);
@@ -2139,15 +2160,15 @@ const server = http.createServer(async (req, res) => {
 
     // --- Staff payroll config (norms) for staff stats (level >= 4) ---
     if (req.url === '/api/staff-pay-config' && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав');
             return;
         }
-        const monthPunish = Number(db.getSetting('staff_norm_month_punish', '0') || 0) || 0;
-        const monthTickets = Number(db.getSetting('staff_norm_month_tickets', '0') || 0) || 0;
-        const weekPunish = Number(db.getSetting('staff_norm_week_punish', '0') || 0) || 0;
-        const weekTickets = Number(db.getSetting('staff_norm_week_tickets', '0') || 0) || 0;
+        const monthPunish = Number(await db.getSetting('staff_norm_month_punish', '0') || 0) || 0;
+        const monthTickets = Number(await db.getSetting('staff_norm_month_tickets', '0') || 0) || 0;
+        const weekPunish = Number(await db.getSetting('staff_norm_week_punish', '0') || 0) || 0;
+        const weekTickets = Number(await db.getSetting('staff_norm_week_tickets', '0') || 0) || 0;
         sendJson(res, 200, {
             norms: {
                 month: { punish: monthPunish, tickets: monthTickets },
@@ -2159,10 +2180,10 @@ const server = http.createServer(async (req, res) => {
 
     // --- Получение уровня текущего пользователя по сессии ---
     if (req.url === '/api/me' && req.method === 'GET') {
-        const session = requireSession(req, res, 0);
+        const session = await requireSession(req, res, 0);
         if (!session) return;
-        const user = db.getUserById(session.userId);
-        const launcherApiKey = db.ensureUserLauncherApiKey(session.userId);
+        const user = await db.getUserById(session.userId);
+        const launcherApiKey = await db.ensureUserLauncherApiKey(session.userId);
         sendJson(res, 200, {
             id: session.userId,
             username: session.username,
@@ -2176,7 +2197,7 @@ const server = http.createServer(async (req, res) => {
 
     // Поиск стаффа в PostgreSQL (общая БД с VibeCodingBdd на Railway)
     if (parsedUrl.pathname === '/api/bdd-staff/search' && req.method === 'GET') {
-        const session = resolveUserSession(req);
+        const session = await resolveUserSession(req);
         if (!session) {
             sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
             return;
@@ -2189,7 +2210,7 @@ const server = http.createServer(async (req, res) => {
         if (!bddStaffPg.isConfigured()) {
             sendJson(res, 503, {
                 code: 'BDD_PG_NOT_CONFIGURED',
-                error: 'Не задан DATABASE_URL или BDD_DATABASE_URL (на Railway добавь в этот же сервис переменную DATABASE_URL из плагина Postgres).'
+                error: 'Не задан DATABASE_URL (на Railway: переменная DATABASE_URL = ${{ Postgres.DATABASE_URL }} в сервисе веб-панели).'
             });
             return;
         }
@@ -2215,7 +2236,7 @@ const server = http.createServer(async (req, res) => {
                 /getaddrinfo ENOTFOUND/i.test(errMsg)
             ) {
                 msg =
-                    'Не удалось найти сервер БД по адресу из строки подключения (ошибка DNS). Задай на том же Railway-сервисе, где крутится сайт, переменную DATABASE_URL = ${{ Postgres.DATABASE_URL }} (или вставь полный URL из вкладки Postgres → Connect). Если заданы DATABASE_URL и BDD_DATABASE_URL, используется DATABASE_URL — удали ошибочный BDD_DATABASE_URL или приведи оба к одному URL. Частые ошибки: хост «base», неподставившаяся ${{ … }}, либо только .internal без доступа из контейнера.';
+                    'Не удалось найти сервер БД по адресу из строки подключения (ошибка DNS). Задай DATABASE_URL = ${{ Postgres.DATABASE_URL }} или полный URL из Postgres → Connect. Частые ошибки: хост «base», неподставившаяся ${{ … }}, либо только .internal без доступа из контейнера.';
             } else if (errCode === 'ECONNREFUSED') {
                 msg = 'Подключение к PostgreSQL отклонено: проверь хост, порт и что база запущена.';
             }
@@ -2225,7 +2246,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.url === '/api/runtime-metrics' && req.method === 'GET') {
-        const session = requireSession(req, res, USER_LEVEL_SUPER);
+        const session = await requireSession(req, res, USER_LEVEL_SUPER);
         if (!session) return;
         const api = Array.from(runtimeMetrics.api.entries()).map(([route, m]) => ({
             route,
@@ -2263,7 +2284,7 @@ const server = http.createServer(async (req, res) => {
         }
         const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
         const localOnly = urlObj.searchParams.get('local') === '1';
-        const checkLocal = () => {
+        const checkLocal = async () => {
             const player = { steamId: sid, bans: [], comments: [], online: false };
             const cached = getCachedData('players');
             if (cached) {
@@ -2309,8 +2330,8 @@ const server = http.createServer(async (req, res) => {
                 const t2 = cachedTop2.allBans.find(p => String(p.steamId) === sid);
                 if (t2) player.bans.push({ source: 'Top2', reason: t2.reason, date: t2.date, expires: t2.expires });
             }
-            player.whitelisted = db.isWhitelisted(sid);
-            player.comments = db.getBanComments(sid);
+            player.whitelisted = whitelistCache.has(sid);
+            player.comments = await db.getBanComments(sid);
             const accAge = cache.accountAge.get(sid);
             if (accAge) player.accountCreated = accAge.created;
             if (!player.nickname) {
@@ -2321,8 +2342,9 @@ const server = http.createServer(async (req, res) => {
             return player;
         };
         if (localOnly) {
+            const local = await checkLocal();
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ local: checkLocal(), fear: null, yooma: null, steam: null, cs2red: null, deti00: null, pride: null, top2: null, faceit: null }));
+            res.end(JSON.stringify({ local, fear: null, yooma: null, steam: null, cs2red: null, deti00: null, pride: null, top2: null, faceit: null }));
             return;
         }
 
@@ -2787,7 +2809,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- Steam avatar by SteamID (for authorized user card) ---
     if (req.url.startsWith('/api/steam-avatar/') && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Не авторизован' }));
@@ -2856,7 +2878,7 @@ const server = http.createServer(async (req, res) => {
             
     // --- Ban comments: POST only (comments come from check-all/check-local) ---
     if (req.url === '/api/comments' && req.method === 'POST') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Не авторизован' }));
@@ -2864,7 +2886,7 @@ const server = http.createServer(async (req, res) => {
         }
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const { steamId, banSource, comment } = JSON.parse(body);
                 if (!steamId || !comment || comment.length > 500) {
@@ -2872,7 +2894,7 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ error: 'Некорректные данные' }));
                     return;
                 }
-                db.addBanComment(steamId, banSource || 'manual', String(session.userId), session.username, comment);
+                await db.addBanComment(steamId, banSource || 'manual', String(session.userId), session.username, comment);
                 safeLog(
                     session,
                     'add_comment',
@@ -2895,7 +2917,7 @@ const server = http.createServer(async (req, res) => {
         ? new URL(req.url, `http://${req.headers.host || 'localhost'}`)
         : null;
     if (staffStatsUrl && staffStatsUrl.pathname === '/api/punishments/staff-stats') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Не авторизован' }));
@@ -3027,6 +3049,10 @@ const server = http.createServer(async (req, res) => {
                     sum: isNew ? (bans + mutes) : counted.length
                 };
             }).sort((a, b) => (b.sum || 0) - (a.sum || 0));
+            const hiddenSet = await getStaffHiddenSiteSteamIdSet();
+            const staffListSite = staffList.filter((s) => !hiddenSet.has(String(s?.steamid || '').trim()));
+            const staffStatsRowsSite = staffStatsRows.filter((r) => !hiddenSet.has(String(r?.admin_steamid || '').trim()));
+            const hiddenSteamIds = Array.from(hiddenSet);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
                 compact: true,
@@ -3035,6 +3061,9 @@ const server = http.createServer(async (req, res) => {
                 periods: staffPeriodsCatalog(),
                 staffList,
                 staffStatsRows,
+                staffListSite,
+                staffStatsRowsSite,
+                hiddenSteamIds,
                 lastUpdated: staffPunishmentsCache.lastUpdated,
                 loading: !!staffPunishmentsCache.loading
             }));
@@ -3044,7 +3073,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- Staff tickets (ручной ввод) ---
     if (req.url.startsWith('/api/staff-tickets') && (req.method === 'GET' || req.method === 'POST')) {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session) {
             sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
             return;
@@ -3062,7 +3091,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (req.method === 'GET') {
-            const rows = db.getStaffTicketsByMonth(ym);
+            const rows = await db.getStaffTicketsByMonth(ym);
             sendJson(res, 200, { ym, tickets: rows });
             return;
         }
@@ -3070,7 +3099,7 @@ const server = http.createServer(async (req, res) => {
         // POST: { steamId, tickets }
         let body = '';
         req.on('data', chunk => body += chunk);
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const payload = JSON.parse(body || '{}');
                 const steamId = String(payload.steamId || '').trim();
@@ -3079,7 +3108,7 @@ const server = http.createServer(async (req, res) => {
                     sendError(res, 400, 'BAD_STEAMID', 'Некорректный steamId');
                     return;
                 }
-                const ok = db.upsertStaffTickets(steamId, ym, tickets, session.userId, session.username);
+                const ok = await db.upsertStaffTickets(steamId, ym, tickets, session.userId, session.username);
                 if (!ok) {
                     sendError(res, 400, 'BAD_REQUEST', 'Не удалось сохранить');
                     return;
@@ -3094,7 +3123,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- Protected JS module: staff stats & payroll ---
     if (req.url === '/secure/staff-stats-secure.js' && req.method === 'GET') {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session) {
             sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
             return;
@@ -3116,7 +3145,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- Punishments (davidonchik.online: type=1 + type=2) ---
     if (req.url.startsWith('/api/punishments') && req.method === 'GET' && !req.url.startsWith('/api/punishments/')) {
-        const session = getSessionFromReq(req);
+        const session = await getSessionFromReq(req);
         if (!session) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Не авторизован' }));
@@ -3126,7 +3155,7 @@ const server = http.createServer(async (req, res) => {
         const querySteamId = (parsed.searchParams.get('steamId') || '').trim();
         let adminSteamId = /^\d{5,}$/.test(querySteamId) ? querySteamId : PUNISHMENTS_ADMIN_STEAM_ID;
         if (session.level < USER_LEVEL_ADMIN) {
-            const user = db.getUserById(session.userId);
+            const user = await db.getUserById(session.userId);
             const ownSteamId = String(user?.steamId || '').trim();
             if (!/^\d{5,}$/.test(ownSteamId)) {
                 sendError(res, 403, 'STEAM_ID_NOT_LINKED', 'SteamID не привязан к вашему аккаунту. Обратитесь к пользователю с уровнем 5.');
@@ -3145,7 +3174,7 @@ const server = http.createServer(async (req, res) => {
         // Для уровней 1-2 запрещаем смотреть наказания чужого стаффа,
         // но свой SteamID (даже если staff) разрешаем.
         if (adminSteamId && session.level < USER_LEVEL_ADMIN) {
-            const user = db.getUserById(session.userId);
+            const user = await db.getUserById(session.userId);
             const ownSteamId = String(user?.steamId || '').trim();
             if (session.level < USER_LEVEL_WHITELIST && adminSteamId !== ownSteamId && isSteamIdStaff(adminSteamId)) {
                 sendError(res, 403, 'STAFF_ACCESS_DENIED', 'Нельзя смотреть наказания стаффа. Доступно: ваш SteamID и любой не-стафф.');
@@ -3249,7 +3278,7 @@ const server = http.createServer(async (req, res) => {
                 if (MODERATOR_API_TOKEN && (bearer === MODERATOR_API_TOKEN || qtok === MODERATOR_API_TOKEN)) {
                     authorized = true;
                 } else {
-                    const sess = auth.getSession(bearer);
+                    const sess = await auth.getSession(bearer);
                     if (sess && sess.level >= USER_LEVEL_ADMIN) authorized = true;
                 }
                 if (!authorized) {
@@ -3276,7 +3305,7 @@ const server = http.createServer(async (req, res) => {
                 const payload = moderatorPlayersSnapshot.buildModeratorPlayersSnapshot({
                     cachedServers: cached,
                     buildOnlinePlayersContext,
-                    db,
+                    isWhitelisted: (sid) => whitelistCache.has(sid),
                     cache,
                     reportsPayload,
                     banCaches,
@@ -3300,7 +3329,7 @@ const server = http.createServer(async (req, res) => {
                 const qtok = String(parsedUrl.searchParams.get('token') || '').trim();
                 const xApiKey = String(req.headers['x-api-key'] || '').trim();
                 const tok = bearer || qtok || xApiKey;
-                const perUser = db.getUserByLauncherApiKey(tok);
+                const perUser = await db.getUserByLauncherApiKey(tok);
                 let userLevelForYooma = USER_LEVEL_SUPER;
                 let authorized = false;
                 if (perUser) {
@@ -3314,7 +3343,7 @@ const server = http.createServer(async (req, res) => {
                 } else if (MODERATOR_API_TOKEN && tok === MODERATOR_API_TOKEN) {
                     authorized = true;
                 } else {
-                    const sess = auth.getSession(bearer);
+                    const sess = await auth.getSession(bearer);
                     if (sess && sess.level >= USER_LEVEL_ADMIN) authorized = true;
                 }
                 if (!authorized) {
@@ -3341,7 +3370,7 @@ const server = http.createServer(async (req, res) => {
                 const payload = moderatorPlayersSnapshot.buildLauncherPlayersSnapshot({
                     cachedServers: cached,
                     buildOnlinePlayersContext,
-                    db,
+                    isWhitelisted: (sid) => whitelistCache.has(sid),
                     cache,
                     reportsPayload,
                     banCaches,
@@ -3382,7 +3411,7 @@ const server = http.createServer(async (req, res) => {
     const isHtmlPage = fileRelPath === '/index.html' || fileRelPath === '/settings.html' || fileRelPath === '/logs.html' || fileRelPath === '/whitelist.html';
     if (isHtmlPage) {
         const tokenFromCookie = getSessionTokenFromCookie(req.headers.cookie || '');
-        const session = tokenFromCookie ? auth.getSession(tokenFromCookie) : null;
+        const session = tokenFromCookie ? await auth.getSession(tokenFromCookie) : null;
         if (!session) {
             const next = rawUrlPath || '/';
             res.writeHead(302, { Location: '/auth?next=' + encodeURIComponent(next) });
@@ -3414,7 +3443,7 @@ const server = http.createServer(async (req, res) => {
         const bearer = String(authHeader).startsWith('Bearer ') ? String(authHeader).slice(7) : '';
         const tokenFromCookie = getSessionTokenFromCookie(req.headers.cookie || '');
         const sessionToken = bearer || tokenFromCookie || '';
-        const session = sessionToken ? auth.getSession(sessionToken) : null;
+        const session = sessionToken ? await auth.getSession(sessionToken) : null;
         if (!session) {
             res.writeHead(401, { 'Content-Type': 'text/plain' });
             res.end('Unauthorized');
@@ -3490,8 +3519,9 @@ process.on('SIGTERM', () => {
 
 (async () => {
     await db.initialize();
-    db.initDatabase();
-    console.log('База данных:', db.getDbPath());
+    await db.initDatabase();
+    await whitelistCache.refresh(db);
+    console.log('База данных:', db.getDbPath(), `backend=${db.backend || '?'}`);
 
     server.listen(PORT, () => {
         console.log(`Сервер запущен на http://localhost:${PORT}`);
@@ -3555,47 +3585,47 @@ function getDangerousCount(currentSteamIds) {
     if (cachedSuspicious && cachedSuspicious.allBans) {
         cachedSuspicious.allBans.forEach(ban => {
             const sid = String(ban.steamId);
-            if (currentSteamIds.has(sid) && !db.isWhitelisted(sid)) dangerousIds.add(sid);
+            if (currentSteamIds.has(sid) && !whitelistCache.has(sid)) dangerousIds.add(sid);
         });
     }
     if (cachedVac && cachedVac.allBans) {
         cachedVac.allBans.forEach(p => {
             const sid = String(p.SteamId);
-            if (currentSteamIds.has(sid) && !db.isWhitelisted(sid)) dangerousIds.add(sid);
+            if (currentSteamIds.has(sid) && !whitelistCache.has(sid)) dangerousIds.add(sid);
         });
     }
     if (cachedYooma && cachedYooma.allBans) {
         cachedYooma.allBans.forEach(p => {
             const sid = String(p.steamId);
-            if (currentSteamIds.has(sid) && !db.isWhitelisted(sid)) dangerousIds.add(sid);
+            if (currentSteamIds.has(sid) && !whitelistCache.has(sid)) dangerousIds.add(sid);
         });
     }
     const cachedCS2Red = getCachedData('cs2redBans');
     if (cachedCS2Red && cachedCS2Red.allBans) {
         cachedCS2Red.allBans.forEach(p => {
             const sid = String(p.steamId);
-            if (currentSteamIds.has(sid) && !db.isWhitelisted(sid)) dangerousIds.add(sid);
+            if (currentSteamIds.has(sid) && !whitelistCache.has(sid)) dangerousIds.add(sid);
         });
     }
     const cachedDeti00 = getCachedData('deti00Bans');
     if (cachedDeti00 && cachedDeti00.allBans) {
         cachedDeti00.allBans.forEach(p => {
             const sid = String(p.steamId);
-            if (currentSteamIds.has(sid) && !db.isWhitelisted(sid)) dangerousIds.add(sid);
+            if (currentSteamIds.has(sid) && !whitelistCache.has(sid)) dangerousIds.add(sid);
         });
     }
     const cachedPride = getCachedData('pridecs2Bans');
     if (cachedPride && cachedPride.allBans) {
         cachedPride.allBans.forEach(p => {
             const sid = String(p.steamId);
-            if (currentSteamIds.has(sid) && !db.isWhitelisted(sid)) dangerousIds.add(sid);
+            if (currentSteamIds.has(sid) && !whitelistCache.has(sid)) dangerousIds.add(sid);
         });
     }
     const cachedTop2 = getCachedData('top2Bans');
     if (cachedTop2 && cachedTop2.allBans) {
         cachedTop2.allBans.forEach(p => {
             const sid = String(p.steamId);
-            if (currentSteamIds.has(sid) && !db.isWhitelisted(sid)) dangerousIds.add(sid);
+            if (currentSteamIds.has(sid) && !whitelistCache.has(sid)) dangerousIds.add(sid);
         });
     }
     return dangerousIds.size;
@@ -3621,10 +3651,10 @@ function sendStats(ws) {
         currentSteamIds = onlineContext.steamIds;
     }
     if (cachedVac && cachedVac.allBans && currentSteamIds.size > 0) {
-        vacCount = cachedVac.allBans.filter(p => currentSteamIds.has(String(p.SteamId)) && !db.isWhitelisted(String(p.SteamId))).length;
+        vacCount = cachedVac.allBans.filter(p => currentSteamIds.has(String(p.SteamId)) && !whitelistCache.has(String(p.SteamId))).length;
     }
     if (cachedYooma && cachedYooma.allBans && currentSteamIds.size > 0) {
-        yoomaCount = cachedYooma.allBans.filter(p => currentSteamIds.has(String(p.steamId)) && !db.isWhitelisted(String(p.steamId))).length;
+        yoomaCount = cachedYooma.allBans.filter(p => currentSteamIds.has(String(p.steamId)) && !whitelistCache.has(String(p.steamId))).length;
     }
     suspiciousCount = getDangerousCount(currentSteamIds);
         
@@ -3653,7 +3683,7 @@ function sendVACBans(ws) {
     if (cached && cachedVac && cachedVac.allBans) {
         const { steamIds: currentSteamIds, playerDataMap } = buildOnlinePlayersContext(cached);
         const filteredPlayers = cachedVac.allBans.filter(p => 
-            currentSteamIds.has(String(p.SteamId)) && !db.isWhitelisted(String(p.SteamId))
+            currentSteamIds.has(String(p.SteamId)) && !whitelistCache.has(String(p.SteamId))
         );
         const withNames = filteredPlayers.map(p => {
             const sid = String(p.SteamId);
@@ -3689,7 +3719,7 @@ function sendYoomaBans(ws, userLevel) {
     if (cached && cachedYooma && cachedYooma.allBans) {
         const currentSteamIds = buildOnlinePlayersContext(cached).steamIds;
         let filteredPlayers = cachedYooma.allBans.filter(p =>
-            currentSteamIds.has(String(p.steamId)) && !db.isWhitelisted(String(p.steamId))
+            currentSteamIds.has(String(p.steamId)) && !whitelistCache.has(String(p.steamId))
         );
         // Уровни 1-2: скрываем баны за читы
         if (userLevel < USER_LEVEL_WHITELIST) {
@@ -3730,7 +3760,7 @@ function sendSuspiciousBans(ws, userLevel) {
         if (cachedSuspicious && cachedSuspicious.allBans) {
             cachedSuspicious.allBans.forEach(ban => {
             const sid = String(ban.steamId);
-            if (!currentSteamIds.has(sid) || db.isWhitelisted(sid)) return;
+            if (!currentSteamIds.has(sid) || whitelistCache.has(sid)) return;
             const playerData = playerDataMap.get(sid);
                     dangerousPlayers.push({
                         ...ban,
@@ -3750,7 +3780,7 @@ function sendSuspiciousBans(ws, userLevel) {
         if (cachedVac && cachedVac.allBans) {
             cachedVac.allBans.forEach(vacBan => {
             const sid = String(vacBan.SteamId);
-            if (!currentSteamIds.has(sid) || db.isWhitelisted(sid)) return;
+            if (!currentSteamIds.has(sid) || whitelistCache.has(sid)) return;
             const playerData = playerDataMap.get(sid);
             const existingPlayer = dangerousPlayers.find(p => String(p.steamId) === sid);
                     if (existingPlayer) {
@@ -3785,7 +3815,7 @@ function sendSuspiciousBans(ws, userLevel) {
         const cheatPatterns = /чит|cheat|haron anti-cheat|использование читов/i;
         cachedYooma.allBans.forEach(yoomaBan => {
             const sid = String(yoomaBan.steamId);
-            if (!currentSteamIds.has(sid) || db.isWhitelisted(sid)) return;
+            if (!currentSteamIds.has(sid) || whitelistCache.has(sid)) return;
             // Уровни 1-2: скрываем Yooma баны за читы из опасных
             if (userLevel < USER_LEVEL_WHITELIST && cheatPatterns.test(yoomaBan.reason || '')) return;
             const playerData = playerDataMap.get(sid);
@@ -3819,7 +3849,7 @@ function sendSuspiciousBans(ws, userLevel) {
     if (cachedCS2Red && cachedCS2Red.allBans) {
         cachedCS2Red.allBans.forEach(cr => {
             const sid = String(cr.steamId);
-            if (!currentSteamIds.has(sid) || db.isWhitelisted(sid)) return;
+            if (!currentSteamIds.has(sid) || whitelistCache.has(sid)) return;
             const playerData = playerDataMap.get(sid);
             const existingPlayer = dangerousPlayers.find(p => String(p.steamId) === sid);
             if (existingPlayer) {
@@ -3851,7 +3881,7 @@ function sendSuspiciousBans(ws, userLevel) {
     if (cachedDeti00 && cachedDeti00.allBans) {
         cachedDeti00.allBans.forEach(d00 => {
             const sid = String(d00.steamId);
-            if (!currentSteamIds.has(sid) || db.isWhitelisted(sid)) return;
+            if (!currentSteamIds.has(sid) || whitelistCache.has(sid)) return;
             const playerData = playerDataMap.get(sid);
             const existingPlayer = dangerousPlayers.find(p => String(p.steamId) === sid);
             if (existingPlayer) {
@@ -3884,7 +3914,7 @@ function sendSuspiciousBans(ws, userLevel) {
     if (cachedPride && cachedPride.allBans) {
         cachedPride.allBans.forEach(pb => {
             const sid = String(pb.steamId);
-            if (!currentSteamIds.has(sid) || db.isWhitelisted(sid)) return;
+            if (!currentSteamIds.has(sid) || whitelistCache.has(sid)) return;
             const playerData = playerDataMap.get(sid);
             const existingPlayer = dangerousPlayers.find(p => String(p.steamId) === sid);
             if (existingPlayer) {
@@ -3918,7 +3948,7 @@ function sendSuspiciousBans(ws, userLevel) {
     if (cachedTop2 && cachedTop2.allBans) {
         cachedTop2.allBans.forEach(t2 => {
             const sid = String(t2.steamId);
-            if (!currentSteamIds.has(sid) || db.isWhitelisted(sid)) return;
+            if (!currentSteamIds.has(sid) || whitelistCache.has(sid)) return;
             const playerData = playerDataMap.get(sid);
             const existingPlayer = dangerousPlayers.find(p => String(p.steamId) === sid);
             if (existingPlayer) {
@@ -3961,8 +3991,8 @@ function sendAllPlayers(ws) {
     const { steamIds, playerDataMap } = buildOnlinePlayersContext(cached);
     const players = Array.from(steamIds).map(steamId => {
         const d = playerDataMap.get(steamId);
-        const wl = db.isWhitelisted(steamId);
-        const wlEntry = wl ? db.getWhitelistEntry(steamId) : null;
+        const wl = whitelistCache.has(steamId);
+        const wlEntry = wl ? whitelistCache.entry(steamId) : null;
         return {
             steamId,
             nickname: d ? d.nickname : 'Unknown',
@@ -4153,7 +4183,7 @@ function updateDataInBackground() {
         if (hasValidData) {
             try {
                 const serverData = Array.isArray(servers) ? servers.map(s => ({ name: s.name || s.hostname, players: (s.players || []).length })) : [];
-                db.saveServerActivity(ctx.totalPlayers, ctx.totalAdmins, serverData);
+                Promise.resolve(db.saveServerActivity(ctx.totalPlayers, ctx.totalAdmins, serverData)).catch(() => {});
             } catch (_) {}
         }
         if (hasValidData || !prev) {

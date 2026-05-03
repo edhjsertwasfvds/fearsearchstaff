@@ -1334,7 +1334,10 @@ function renderPanel() {
 
         if (effectiveView === 'stats') {
             const isOldTable = staffTableMode === 'old';
-            const staffList = Array.isArray(state.punishments.staffList) ? state.punishments.staffList : [];
+            const staffListFull = Array.isArray(state.punishments.staffList) ? state.punishments.staffList : [];
+            const staffList = Array.isArray(state.punishments.staffListSite)
+                ? state.punishments.staffListSite
+                : staffListFull;
             const rolesMap = state.punishments.staffRolesBySid || {};
             const inferRoleFromGroup = (groupRaw) => {
                 const g = String(groupRaw || '').trim().toLowerCase();
@@ -1342,6 +1345,7 @@ function renderPanel() {
                 if (g.includes('мл. модер')) return 'ML';
                 if (g.includes('модератор')) return 'M';
                 if (g.includes('ст. модер')) return 'STM';
+                if (g.includes('стаф') || g.includes('staff') || g === 'стафф') return 'STA';
                 return '';
             };
             const resolveRoleCode = (row) => {
@@ -1377,7 +1381,10 @@ function renderPanel() {
                 mutes: 0,
                 sum: 0
             }));
-            const statsRows = (Array.isArray(state.punishments.staffStatsRows) ? state.punishments.staffStatsRows : baseRows)
+            const statsRowsSource = Array.isArray(state.punishments.staffStatsRowsSite)
+                ? state.punishments.staffStatsRowsSite
+                : state.punishments.staffStatsRows;
+            const statsRows = (Array.isArray(statsRowsSource) ? statsRowsSource : baseRows)
                 .sort((a, b) => {
                     const ra = roleRank(resolveRoleCode(a));
                     const rb = roleRank(resolveRoleCode(b));
@@ -1937,6 +1944,11 @@ async function loadStaffStatsFromServer() {
             ? data.staffList
             : (state.punishments.staffList || []);
         state.punishments.staffList = staffList;
+        if (Array.isArray(data.staffListSite)) {
+            state.punishments.staffListSite = data.staffListSite;
+        } else {
+            delete state.punishments.staffListSite;
+        }
         if (Array.isArray(data.staffStatsRows)) {
             state.punishments.staffStatsRows = data.staffStatsRows;
             if (data.periods && typeof data.periods === 'object') {
@@ -1951,6 +1963,12 @@ async function loadStaffStatsFromServer() {
                 state.punishments.staffStatsData,
                 state.punishments.selectedMonth
             );
+            delete state.punishments.staffStatsRowsSite;
+        }
+        if (Array.isArray(data.staffStatsRowsSite)) {
+            state.punishments.staffStatsRowsSite = data.staffStatsRowsSite;
+        } else if (Array.isArray(data.staffStatsRows)) {
+            delete state.punishments.staffStatsRowsSite;
         }
         state.punishments.staffStatsLoading = !!data.loading;
         if (staffStatsPollTimer) {
@@ -3556,7 +3574,7 @@ async function runBddStaffSearch() {
         const data = await res.json().catch(() => ({}));
         if (res.status === 503) {
             out.innerHTML = `<p class="text-amber-300 text-sm leading-relaxed">${escapeHtml(data.error || 'Staff database is not configured')}</p>
-                <p class="text-gray-500 text-xs mt-2 leading-relaxed">On Railway: set DATABASE_URL on the web service from the Postgres plugin (e.g. \${{ Postgres.DATABASE_URL }}). BDD_DATABASE_URL is used only if DATABASE_URL is unset.</p>`;
+                <p class="text-gray-500 text-xs mt-2 leading-relaxed">On Railway: set DATABASE_URL on the web service (e.g. \${{ Postgres.DATABASE_URL }}) — same DB as VibeCodingBdd.</p>`;
             return;
         }
         if (res.status === 403) {

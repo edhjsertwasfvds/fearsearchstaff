@@ -845,6 +845,31 @@
         }
 
         let staffRolesBySid = {};
+        let staffHiddenSiteIds = new Set();
+
+        async function saveStaffHiddenSiteIds() {
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ staff_hidden_site_steam_ids: Array.from(staffHiddenSiteIds) })
+                });
+                if (!res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    alert(d.error || 'Не удалось сохранить список скрытых');
+                }
+            } catch (_) {
+                alert('Ошибка сохранения');
+            }
+        }
+
+        async function toggleStaffSiteHidden(steamId, hide) {
+            const sid = String(steamId || '').trim();
+            if (!sid) return;
+            if (hide) staffHiddenSiteIds.add(sid);
+            else staffHiddenSiteIds.delete(sid);
+            await saveStaffHiddenSiteIds();
+        }
 
         async function loadStaff() {
             const staffLast = document.getElementById('staffLastUpdated');
@@ -858,6 +883,9 @@
                 if (!res.ok) return;
                 const data = await res.json();
                 const list = Array.isArray(data.staffList) ? data.staffList : [];
+                staffHiddenSiteIds = new Set(
+                    (Array.isArray(data.hiddenSteamIds) ? data.hiddenSteamIds : []).map((x) => String(x).trim()).filter(Boolean)
+                );
 
                 // Подтягиваем роли для выплат (level >=3, редактирование только с 5 уровня).
                 staffRolesBySid = {};
@@ -896,6 +924,13 @@
                                 <span class="text-[10px] text-gray-500">Роль для выплат</span>
                            </div>`
                         : '';
+                    const hideOnSiteHtml =
+                        currentUserLevel >= 4 && sid
+                            ? `<label class="flex items-center gap-2 mt-1.5 text-[10px] text-gray-400 cursor-pointer select-none">
+                                    <input type="checkbox" class="rounded border-white/20" ${staffHiddenSiteIds.has(sid) ? 'checked' : ''} onchange="toggleStaffSiteHidden('${esc(sid)}', this.checked)">
+                                    <span>Скрыть в статистике на главном сайте</span>
+                               </label>`
+                            : '';
                     return `
                         <div class="flex items-center gap-3 p-2 bg-white/[0.03] rounded-lg">
                             <img src="${avatar}" class="w-9 h-9 rounded-full" onerror="this.src='${defaultAvatar}'">
@@ -904,6 +939,7 @@
                                 <div class="text-gray-500 text-xs font-mono">${esc(s.steamid || '')}</div>
                                 <div class="text-gray-400 text-xs">${esc(s.group_display_name || '')}</div>
                                 ${roleSelectHtml}
+                                ${hideOnSiteHtml}
                             </div>
                         </div>
                     `;

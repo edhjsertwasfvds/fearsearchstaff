@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const https = require('https');
+const whitelistCache = require('../whitelistCache');
 
 function getCookieValue(cookieHeader, name) {
     if (!cookieHeader || !name) return '';
@@ -42,22 +43,22 @@ function attachWss({
 
     console.log('WebSocket сервер запущен');
 
-    wss.on('connection', (ws, req) => {
+    wss.on('connection', async (ws, req) => {
         const wsIp = getClientIp(req || { headers: {}, socket: {} });
         const wsUa = truncateForLog(req?.headers?.['user-agent'] || '-', 220);
         const wsOrigin = truncateForLog(req?.headers?.origin || '-', 140);
         ws._clientMeta = { ip: wsIp, ua: wsUa, origin: wsOrigin };
         const wsCookieSessionToken = getCookieValue(req?.headers?.cookie, 'sessionToken');
-        ws._session = wsCookieSessionToken ? auth.getSession(String(wsCookieSessionToken)) : null;
-        console.log(`[WS] connected ip=${wsIp} origin=${wsOrigin} ua="${wsUa}"`);
+        ws._session = wsCookieSessionToken ? await auth.getSession(String(wsCookieSessionToken)) : null;
 
         // Отправляем текущие данные сразу при подключении
         sendCurrentData(ws);
 
-        ws.on('message', (message) => {
+        ws.on('message', async (message) => {
             try {
                 const data = JSON.parse(message.toString());
-                const sidFromMessage = data && data.sessionToken ? auth.getSession(String(data.sessionToken)) : null;
+                const sidFromMessage =
+                    data && data.sessionToken ? await auth.getSession(String(data.sessionToken)) : null;
                 const sid = sidFromMessage || ws._session || null;
                 const type = data && data.type ? String(data.type) : 'unknown';
                 const steamId = data && data.steamId != null ? String(data.steamId) : '-';
@@ -160,8 +161,17 @@ function attachWss({
                         return;
                     }
                     try {
-                        db.addToWhitelist(steamId2, nickname, String(session.userId), session.username, 'Отмечен как чистый');
-                        db.logAction(String(session.userId), session.username, 'add_to_whitelist', steamId2, nickname, 'Добавлен в whitelist', null);
+                        await db.addToWhitelist(steamId2, nickname, String(session.userId), session.username, 'Отмечен как чистый');
+                        await whitelistCache.refresh(db);
+                        await db.logAction(
+                            String(session.userId),
+                            session.username,
+                            'add_to_whitelist',
+                            steamId2,
+                            nickname,
+                            'Добавлен в whitelist',
+                            null
+                        );
                         broadcastUpdate('vac_bans_update', {});
                         broadcastUpdate('yooma_bans_update', {});
                         broadcastUpdate('suspicious_bans_update', {});
@@ -184,7 +194,7 @@ function attachWss({
                         return;
                     }
                     const { steamId: steamId3, nickname } = data;
-                    const entry = db.getWhitelistEntry(steamId3);
+                    const entry = whitelistCache.entry(steamId3);
                     const isOwn = entry && String(entry.added_by_discord_id) === String(session.userId);
                     const canRemove = session.level >= USER_LEVEL_WHITELIST || isOwn;
                     if (!entry || !canRemove) {
@@ -193,8 +203,17 @@ function attachWss({
                         }
                         return;
                     }
-                    db.removeFromWhitelist(steamId3);
-                    db.logAction(String(session.userId), session.username, 'remove_from_whitelist', steamId3, nickname, 'Удален из whitelist', null);
+                    await db.removeFromWhitelist(steamId3);
+                    await whitelistCache.refresh(db);
+                    await db.logAction(
+                        String(session.userId),
+                        session.username,
+                        'remove_from_whitelist',
+                        steamId3,
+                        nickname,
+                        'Удален из whitelist',
+                        null
+                    );
 
                     broadcastUpdate('vac_bans_update', {});
                     broadcastUpdate('yooma_bans_update', {});

@@ -1,7 +1,6 @@
 /**
  * Чтение стаффа из PostgreSQL (схема VibeCodingBdd: admins + profiles).
- * На Railway: обычно тот же DATABASE_URL, что выдаёт плагин Postgres (${{ Postgres.DATABASE_URL }}).
- * BDD_DATABASE_URL — запасной вариант, если DATABASE_URL не задан (отдельный инстанс только под BDD).
+ * Подключение: только DATABASE_URL.
  */
 
 'use strict';
@@ -9,9 +8,7 @@
 let _pool;
 
 function getConnectionString() {
-    // Сначала DATABASE_URL: на Railway он часто подставлен корректно, а устаревший ручной BDD_DATABASE_URL
-    // с postgres.railway.internal / опечатками не должен его перебивать.
-    return String(process.env.DATABASE_URL || process.env.BDD_DATABASE_URL || '').trim();
+    return String(process.env.DATABASE_URL || '').trim();
 }
 
 function isConfigured() {

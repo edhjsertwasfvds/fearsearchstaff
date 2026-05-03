@@ -86,6 +86,17 @@ npm run smoke
 
 > **Важно:** `DATABASE_PATH` в Railway обычно не нужен при использовании Volume.
 
+### PostgreSQL (панель + поиск стаффа BDD, одна переменная)
+
+Нужен только **`DATABASE_URL`** (тот же URL, что у [VibeCodingBdd](https://github.com/VibeCodingMeta/VibeCodingBdd) — одна база: `admins` / `profiles` и таблицы `panel_*`).
+
+1. Подключи **Postgres** в Railway.
+2. В сервисе веб-панели: **`DATABASE_URL`** = `${{ Postgres.DATABASE_URL }}`.
+3. На новой базе выполни миграцию **`db/panel.sql`** из репозитория BDD (в этом проекте лежит копия: `VibeCodingBdd/db/panel.sql` — перенеси в свой Bdd и закоммить). При первом старте панель тоже создаст таблицы, если их ещё нет.
+4. Volume под SQLite не обязателен.
+
+Подробности — в `.env.example`.
+
 ### Если видишь SIGTERM / npm error command failed
 
 1. **Проверь Volume**: mount path `/app/data` должен быть подключён к сервису.

@@ -1,9 +1,9 @@
 const auth = require('../auth');
 
-function getSessionFromReq(req) {
+async function getSessionFromReq(req) {
     const header = req.headers['authorization'] || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-    return token ? auth.getSession(token) : null;
+    return token ? await auth.getSession(token) : null;
 }
 
 function sendJson(res, status, payload) {
@@ -15,8 +15,8 @@ function sendError(res, status, code, error) {
     sendJson(res, status, { code, error });
 }
 
-function requireSession(req, res, minLevel = 0) {
-    const session = getSessionFromReq(req);
+async function requireSession(req, res, minLevel = 0) {
+    const session = await getSessionFromReq(req);
     if (!session) {
         sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
         return null;
@@ -87,4 +87,3 @@ module.exports = {
     getAllowedMethodsForApiPath,
     getClientIp
 };
-

@@ -31,7 +31,9 @@ async function refreshStaffList() {
     if (staffPunishmentsCache.staffListLoading) return;
     staffPunishmentsCache.staffListLoading = true;
 
-    const allowedGroupDisplayNames = new Set(['Ст. Модер', 'Модератор', 'Мл. Модератор']);
+    // Стафф → Ст. Модер → Модератор → Мл. Модератор (по отображаемому названию и group_name с API).
+    const allowedGroupDisplayNames = new Set(['Стафф', 'Стаф', 'Ст. Модер', 'Модератор', 'Мл. Модератор']);
+    const allowedGroupNames = new Set(['STAFF', 'STMODER', 'MODER', 'MLMODER']);
     const allowedByName = new Set(['Quasar']);
 
     const normalizeAdminToStaff = (a) => ({
@@ -44,8 +46,13 @@ async function refreshStaffList() {
 
     const filterAdmin = (a) => {
         const name = a?.name;
-        const group = a?.group_display_name;
-        return allowedByName.has(name) || allowedGroupDisplayNames.has(group);
+        const group = String(a?.group_display_name || '').trim();
+        const gn = String(a?.group_name || '').trim().toUpperCase();
+        return (
+            allowedByName.has(name) ||
+            allowedGroupDisplayNames.has(group) ||
+            allowedGroupNames.has(gn)
+        );
     };
 
     let staffList = [];

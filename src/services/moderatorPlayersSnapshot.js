@@ -161,13 +161,19 @@ function displayFromBanCaches(sid, banCaches) {
 function buildModeratorPlayersSnapshot({
     cachedServers,
     buildOnlinePlayersContext,
-    db,
+    isWhitelisted,
     cache,
     reportsPayload,
     banCaches,
     userLevelForYooma,
     USER_LEVEL_WHITELIST
 }, snapshotOpts = {}) {
+    const wl =
+        typeof isWhitelisted === 'function'
+            ? isWhitelisted
+            : () => {
+                  throw new Error('buildModeratorPlayersSnapshot: передайте isWhitelisted(sid)');
+              };
     const {
         includeOfflineReportSuspects = false,
         embedActiveReports = false,
@@ -203,7 +209,7 @@ function buildModeratorPlayersSnapshot({
 
     const players = [];
     for (const steamId of steamIds) {
-        if (db.isWhitelisted(steamId)) continue;
+        if (wl(steamId)) continue;
 
         const d = playerDataMap.get(steamId);
         const kills = d ? d.kills : 0;
@@ -247,7 +253,7 @@ function buildModeratorPlayersSnapshot({
     if (includeOfflineReportSuspects && bySteam) {
         const onlineSet = new Set(steamIds);
         for (const sid of Object.keys(bySteam)) {
-            if (onlineSet.has(sid) || db.isWhitelisted(sid)) continue;
+            if (onlineSet.has(sid) || wl(sid)) continue;
             offlineReportSuspects += 1;
             const rep = bySteam[sid];
             const flags = collectFlagsForPlayer(sid, banCaches, userLevelForYooma, USER_LEVEL_WHITELIST);
