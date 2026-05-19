@@ -1,6 +1,6 @@
 function escapeHtml(s) {
     const x = String(s ?? '');
-    return x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // Экранирование для передачи в onclick="addToWhitelist('...', '...')"

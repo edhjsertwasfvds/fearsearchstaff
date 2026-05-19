@@ -26,7 +26,7 @@ function normalizePunishmentCreated(p) {
 
 function fetchPunishmentsForSteamId(steamId) {
     if (!/^\d{5,}$/.test(steamId)) return Promise.resolve({ punishments: [] });
-    const baseUrl = 'https://davidonchik.online/admin/' + steamId;
+    const baseUrl = 'https://davidonchik.online/admin/' + encodeURIComponent(steamId);
     const fetchJson = (url) => new Promise((resolve) => {
         const r = https.get(url, (apiRes) => {
             let data = '';

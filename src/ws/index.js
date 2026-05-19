@@ -37,7 +37,9 @@ function attachWss({
     sendAllPlayers,
     sendFaceitLevels,
     sendPlayerGames,
-    broadcastUpdate
+    broadcastUpdate,
+    allowedOrigin,
+    isProd
 }) {
     const wss = new WebSocket.Server({ server });
 
@@ -47,6 +49,15 @@ function attachWss({
         const wsIp = getClientIp(req || { headers: {}, socket: {} });
         const wsUa = truncateForLog(req?.headers?.['user-agent'] || '-', 220);
         const wsOrigin = truncateForLog(req?.headers?.origin || '-', 140);
+        // CSWSH защита: в продакшене отклоняем соединения с неправильного origin
+        if (isProd && allowedOrigin && allowedOrigin !== '*') {
+            const originHeader = req?.headers?.origin || '';
+            if (originHeader !== allowedOrigin) {
+                console.warn(`[WS] Отклонено соединение с origin=${originHeader} (ожидалось ${allowedOrigin})`);
+                ws.close(1008, 'Invalid origin');
+                return;
+            }
+        }
         ws._clientMeta = { ip: wsIp, ua: wsUa, origin: wsOrigin };
         const wsCookieSessionToken = getCookieValue(req?.headers?.cookie, 'sessionToken');
         ws._session = wsCookieSessionToken ? await auth.getSession(String(wsCookieSessionToken)) : null;
@@ -86,10 +97,23 @@ function attachWss({
                 } else if (data.type === 'get_faceit_levels') {
                     sendFaceitLevels(ws);
                 } else if (data.type === 'get_player_games') {
-                    sendPlayerGames(ws, data.steamId);
+                    const sid = data.steamId != null ? String(data.steamId) : '';
+                    if (!sid || !/^\d{5,}$/.test(sid)) {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'error', message: 'Invalid steamId' }));
+                        }
+                        return;
+                    }
+                    sendPlayerGames(ws, sid);
                 } else if (data.type === 'get_account_age_batch') {
                     const steamIds = Array.isArray(data.steamIds) ? data.steamIds.map(id => String(id)).filter(Boolean) : [];
                     if (steamIds.length === 0) return;
+                    if (steamIds.length > 100) {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'error', message: 'Too many steamIds (max 100)' }));
+                        }
+                        return;
+                    }
 
                     const results = [];
                     const toFetch = [];
@@ -113,7 +137,7 @@ function attachWss({
                     for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
                         const batch = toFetch.slice(i, i + BATCH_SIZE);
                         const ids = batch.join(',');
-                        const url = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${STEAM_API_KEY}&steamids=${ids}`;
+                        const url = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${STEAM_API_KEY}&steamids=${encodeURIComponent(ids)}`;
                         https.get(url, (res) => {
                             let apiData = '';
                             res.on('data', chunk => apiData += chunk);
@@ -193,7 +217,8 @@ function attachWss({
                         }
                         return;
                     }
-                    const { steamId: steamId3, nickname } = data;
+                    const steamId3 = data.steamId != null ? String(data.steamId) : '';
+                    const safeNickname = String(data.nickname || '').trim().slice(0, 128);
                     const entry = whitelistCache.entry(steamId3);
                     const isOwn = entry && String(entry.added_by_discord_id) === String(session.userId);
                     const canRemove = session.level >= USER_LEVEL_WHITELIST || isOwn;
@@ -210,7 +235,7 @@ function attachWss({
                         session.username,
                         'remove_from_whitelist',
                         steamId3,
-                        nickname,
+                        safeNickname,
                         'Удален из whitelist',
                         null
                     );

@@ -5,7 +5,6 @@ const {
     STEAM_API_KEY,
     FEAR_ACCESS_TOKEN,
     FACEIT_API_KEY,
-    OPENROUTER_API_KEY,
     CSSTATS_COOKIE,
     DXDCS_COOKIE,
     PUNISHMENTS_ADMIN_STEAM_ID,
@@ -343,8 +342,51 @@ function timedJob(name, fn) {
     }
 }
 
+function computePresumption(result) {
+    const now = Math.floor(Date.now() / 1000);
+    const presumption = { staleSources: [], freshSources: [], overall: 'clean', details: {} };
+
+    if (result.steam?.vacBanned && result.steam.daysSinceLastBan > 1800 && result.steam.numberOfVACBans <= 1 && result.steam.numberOfGameBans === 0) {
+        presumption.staleSources.push('vac');
+        presumption.details.vac = { stale: true, daysAgo: result.steam.daysSinceLastBan, note: 'VAC бан более 5 лет назад, единственный' };
+    } else if (result.steam?.vacBanned || result.steam?.numberOfGameBans > 0) {
+        presumption.freshSources.push('vac');
+    }
+
+    if (result.yooma?.banned && result.yooma.created) {
+        const ageDays = (now - result.yooma.created) / 86400;
+        if (ageDays > 730 && !result.yooma.isPermanent) {
+            presumption.staleSources.push('yooma');
+            presumption.details.yooma = { stale: true, daysAgo: Math.floor(ageDays), note: 'Бан Yooma истёк/снят более 2 лет назад' };
+        } else {
+            presumption.freshSources.push('yooma');
+        }
+    }
+
+    if (result.cs2red?.banned) presumption.freshSources.push('cs2red');
+    if (result.deti00?.banned) presumption.freshSources.push('deti00');
+    if (result.pride?.banned) presumption.freshSources.push('pride');
+    if (result.top2?.banned) presumption.freshSources.push('top2');
+
+    if (presumption.freshSources.length > 0) {
+        presumption.overall = 'flagged';
+    } else if (presumption.staleSources.length > 0) {
+        presumption.overall = 'likely_clean';
+    } else {
+        presumption.overall = 'clean';
+    }
+
+    return presumption;
+}
+
 function parseServersPayload(rawPayload) {
-    const parsed = JSON.parse(rawPayload);
+    let parsed;
+    try {
+        parsed = JSON.parse(rawPayload);
+    } catch (e) {
+        const preview = String(rawPayload).slice(0, 180).replace(/\s+/g, ' ');
+        throw new Error(`Fear API response is not valid JSON: ${preview}`);
+    }
     if (!Array.isArray(parsed)) {
         // Иногда API может вернуть обертку, извлекаем массив серверов из известных ключей
         if (parsed && typeof parsed === 'object') {
@@ -730,7 +772,7 @@ async function checkSuspiciousBans(steamIds, playerDataMap, progressCallback, fi
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'Content-Length': postData.length,
+                    'Content-Length': Buffer.byteLength(postData),
                     'Accept': 'application/json',
                     'X-Requested-With': 'XMLHttpRequest',
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -849,7 +891,7 @@ async function checkCS2RedBans(steamIds, playerDataMap) {
         const batch = steamIds.slice(i, i + batchSize);
         const results = await Promise.allSettled(batch.map(sid => {
             return new Promise((resolve) => {
-                const url = `https://cs2red.ru/api/profile?steamid=${sid}`;
+                const url = `https://cs2red.ru/api/profile?steamid=${encodeURIComponent(sid)}`;
                 const req = https.get(url, {
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -1071,7 +1113,7 @@ async function checkTop2Bans(steamIds, playerDataMap) {
                         'Accept-Encoding': 'identity',
                         'Host': 'top2.fun',
                         'Referer': `https://top2.fun/profiles/${sid}/?search=1`,
-                        'Cookie': 'PHPSESSID=647e9c72684a75b3cd7ba27154d50fb0'
+                        'Cookie': process.env.TOP2_PHPSESSID ? `PHPSESSID=${process.env.TOP2_PHPSESSID}` : ''
                     }
                 }, (res) => {
                     let data = '';
@@ -1137,9 +1179,9 @@ function checkVACBans(steamIds, callback) {
         return;
     }
 
-    const url = `https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${STEAM_API_KEY}&steamids=${steamIds.join(',')}`;
+    const url = `https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${STEAM_API_KEY}&steamids=${encodeURIComponent(steamIds.join(','))}`;
     
-    https.get(url, (res) => {
+    const req = https.get(url, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
@@ -1150,7 +1192,9 @@ function checkVACBans(steamIds, callback) {
                 callback(err, null);
             }
         });
-    }).on('error', callback);
+    });
+    req.on('error', callback);
+    req.setTimeout(15000, () => { req.destroy(); callback(new Error('Steam API timeout'), null); });
 }
 
 // Функция для получения списка игр пользователя
@@ -1160,8 +1204,8 @@ function getPlayerGames(steamId, callback) {
         return;
     }
 
-    const ownedGamesUrl = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${STEAM_API_KEY}&steamid=${steamId}&include_appinfo=1&format=json`;
-    const recentGamesUrl = `https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key=${STEAM_API_KEY}&steamid=${steamId}&format=json`;
+    const ownedGamesUrl = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${STEAM_API_KEY}&steamid=${encodeURIComponent(steamId)}&include_appinfo=1&format=json`;
+    const recentGamesUrl = `https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key=${STEAM_API_KEY}&steamid=${encodeURIComponent(steamId)}&format=json`;
     
     console.log('Запрос игр в библиотеке для:', steamId);
     
@@ -1170,7 +1214,7 @@ function getPlayerGames(steamId, callback) {
     let completedRequests = 0;
     
     // Получаем игры в библиотеке
-    https.get(ownedGamesUrl, (res) => {
+    const req1 = https.get(ownedGamesUrl, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
@@ -1190,16 +1234,18 @@ function getPlayerGames(steamId, callback) {
                 }
             }
         });
-    }).on('error', (err) => {
+    });
+    req1.on('error', (err) => {
         console.error('Ошибка запроса owned games:', err);
         completedRequests++;
         if (completedRequests === 2) {
             combineAndReturn();
         }
     });
+    req1.setTimeout(15000, () => { req1.destroy(); completedRequests++; if (completedRequests === 2) combineAndReturn(); });
     
     // Получаем недавно сыгранные игры
-    https.get(recentGamesUrl, (res) => {
+    const req2 = https.get(recentGamesUrl, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
         res.on('end', () => {
@@ -1219,13 +1265,15 @@ function getPlayerGames(steamId, callback) {
                 }
             }
         });
-    }).on('error', (err) => {
+    });
+    req2.on('error', (err) => {
         console.error('Ошибка запроса recent games:', err);
         completedRequests++;
         if (completedRequests === 2) {
             combineAndReturn();
         }
     });
+    req2.setTimeout(15000, () => { req2.destroy(); completedRequests++; if (completedRequests === 2) combineAndReturn(); });
     
     function combineAndReturn() {
         // Объединяем игры, убирая дубликаты
@@ -1335,7 +1383,21 @@ const server = http.createServer(async (req, res) => {
     // Авторизация по логину/паролю
     if (req.url === '/api/auth/login' && req.method === 'POST') {
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { username, password } = JSON.parse(body);
@@ -1384,7 +1446,21 @@ const server = http.createServer(async (req, res) => {
         const session = await requireSession(req, res, USER_LEVEL_ADMIN);
         if (!session) return;
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { username, password, displayName, level } = JSON.parse(body);
@@ -1431,7 +1507,21 @@ const server = http.createServer(async (req, res) => {
         }
         const userId = parseInt(req.url.split('/api/users/')[1]);
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const payload = JSON.parse(body);
@@ -1580,7 +1670,21 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { level } = JSON.parse(body || '{}');
@@ -1637,7 +1741,21 @@ const server = http.createServer(async (req, res) => {
     // Регистрация по пригласительному коду (публичный endpoint)
     if (req.url === '/api/auth/register-by-invite' && req.method === 'POST') {
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { username, password, inviteCode } = JSON.parse(body || '{}');
@@ -1723,7 +1841,21 @@ const server = http.createServer(async (req, res) => {
     // Проверка сессии
     if (req.url === '/api/auth/session' && req.method === 'POST') {
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { sessionToken } = JSON.parse(body);
@@ -1756,7 +1888,21 @@ const server = http.createServer(async (req, res) => {
     // Выход (logout)
     if (req.url === '/api/auth/logout' && req.method === 'POST') {
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { sessionToken } = JSON.parse(body);
@@ -1799,6 +1945,34 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
+    // --- Activity heatmap (by hour + day-of-week)
+    if (req.url.startsWith('/api/activity/heatmap') && req.method === 'GET') {
+        const session = await getSessionFromReq(req);
+        if (!session) {
+            sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+            return;
+        }
+        const parsed = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+        const days = Math.min(90, Math.max(1, parseInt(parsed.searchParams.get('days') || '30', 10) || 30));
+        const heatmap = await db.getActivityHeatmap(days);
+        sendJson(res, 200, { heatmap, days });
+        return;
+    }
+
+    // --- Activity per-server graph data
+    if (req.url.startsWith('/api/activity/servers') && req.method === 'GET') {
+        const session = await getSessionFromReq(req);
+        if (!session) {
+            sendError(res, 401, 'UNAUTHORIZED', 'Требуется авторизация');
+            return;
+        }
+        const parsed = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+        const days = Math.min(30, Math.max(1, parseInt(parsed.searchParams.get('days') || '7', 10) || 7));
+        const servers = await db.getActivityByServer(days);
+        sendJson(res, 200, { servers, days });
+        return;
+    }
+
     // --- Activity graph data ---
     if (req.url.startsWith('/api/activity') && req.method === 'GET') {
         const session = await getSessionFromReq(req);
@@ -1837,7 +2011,21 @@ const server = http.createServer(async (req, res) => {
         const session = await requireSession(req, res, 3);
         if (!session) return;
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const parsed = JSON.parse(body || '{}');
@@ -1880,7 +2068,21 @@ const server = http.createServer(async (req, res) => {
         const session = await requireSession(req, res, 3);
         if (!session) return;
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const parsed = JSON.parse(body || '{}');
@@ -1934,7 +2136,21 @@ const server = http.createServer(async (req, res) => {
         const session = await requireSession(req, res, USER_LEVEL_ADMIN);
         if (!session) return;
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { active, message } = JSON.parse(body || '{}');
@@ -1962,7 +2178,21 @@ const server = http.createServer(async (req, res) => {
         const session = await requireSession(req, res, 5);
         if (!session) return;
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { message } = JSON.parse(body || '{}');
@@ -2006,7 +2236,21 @@ const server = http.createServer(async (req, res) => {
         const session = await requireSession(req, res, 1);
         if (!session) return;
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const data = JSON.parse(body || '{}');
@@ -2050,7 +2294,21 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const data = JSON.parse(body);
@@ -2088,7 +2346,21 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { steamId, role } = JSON.parse(body || '{}');
@@ -2349,7 +2621,7 @@ const server = http.createServer(async (req, res) => {
             return { banned: bans.length > 0, reason: lb.reason, date: lb.date, expires: lb.expires, bans };
         };
 
-        const checkFear = () => httpGet(`https://api.fearproject.ru/profile/${sid}`);
+        const checkFear = () => httpGet(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`);
 
         const checkYooma = () => new Promise((resolve) => {
             const cachedYooma = getCachedData('yoomaBans');
@@ -2388,11 +2660,11 @@ const server = http.createServer(async (req, res) => {
             const steamGet = (url) => httpGet(url);
             const key = STEAM_API_KEY;
             const [summaries, bans, level, games, friends] = await Promise.allSettled([
-                steamGet(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${key}&steamids=${sid}`),
-                steamGet(`https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${key}&steamids=${sid}`),
-                steamGet(`https://api.steampowered.com/IPlayerService/GetSteamLevel/v1/?key=${key}&steamid=${sid}`),
-                steamGet(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${key}&steamid=${sid}&include_appinfo=0&appids_filter[0]=730&format=json`),
-                steamGet(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${key}&steamid=${sid}&relationship=friend`)
+                steamGet(`https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${key}&steamids=${encodeURIComponent(sid)}`),
+                steamGet(`https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${key}&steamids=${encodeURIComponent(sid)}`),
+                steamGet(`https://api.steampowered.com/IPlayerService/GetSteamLevel/v1/?key=${key}&steamid=${encodeURIComponent(sid)}`),
+                steamGet(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${key}&steamid=${encodeURIComponent(sid)}&include_appinfo=0&appids_filter[0]=730&format=json`),
+                steamGet(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${key}&steamid=${encodeURIComponent(sid)}&relationship=friend`)
             ]);
             const profile = summaries.status === 'fulfilled' && summaries.value?.response?.players?.[0] || null;
             const banData = bans.status === 'fulfilled' && bans.value?.players?.[0] || null;
@@ -2424,7 +2696,7 @@ const server = http.createServer(async (req, res) => {
         };
 
         const checkCs2red = async () => {
-            const data = await httpGet(`https://cs2red.ru/api/profile?steamid=${sid}`, {
+            const data = await httpGet(`https://cs2red.ru/api/profile?steamid=${encodeURIComponent(sid)}`, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                     'Accept': 'application/json, text/plain, */*',
@@ -2497,7 +2769,7 @@ const server = http.createServer(async (req, res) => {
 
         const checkFaceit = async () => {
             if (!FACEIT_API_KEY) return null;
-            const data = await httpGet(`https://open.faceit.com/data/v4/players?game=cs2&game_player_id=${sid}`, {
+            const data = await httpGet(`https://open.faceit.com/data/v4/players?game=cs2&game_player_id=${encodeURIComponent(sid)}`, {
                 timeout: TIMEOUT_FAST,
                 headers: { 'Authorization': `Bearer ${FACEIT_API_KEY}` }
             });
@@ -2625,7 +2897,7 @@ const server = http.createServer(async (req, res) => {
 
         const checkCSStatsCsstatsGg = () => new Promise((resolve) => {
             if (!CSSTATS_COOKIE) return resolve(null);
-            const req = https.get(`https://csstats.gg/player/${sid}`, {
+            const req = https.get(`https://csstats.gg/player/${encodeURIComponent(sid)}`, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -2713,6 +2985,7 @@ const server = http.createServer(async (req, res) => {
                 }
             } catch (_) {}
 
+            result.presumption = computePresumption(result);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
         } catch (e) {
@@ -2740,7 +3013,7 @@ const server = http.createServer(async (req, res) => {
             r.setTimeout(6000, () => { r.destroy(); resolve(null); });
         });
         (async () => {
-            const fl = await httpGet(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${STEAM_API_KEY}&steamid=${steamId}&relationship=friend`);
+            const fl = await httpGet(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${STEAM_API_KEY}&steamid=${encodeURIComponent(steamId)}&relationship=friend`);
             const ids = fl?.friendslist?.friends?.map(f => f.steamid) || [];
             if (ids.length === 0) {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2841,7 +3114,21 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const { steamId, banSource, comment } = JSON.parse(body);
@@ -3054,7 +3341,21 @@ const server = http.createServer(async (req, res) => {
 
         // POST: { steamId, tickets }
         let body = '';
-        req.on('data', chunk => body += chunk);
+        let bodySize = 0;
+        let bodyTooLarge = false;
+        req.on('data', chunk => {
+            if (bodyTooLarge) return;
+            bodySize += chunk.length;
+            if (bodySize > MAX_REQUEST_BODY_BYTES) {
+                bodyTooLarge = true;
+                try {
+                    sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Payload too large');
+                } catch (_) {}
+                req.destroy();
+                return;
+            }
+            body += chunk;
+        });
         req.on('end', async () => {
             try {
                 const payload = JSON.parse(body || '{}');
@@ -3501,6 +3802,7 @@ process.on('SIGTERM', () => {
     process.exit(1);
 });
 
+const configuredAllowedOrigin = (process.env.ALLOWED_ORIGIN || '').trim();
 const wss = attachWss({
     server,
     auth,
@@ -3519,7 +3821,9 @@ const wss = attachWss({
     sendAllPlayers,
     sendFaceitLevels,
     sendPlayerGames,
-    broadcastUpdate
+    broadcastUpdate,
+    allowedOrigin: configuredAllowedOrigin,
+    isProd: IS_PROD
 });
 
 // При подключении сразу шлём статистику и все списки (если есть кэш) — меньше гонок и пустых экранов
@@ -4644,7 +4948,7 @@ async function updateFaceitLevelsInBackground(servers) {
     for (const sid of steamIdArray) {
         try {
             const data = await new Promise((resolve) => {
-                const r = https.get(`https://open.faceit.com/data/v4/players?game=cs2&game_player_id=${sid}`, {
+                const r = https.get(`https://open.faceit.com/data/v4/players?game=cs2&game_player_id=${encodeURIComponent(sid)}`, {
                     headers: { 'Authorization': `Bearer ${FACEIT_API_KEY}` }
                 }, (apiRes) => {
                     let d = '';

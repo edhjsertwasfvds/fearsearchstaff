@@ -6,7 +6,6 @@ const API_URL = 'https://api.fearproject.ru/servers';
 const STEAM_API_KEY = process.env.STEAM_API_KEY || '';
 const FEAR_ACCESS_TOKEN = process.env.FEAR_ACCESS_TOKEN || '';
 const FACEIT_API_KEY = process.env.FACEIT_API_KEY || '';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const CSSTATS_COOKIE = process.env.CSSTATS_COOKIE || '';
 const DXDCS_COOKIE = process.env.DXDCS_COOKIE || '';
 const PUNISHMENTS_ADMIN_STEAM_ID = process.env.PUNISHMENTS_ADMIN_STEAM_ID || '';
@@ -40,7 +39,6 @@ module.exports = {
     STEAM_API_KEY,
     FEAR_ACCESS_TOKEN,
     FACEIT_API_KEY,
-    OPENROUTER_API_KEY,
     CSSTATS_COOKIE,
     DXDCS_COOKIE,
     PUNISHMENTS_ADMIN_STEAM_ID,

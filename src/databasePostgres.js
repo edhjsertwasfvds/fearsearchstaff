@@ -798,6 +798,57 @@ async function getUserByLauncherApiKey(key) {
     };
 }
 
+async function getActivityHeatmap(days = 30) {
+    const since = Date.now() - days * 24 * 60 * 60 * 1000;
+    const { rows } = await poolQuery(`
+        SELECT hour, EXTRACT(DOW FROM to_timestamp(timestamp/1000))::int as dow, AVG(total_players)::float as avg_players
+        FROM panel_server_activity
+        WHERE timestamp > $1
+        GROUP BY dow, hour
+        ORDER BY dow, hour
+    `, [since]);
+    const heatmap = Array.from({ length: 7 }, (_, dow) =>
+        Array.from({ length: 24 }, (_, hour) => {
+            const row = rows.find(r => r.dow === dow && r.hour === hour);
+            return Math.round(row?.avg_players || 0);
+        })
+    );
+    return heatmap;
+}
+
+async function getActivityByServer(days = 7) {
+    const since = Date.now() - days * 24 * 60 * 60 * 1000;
+    const { rows } = await poolQuery(
+        'SELECT timestamp, server_data FROM panel_server_activity WHERE timestamp > $1 ORDER BY timestamp ASC',
+        [since]
+    );
+    const serversMap = new Map();
+    for (const row of rows) {
+        let data;
+        try { data = JSON.parse(row.server_data); } catch { continue; }
+        if (!Array.isArray(data)) continue;
+        for (const s of data) {
+            const name = s.name || 'Unknown';
+            if (!serversMap.has(name)) serversMap.set(name, []);
+            serversMap.get(name).push({ timestamp: row.timestamp, players: Number(s.players) || 0 });
+        }
+    }
+    const result = {};
+    const bucketMs = 60 * 60 * 1000;
+    for (const [name, points] of serversMap) {
+        const hourly = new Map();
+        for (const p of points) {
+            const bucket = Math.floor(p.timestamp / bucketMs) * bucketMs;
+            const existing = hourly.get(bucket);
+            if (!existing || p.players > existing.players) hourly.set(bucket, p);
+        }
+        result[name] = Array.from(hourly.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([ts, p]) => ({ timestamp: ts, players: p.players }));
+    }
+    return result;
+}
+
 module.exports = {
     initialize,
     getDbPath,
@@ -855,5 +906,7 @@ module.exports = {
     getStaffTicketsOne,
     upsertStaffRole,
     deleteStaffRole,
-    getAllStaffRoles
+    getAllStaffRoles,
+    getActivityHeatmap,
+    getActivityByServer
 };

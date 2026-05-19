@@ -559,6 +559,54 @@ function deleteAllSessionsDb() { db.prepare('DELETE FROM sessions').run(); }
 function cleanupExpiredSessionsDb() { return db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now()).changes; }
 function getActiveSessionsFromDb() { return db.prepare('SELECT * FROM sessions WHERE expires_at > ?').all(Date.now()); }
 
+function getActivityHeatmap(days = 30) {
+    const since = Date.now() - days * 24 * 60 * 60 * 1000;
+    const rows = db.prepare(`
+        SELECT hour, CAST(strftime('%w', timestamp/1000, 'unixepoch') AS INTEGER) as dow, AVG(total_players) as avg_players
+        FROM server_activity
+        WHERE timestamp > ?
+        GROUP BY dow, hour
+        ORDER BY dow, hour
+    `).all(since);
+    const heatmap = Array.from({ length: 7 }, (_, dow) =>
+        Array.from({ length: 24 }, (_, hour) => {
+            const row = rows.find(r => r.dow === dow && r.hour === hour);
+            return Math.round(row?.avg_players || 0);
+        })
+    );
+    return heatmap;
+}
+
+function getActivityByServer(days = 7) {
+    const since = Date.now() - days * 24 * 60 * 60 * 1000;
+    const rows = db.prepare(`SELECT timestamp, server_data FROM server_activity WHERE timestamp > ? ORDER BY timestamp ASC`).all(since);
+    const serversMap = new Map();
+    for (const row of rows) {
+        let data;
+        try { data = JSON.parse(row.server_data); } catch { continue; }
+        if (!Array.isArray(data)) continue;
+        for (const s of data) {
+            const name = s.name || 'Unknown';
+            if (!serversMap.has(name)) serversMap.set(name, []);
+            serversMap.get(name).push({ timestamp: row.timestamp, players: Number(s.players) || 0 });
+        }
+    }
+    const result = {};
+    const bucketMs = 60 * 60 * 1000;
+    for (const [name, points] of serversMap) {
+        const hourly = new Map();
+        for (const p of points) {
+            const bucket = Math.floor(p.timestamp / bucketMs) * bucketMs;
+            const existing = hourly.get(bucket);
+            if (!existing || p.players > existing.players) hourly.set(bucket, p);
+        }
+        result[name] = Array.from(hourly.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([ts, p]) => ({ timestamp: ts, players: p.players }));
+    }
+    return result;
+}
+
 module.exports = {
     initialize,
     getDbPath, closeDatabase, initDatabase,
@@ -573,5 +621,6 @@ module.exports = {
     createInviteCode, useInviteCode, validateInviteCode, getInviteCodes, deleteInviteCode,
     saveSession, getSessionFromDb, deleteSessionFromDb, deleteSessionsByUserId, deleteAllSessionsDb, cleanupExpiredSessionsDb, getActiveSessionsFromDb,
     upsertStaffTickets, getStaffTicketsByMonth, getStaffTicketsOne,
-    upsertStaffRole, deleteStaffRole, getAllStaffRoles
+    upsertStaffRole, deleteStaffRole, getAllStaffRoles,
+    getActivityHeatmap, getActivityByServer
 };

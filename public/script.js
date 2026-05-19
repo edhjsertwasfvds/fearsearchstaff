@@ -153,7 +153,12 @@ async function loadBoundSteamAvatar(steamId) {
     if (cachedAvatar) {
         avatarEl.style.display = '';
         avatarEl.className = 'mb-3';
-        avatarEl.innerHTML = `<img src="${cachedAvatar.replace(/^http:\/\//i, 'https://')}" class="w-16 h-16 rounded-full border border-white/10 object-cover" alt="avatar">`;
+        avatarEl.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = cachedAvatar.replace(/^http:\/\//i, 'https://');
+        img.className = 'w-16 h-16 rounded-full border border-white/10 object-cover';
+        img.alt = 'avatar';
+        avatarEl.appendChild(img);
         return;
     }
     try {
@@ -167,7 +172,12 @@ async function loadBoundSteamAvatar(steamId) {
         }
         avatarEl.style.display = '';
         avatarEl.className = 'mb-3';
-        avatarEl.innerHTML = `<img src="${avatar.replace(/^http:\/\//i, 'https://')}" class="w-16 h-16 rounded-full border border-white/10 object-cover" alt="avatar">`;
+        avatarEl.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = avatar.replace(/^http:\/\//i, 'https://');
+        img.className = 'w-16 h-16 rounded-full border border-white/10 object-cover';
+        img.alt = 'avatar';
+        avatarEl.appendChild(img);
         setCurrentUserPatch({ avatar });
     } catch (_) {
         avatarEl.style.display = 'none';
@@ -2325,8 +2335,8 @@ function buildVacTable(players) {
                                 <td class="py-3 px-3">
                                     <div class="flex gap-2">
                                 ${canWhitelist ? `<button onclick="addToWhitelist('${sid}', '${nick}')" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg">Чист</button>` : ''}
-                                <a href="https://fearproject.ru/profile/${sid}" target="_blank" class="px-3 py-1.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a>
-                                <a href="https://steamcommunity.com/profiles/${sid}" target="_blank" class="px-3 py-1.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs font-semibold rounded-lg">Steam</a>
+                                <a href="https://fearproject.ru/profile/${sid}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a>
+                                <a href="https://steamcommunity.com/profiles/${sid}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs font-semibold rounded-lg">Steam</a>
                                 <button onclick="requestPlayerGames('${sid}')" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg">Игры</button>
                                     </div>
                             <div id="games-${sid}" class="text-xs text-gray-400 mt-1"></div>
@@ -2384,8 +2394,8 @@ function buildYoomaTable(players) {
                                 <td class="py-3 px-3">
                             <div class="flex gap-2 flex-wrap">
                                 ${canWhitelist ? `<button onclick="addToWhitelist('${sid}', '${nick}')" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg">Чист</button>` : ''}
-                                <a href="https://fearproject.ru/profile/${sid}" target="_blank" class="px-3 py-1.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a>
-                                <a href="https://steamcommunity.com/profiles/${sid}" target="_blank" class="px-3 py-1.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs font-semibold rounded-lg">Steam</a>
+                                <a href="https://fearproject.ru/profile/${sid}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a>
+                                <a href="https://steamcommunity.com/profiles/${sid}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs font-semibold rounded-lg">Steam</a>
                                     </div>
                                 </td>
                     </tr>`;
@@ -2535,7 +2545,7 @@ function buildSuspiciousRowHtml(p, index) {
     const canAdd = state.userLevel >= 1 && !p.whitelisted;
     const canRemove = p.whitelisted && (state.userLevel >= 3 || (p.whitelistAddedBy != null && String(p.whitelistAddedBy) === String(state.userId)));
     const whitelistBtn = canAdd ? `<button onclick="addToWhitelist('${sid}', '${nick}')" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-lg">Чист</button>` : (canRemove ? `<button onclick="removeFromWhitelist('${sid}', '${nick}')" class="px-3 py-1.5 bg-red-600/80 hover:bg-red-600 text-white text-xs font-semibold rounded-lg">Убрать</button>` : '');
-    if (vis.actions) cells.push(`<td data-column="actions" class="py-3 px-3"><div class="flex gap-2 flex-wrap">${whitelistBtn}<a href="https://fearproject.ru/profile/${sid}" target="_blank" class="px-3 py-1.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a><a href="https://steamcommunity.com/profiles/${sid}" target="_blank" class="px-3 py-1.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs font-semibold rounded-lg">Steam</a><button type="button" data-open-card="${sid}" onmouseenter="prefetchCheck('${sid}')" class="px-3 py-1.5 bg-indigo-500/80 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg btn-card">Карточка</button></div></td>`);
+    if (vis.actions) cells.push(`<td data-column="actions" class="py-3 px-3"><div class="flex gap-2 flex-wrap">${whitelistBtn}<a href="https://fearproject.ru/profile/${sid}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a><a href="https://steamcommunity.com/profiles/${sid}" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs font-semibold rounded-lg">Steam</a><button type="button" data-open-card="${sid}" onmouseenter="prefetchCheck('${sid}')" class="px-3 py-1.5 bg-indigo-500/80 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg btn-card">Карточка</button></div></td>`);
     return `<tr data-sid="${sid}" class="border-b border-white/[0.04] hover:bg-white/[0.03]">${cells.join('')}</tr>`;
 }
 
@@ -2965,7 +2975,7 @@ function faceitLevelBadgeHtml(sid) {
     if (!fl || !fl.level) return '';
     const color = getFaceitLevelColor(fl.level);
     const url = fl.url || `https://www.faceit.com/en/players-modal/${sid}`;
-    return `<a href="${url}" target="_blank" id="faceit-${sid}" class="inline-flex items-center hover:opacity-80 transition-opacity" title="Faceit Lvl ${fl.level} (${fl.elo} ELO)"><img src="/images/lvl${fl.level}.svg" class="w-4.5 h-4.5" loading="eager" decoding="sync"></a>`;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" id="faceit-${sid}" class="inline-flex items-center hover:opacity-80 transition-opacity" title="Faceit Lvl ${fl.level} (${fl.elo} ELO)"><img src="/images/lvl${fl.level}.svg" class="w-4.5 h-4.5" loading="eager" decoding="sync"></a>`;
 }
 
 function applyFaceitLevels() {
@@ -3794,7 +3804,7 @@ function processCheckData(checkData, steamId, forModal = false) {
     if (fc?.faceitLevel) {
         const flColor = getFaceitLevelColor(fc.faceitLevel);
         const faceitUrl = fc.faceitUrl || `https://www.faceit.com/en/players-modal/${steamId}`;
-        statsCards.push(`<a href="${faceitUrl}" target="_blank" class="${cardClass} block" title="Перейти в Faceit"><span class="text-gray-500">Faceit</span><div class="flex items-center gap-1 font-semibold mt-0.5" style="color:${flColor}"><img src="/images/lvl${fc.faceitLevel}.svg" class="w-4 h-4" loading="eager" decoding="sync">Lvl ${fc.faceitLevel}${fc.faceitElo ? ` <span class="text-gray-500 text-[10px]">(${fc.faceitElo} ELO)</span>` : ''}</div></a>`);
+        statsCards.push(`<a href="${faceitUrl}" target="_blank" rel="noopener noreferrer" class="${cardClass} block" title="Перейти в Faceit"><span class="text-gray-500">Faceit</span><div class="flex items-center gap-1 font-semibold mt-0.5" style="color:${flColor}"><img src="/images/lvl${fc.faceitLevel}.svg" class="w-4 h-4" loading="eager" decoding="sync">Lvl ${fc.faceitLevel}${fc.faceitElo ? ` <span class="text-gray-500 text-[10px]">(${fc.faceitElo} ELO)</span>` : ''}</div></a>`);
     }
     const badges = [];
     if (adminGroup) badges.push(`<span class="px-2 py-0.5 bg-amber-500/10 text-amber-400 text-xs font-semibold rounded-full">${escapeHtml(adminGroup)}</span>`);
@@ -3843,8 +3853,8 @@ function renderCheckFromMergedPlayer(p, result, steamId) {
                 </div>
                 <div class="flex items-center gap-2 mt-0.5">
                     <span class="text-gray-500 text-xs font-mono">${steamId}</span>
-                    <a href="https://fearproject.ru/profile/${steamId}" target="_blank" class="px-2 py-0.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-[10px] font-semibold rounded transition-colors">FEAR</a>
-                    <a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" class="px-2 py-0.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-[10px] font-semibold rounded transition-colors">Steam</a>
+                    <a href="https://fearproject.ru/profile/${steamId}" target="_blank" rel="noopener noreferrer" class="px-2 py-0.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-[10px] font-semibold rounded transition-colors">FEAR</a>
+                    <a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener noreferrer" class="px-2 py-0.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-[10px] font-semibold rounded transition-colors">Steam</a>
                 </div>
                 <div class="flex items-center gap-2 mt-1">${statusHtml}</div>
             </div>
@@ -3899,8 +3909,8 @@ async function runPlayerCheck() {
                     </div>
                     <div class="flex items-center gap-2 mt-0.5">
                         <span class="text-gray-500 text-xs font-mono">${steamId}</span>
-                        <a href="https://fearproject.ru/profile/${steamId}" target="_blank" class="px-2 py-0.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-[10px] font-semibold rounded transition-colors">FEAR</a>
-                        <a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" class="px-2 py-0.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-[10px] font-semibold rounded transition-colors">Steam</a>
+                        <a href="https://fearproject.ru/profile/${steamId}" target="_blank" rel="noopener noreferrer" class="px-2 py-0.5 bg-[#5865F2] hover:bg-[#4752C4] text-white text-[10px] font-semibold rounded transition-colors">FEAR</a>
+                        <a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener noreferrer" class="px-2 py-0.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-[10px] font-semibold rounded transition-colors">Steam</a>
                     </div>
                     <div class="flex items-center gap-2 mt-1">${d.statusHtml}${d.countrySpan || ''}</div>
                 </div>
@@ -3941,7 +3951,7 @@ async function openFriendsModal(steamId) {
                         <div class="text-white text-sm font-semibold truncate">${escapeHtml(f.nickname || 'Unknown')}</div>
                         <div class="text-gray-500 text-xs font-mono">${f.steamId}</div>
                     </div>
-                    <a href="https://steamcommunity.com/profiles/${f.steamId}" target="_blank" class="px-2 py-1 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs rounded">Steam</a>
+                    <a href="https://steamcommunity.com/profiles/${f.steamId}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs rounded">Steam</a>
                     <button onclick="closeFriendsModal(); document.getElementById('checkInput').value='${f.steamId}'; runPlayerCheck();" class="px-2 py-1 bg-cyan-500/80 hover:bg-cyan-500 text-white text-xs rounded">Проверить</button>
                 </div>
             `).join('');
@@ -4591,8 +4601,8 @@ async function openPlayerModal(steamId) {
                 <p id="commentError" class="text-rose-400 text-xs mt-1 min-h-[1rem]"></p>
             </div>
             <div class="flex gap-2">
-                <a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" class="flex-1 text-center px-3 py-2 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs font-semibold rounded-lg">Steam</a>
-                <a href="https://fearproject.ru/profile/${steamId}" target="_blank" class="flex-1 text-center px-3 py-2 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a>
+                <a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener noreferrer" class="flex-1 text-center px-3 py-2 bg-[#171a21] hover:bg-[#1b2838] text-white text-xs font-semibold rounded-lg">Steam</a>
+                <a href="https://fearproject.ru/profile/${steamId}" target="_blank" rel="noopener noreferrer" class="flex-1 text-center px-3 py-2 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a>
             </div>
         `;
     } catch (err) {
