@@ -2623,7 +2623,9 @@ const server = http.createServer(async (req, res) => {
             return { banned: bans.length > 0, reason: lb.reason, date: lb.date, expires: lb.expires, bans };
         };
 
-        const checkFear = () => httpGet(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`);
+        const checkFear = () => httpGet(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`, {
+            headers: FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {}
+        });
 
         const checkYooma = () => new Promise((resolve) => {
             const cachedYooma = getCachedData('yoomaBans');
@@ -5025,7 +5027,9 @@ async function updateFearProfilesInBackground(servers) {
             const sid = queue.shift();
             try {
                 const profile = await new Promise((resolve) => {
-                    const r = https.get(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`, (apiRes) => {
+                    const r = https.get(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`, {
+                        headers: FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {}
+                    }, (apiRes) => {
                         let d = '';
                         apiRes.on('data', c => d += c);
                         apiRes.on('end', () => { try { resolve(JSON.parse(d || '{}')); } catch { resolve({}); } });

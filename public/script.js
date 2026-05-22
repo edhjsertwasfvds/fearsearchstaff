@@ -2593,6 +2593,18 @@ function sortAndFilterAllPlayers(players) {
             const sidB = String(b.steamId ?? '');
             return getPlayerReportCount(sidB) - getPlayerReportCount(sidA);
         });
+    } else if (sortMethod === 'profileKd') {
+        sorted.sort((a, b) => {
+            const kdA = a.profileKd != null ? Number(a.profileKd) : -1;
+            const kdB = b.profileKd != null ? Number(b.profileKd) : -1;
+            return kdB - kdA;
+        });
+    } else if (sortMethod === 'profileHours') {
+        sorted.sort((a, b) => {
+            const hA = a.profileHours != null ? Number(a.profileHours) : Infinity;
+            const hB = b.profileHours != null ? Number(b.profileHours) : Infinity;
+            return hA - hB; // сверху меньше часов
+        });
     } else if (sortMethod === 'created') {
         sorted.sort((a, b) => {
             const sidA = String(a.steamId ?? '');
@@ -2617,6 +2629,8 @@ function buildAllPlayersTable(players) {
         ['kd', 'По K/D'],
         ['flags', 'По флагам'],
         ['reports', 'По репортам'],
+        ['profileKd', 'По K/D в профиле'],
+        ['profileHours', 'По часам в профиле'],
         ['created', 'По дате акка']
     ].map(([m, label]) => {
         const extraAttr = m === 'flags' ? ' data-flags-sort-button="1"' : '';
