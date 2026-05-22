@@ -217,8 +217,7 @@ const cache = {
     top2Bans: { data: null, timestamp: 0, ttl: CACHE_TTL_MS },
     playerGames: new Map(),
     accountAge: new Map(),
-    faceitLevels: new Map(),
-    fearProfiles: new Map()
+    faceitLevels: new Map()
 };
 const runtimeMetrics = {
     api: new Map(), // key -> { count, totalMs, maxMs }
@@ -259,8 +258,7 @@ const checkedPlayers = {
     pridecs2: new Map(),
     top2: new Map(),
     accountAge: new Map(),
-    faceit: new Map(),
-    fearProfiles: new Map()
+    faceit: new Map()
 };
 const CHECK_CACHE_TTL = Math.max(60_000, BG_CYCLE_MS);
 
@@ -2623,9 +2621,7 @@ const server = http.createServer(async (req, res) => {
             return { banned: bans.length > 0, reason: lb.reason, date: lb.date, expires: lb.expires, bans };
         };
 
-        const checkFear = () => httpGet(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`, {
-            headers: FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {}
-        });
+        const checkFear = () => httpGet(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`);
 
         const checkYooma = () => new Promise((resolve) => {
             const cachedYooma = getCachedData('yoomaBans');
@@ -2671,9 +2667,6 @@ const server = http.createServer(async (req, res) => {
                 steamGet(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${key}&steamid=${encodeURIComponent(sid)}&relationship=friend`)
             ]);
             const profile = summaries.status === 'fulfilled' && summaries.value?.response?.players?.[0] || null;
-            if (profile?.timecreated != null) {
-                cache.accountAge.set(sid, { created: profile.timecreated, lastCheck: Date.now() });
-            }
             const banData = bans.status === 'fulfilled' && bans.value?.players?.[0] || null;
             const lvl = level.status === 'fulfilled' && level.value?.response?.player_level;
             const cs2 = games.status === 'fulfilled' && games.value?.response?.games?.find(g => g.appid === 730) || null;
@@ -4260,7 +4253,6 @@ function sendAllPlayers(ws) {
         const d = playerDataMap.get(steamId);
         const wl = whitelistCache.has(steamId);
         const wlEntry = wl ? whitelistCache.entry(steamId) : null;
-        const fp = cache.fearProfiles.get(steamId);
         return {
             steamId,
             nickname: d ? d.nickname : 'Unknown',
@@ -4273,9 +4265,7 @@ function sendAllPlayers(ws) {
             serverPort: d ? d.serverPort : null,
             ping: d ? d.ping : null,
             whitelisted: wl,
-            whitelistAddedBy: wlEntry ? wlEntry.added_by_discord_id : null,
-            profileKd: fp ? fp.kd : null,
-            profileHours: fp ? fp.playtimeHours : null
+            whitelistAddedBy: wlEntry ? wlEntry.added_by_discord_id : null
         };
     });
     if (ws.readyState === WebSocket.OPEN) {
@@ -4398,8 +4388,7 @@ function createBackgroundJobsForCycle(cycleNo, dataForChecks) {
         () => timedJob('deti00', () => updateDeti00BansInBackground(dataForChecks)),
         () => timedJob('pridecs2', () => updatePrideCS2BansInBackground(dataForChecks)),
         () => timedJob('top2', () => updateTop2BansInBackground(dataForChecks)),
-        () => timedJob('faceit', () => updateFaceitLevelsInBackground(dataForChecks)),
-        () => timedJob('fearProfiles', () => updateFearProfilesInBackground(dataForChecks))
+        () => timedJob('faceit', () => updateFaceitLevelsInBackground(dataForChecks))
     ];
 
     if (!RAILWAY_LIGHT_MODE) return [...criticalJobs, ...heavyJobs];
@@ -4993,78 +4982,5 @@ async function updateFaceitLevelsInBackground(servers) {
 
     console.log(`[Background] Faceit проверено: ${checked}, найдено: ${found}`);
     broadcastUpdate('faceit_levels_update', {});
-}
-
-async function updateFearProfilesInBackground(servers) {
-    console.log('[Background] Обновление профилей Fear (KD + часы)...');
-    const onlineContext = buildOnlinePlayersContext(servers);
-    const steamIds = onlineContext.steamIds;
-
-    if (steamIds.size === 0) return;
-
-    const now = Date.now();
-    const steamIdArray = [...steamIds].filter(sid => {
-        const last = checkedPlayers.fearProfiles.get(sid);
-        if (last && (now - last) < CHECK_CACHE_TTL) return false;
-        return true;
-    });
-
-    if (steamIdArray.length === 0) {
-        console.log('[Background] Все профили Fear уже проверены недавно');
-        return;
-    }
-
-    console.log(`[Background] Проверка Fear профилей: ${steamIdArray.length} новых игроков`);
-    let checked = 0;
-    let found = 0;
-
-    // Параллельно, но не больше 10 одновременно
-    const CONCURRENCY = 10;
-    const queue = [...steamIdArray];
-
-    async function worker() {
-        while (queue.length > 0) {
-            const sid = queue.shift();
-            try {
-                const profile = await new Promise((resolve) => {
-                    const r = https.get(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`, {
-                        headers: FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {}
-                    }, (apiRes) => {
-                        let d = '';
-                        apiRes.on('data', c => d += c);
-                        apiRes.on('end', () => { try { resolve(JSON.parse(d || '{}')); } catch { resolve({}); } });
-                    });
-                    r.on('error', () => resolve({}));
-                    r.setTimeout(5000, () => { r.destroy(); resolve({}); });
-                });
-
-                checkedPlayers.fearProfiles.set(sid, Date.now());
-                checked++;
-
-                const stats = profile && profile.stats ? profile.stats : null;
-                if (stats && typeof stats.kills === 'number' && typeof stats.deaths === 'number') {
-                    const kd = stats.deaths > 0 ? stats.kills / stats.deaths : stats.kills || 0;
-                    const playtimeHours = typeof stats.playtime === 'number' ? Math.round(stats.playtime / 3600) : null;
-                    cache.fearProfiles.set(sid, {
-                        kills: stats.kills,
-                        deaths: stats.deaths,
-                        kd: Number(kd.toFixed(2)),
-                        playtimeHours,
-                        timestamp: Date.now()
-                    });
-                    found++;
-                }
-            } catch (err) {
-                checkedPlayers.fearProfiles.set(sid, Date.now());
-                checked++;
-            }
-        }
-    }
-
-    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker());
-    await Promise.all(workers);
-
-    console.log(`[Background] Fear профили проверено: ${checked}, найдено: ${found}`);
-    broadcastUpdate('all_players_update', {});
 }
 

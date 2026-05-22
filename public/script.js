@@ -197,8 +197,6 @@ const PLAYERS_COLUMNS_DEF = [
     { id: 'player', label: 'Игрок', default: true },
     { id: 'flags', label: 'Флаги', default: true },
     { id: 'kd', label: 'K/D', default: true },
-    { id: 'profileKd', label: 'Кд в профиле', default: true },
-    { id: 'profileHours', label: 'Часы', default: true },
     { id: 'accDate', label: 'Дата акка', default: true },
     { id: 'actions', label: 'Действия', default: true }
 ];
@@ -1080,7 +1078,6 @@ function renderPanel() {
         } else if (players.length > 0) {
             content.innerHTML = buildVacTable(players);
             requestAccountAgeFor(players, 'SteamId');
-            cleanupAccAgePlaceholders();
         } else {
             content.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Нет игроков с Game банами</p>';
         }
@@ -1103,7 +1100,6 @@ function renderPanel() {
         } else if (filtered.length > 0) {
             content.innerHTML = buildYoomaTable(filtered);
             requestAccountAgeFor(filtered, 'steamId');
-            cleanupAccAgePlaceholders();
         } else {
             content.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Нет забаненных игроков на Yooma</p>';
         }
@@ -1120,7 +1116,6 @@ function renderPanel() {
             content.innerHTML = buildAllPlayersTable(merged);
             staggerRows(content);
             requestAccountAgeFor(merged, 'steamId');
-            cleanupAccAgePlaceholders();
         }
         return;
     }
@@ -2546,20 +2541,6 @@ function buildSuspiciousRowHtml(p, index) {
     if (vis.player) cells.push(`<td data-column="player" class="py-3 px-3"><div class="flex items-center gap-3"><img src="${p.avatar || DEFAULT_AVATAR}" alt="${escapeHtml(p.nickname || 'Player')}" class="w-9 h-9 rounded-full" onerror="this.src='${DEFAULT_AVATAR}'"><div class="min-w-0"><div class="flex items-center gap-1"><span class="text-white text-sm font-semibold truncate">${escapeHtml(p.nickname || 'Unknown')}</span>${fBadge}${rBadge}</div><div class="mt-0.5 flex items-center gap-2"><div class="text-gray-500 text-xs font-mono truncate">${p.steamId}</div>${connectBtnHtml}</div></div></div></td>`);
     if (vis.flags) cells.push(`<td data-column="flags" class="py-3 px-2"><div class="flex gap-1 flex-wrap">${flagsHtml}</div></td>`);
     if (vis.kd) cells.push(`<td data-column="kd" class="py-3 px-2"><div class="text-gray-400 text-xs font-semibold">${kd} <span class="text-gray-500">(${kills}/${deaths})</span></div></td>`);
-    if (vis.profileKd) {
-        const pkd = p.profileKd;
-        const pkdHtml = pkd != null
-            ? `<span class="text-gray-400 text-xs font-semibold">${Number(pkd).toFixed(2)}</span>`
-            : '<span class="text-gray-600 text-xs">—</span>';
-        cells.push(`<td data-column="profileKd" class="py-3 px-2">${pkdHtml}</td>`);
-    }
-    if (vis.profileHours) {
-        const ph = p.profileHours;
-        const phHtml = ph != null
-            ? `<span class="text-gray-400 text-xs font-semibold">${ph} ч</span>`
-            : '<span class="text-gray-600 text-xs">—</span>';
-        cells.push(`<td data-column="profileHours" class="py-3 px-2">${phHtml}</td>`);
-    }
     if (vis.accDate) cells.push(`<td data-column="accDate" class="py-3 px-2"><span id="acc-age-${sid}" class="text-gray-500 text-xs">...</span></td>`);
     const canAdd = state.userLevel >= 1 && !p.whitelisted;
     const canRemove = p.whitelisted && (state.userLevel >= 3 || (p.whitelistAddedBy != null && String(p.whitelistAddedBy) === String(state.userId)));
@@ -2593,18 +2574,6 @@ function sortAndFilterAllPlayers(players) {
             const sidB = String(b.steamId ?? '');
             return getPlayerReportCount(sidB) - getPlayerReportCount(sidA);
         });
-    } else if (sortMethod === 'profileKd') {
-        sorted.sort((a, b) => {
-            const kdA = a.profileKd != null ? Number(a.profileKd) : -1;
-            const kdB = b.profileKd != null ? Number(b.profileKd) : -1;
-            return kdB - kdA;
-        });
-    } else if (sortMethod === 'profileHours') {
-        sorted.sort((a, b) => {
-            const hA = a.profileHours != null ? Number(a.profileHours) : Infinity;
-            const hB = b.profileHours != null ? Number(b.profileHours) : Infinity;
-            return hA - hB; // сверху меньше часов
-        });
     } else if (sortMethod === 'created') {
         sorted.sort((a, b) => {
             const sidA = String(a.steamId ?? '');
@@ -2629,8 +2598,6 @@ function buildAllPlayersTable(players) {
         ['kd', 'По K/D'],
         ['flags', 'По флагам'],
         ['reports', 'По репортам'],
-        ['profileKd', 'По K/D в профиле'],
-        ['profileHours', 'По часам в профиле'],
         ['created', 'По дате акка']
     ].map(([m, label]) => {
         const extraAttr = m === 'flags' ? ' data-flags-sort-button="1"' : '';
@@ -2858,17 +2825,6 @@ function flushAccAgeBatch() {
     const ids = _accAgeBatchQueue.splice(0);
     if (ids.length === 0 || !ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: 'get_account_age_batch', steamIds: ids }));
-}
-
-function cleanupAccAgePlaceholders() {
-    setTimeout(() => {
-        document.querySelectorAll('span[id^="acc-age-"]').forEach(el => {
-            if (el.textContent === '...') {
-                el.textContent = '—';
-                el.className = 'text-gray-600 text-xs';
-            }
-        });
-    }, 8000);
 }
 
 function deti00Reason(raw) {
