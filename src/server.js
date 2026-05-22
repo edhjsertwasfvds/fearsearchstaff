@@ -2667,6 +2667,9 @@ const server = http.createServer(async (req, res) => {
                 steamGet(`https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=${key}&steamid=${encodeURIComponent(sid)}&relationship=friend`)
             ]);
             const profile = summaries.status === 'fulfilled' && summaries.value?.response?.players?.[0] || null;
+            if (profile?.timecreated != null) {
+                cache.accountAge.set(sid, { created: profile.timecreated, lastCheck: Date.now() });
+            }
             const banData = bans.status === 'fulfilled' && bans.value?.players?.[0] || null;
             const lvl = level.status === 'fulfilled' && level.value?.response?.player_level;
             const cs2 = games.status === 'fulfilled' && games.value?.response?.games?.find(g => g.appid === 730) || null;
@@ -3637,6 +3640,58 @@ const server = http.createServer(async (req, res) => {
                 sendJson(res, 200, payload);
             } catch (e) {
                 sendError(res, 500, 'SNAPSHOT_ERROR', String(e && e.message ? e.message : e));
+            }
+        })();
+        return;
+    }
+
+    // Batch fear profiles (kd + hours)
+    if (parsedUrl.pathname === '/api/fear-profiles-batch' && req.method === 'POST') {
+        (async () => {
+            try {
+                let body = '';
+                req.on('data', c => body += c);
+                req.on('end', async () => {
+                    try {
+                        const payload = JSON.parse(body || '{}');
+                        const steamIds = Array.isArray(payload.steamIds) ? payload.steamIds.map(id => String(id)).filter(Boolean) : [];
+                        if (steamIds.length === 0 || steamIds.length > 200) {
+                            sendJson(res, 400, { error: 'Invalid steamIds count (1-200)' });
+                            return;
+                        }
+                        const results = [];
+                        for (const sid2 of steamIds) {
+                            try {
+                                const profile = await new Promise((resolve) => {
+                                    const rq = https.get(`https://api.fearproject.ru/profile/${encodeURIComponent(sid2)}`, (rs) => {
+                                        let d = '';
+                                        rs.on('data', c => d += c);
+                                        rs.on('end', () => {
+                                            try { resolve(JSON.parse(d || '{}')); } catch { resolve({}); }
+                                        });
+                                    });
+                                    rq.setTimeout(5000);
+                                    rq.on('timeout', () => { rq.destroy(); resolve({}); });
+                                    rq.on('error', () => resolve({}));
+                                });
+                                const stats = profile && profile.stats ? profile.stats : null;
+                                const kills = stats && typeof stats.kills === 'number' ? stats.kills : null;
+                                const deaths = stats && typeof stats.deaths === 'number' ? stats.deaths : null;
+                                const kd = (kills != null && deaths != null && deaths > 0) ? kills / deaths : (kills || 0);
+                                const playtime = stats && typeof stats.playtime === 'number' ? stats.playtime : null;
+                                const playtimeHours = playtime != null ? Math.round(playtime / 3600) : null;
+                                results.push({ steamId: sid2, kills, deaths, kd: Number(kd.toFixed(2)), playtimeHours });
+                            } catch (_) {
+                                results.push({ steamId: sid2, kills: null, deaths: null, kd: null, playtimeHours: null });
+                            }
+                        }
+                        sendJson(res, 200, { results });
+                    } catch (e) {
+                        sendJson(res, 400, { error: 'Invalid JSON' });
+                    }
+                });
+            } catch (e) {
+                sendError(res, 500, 'PROFILE_BATCH_ERROR', String(e && e.message ? e.message : e));
             }
         })();
         return;

@@ -131,7 +131,15 @@ function attachWss({
                         ws.send(JSON.stringify({ type: 'account_age_batch', results }));
                     }
 
-                    if (!STEAM_API_KEY || toFetch.length === 0) return;
+                    if (toFetch.length === 0) return;
+
+                    if (!STEAM_API_KEY) {
+                        const fetched = toFetch.map(sid3 => ({ steamId: sid3, created: 0 }));
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'account_age_batch', results: fetched }));
+                        }
+                        return;
+                    }
 
                     const BATCH_SIZE = 100;
                     for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
