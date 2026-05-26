@@ -64,15 +64,22 @@ async function refreshStaffList() {
             const admins = Array.isArray(data) ? data : [];
             staffList = admins.filter(filterAdmin).map(normalizeAdminToStaff);
         } else {
-            const cookie = `__ddg1_=g7Ui979pOEjDNf5BOT9p; access_token=${config.FEAR_ACCESS_TOKEN}`;
+            const cookie = `access_token=${config.FEAR_ACCESS_TOKEN}`;
             const admins = await new Promise((resolve) => {
                 const req = https.get('https://api.fearproject.ru/admins/', {
                     timeout: config.REQUEST_TIMEOUT_SLOW,
                     headers: {
                         'Accept': 'application/json, text/plain, */*',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+                        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+                        'sec-ch-ua': '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+                        'sec-ch-ua-mobile': '?0',
+                        'sec-ch-ua-platform': '"Windows"',
                         'Origin': 'https://fearproject.ru',
                         'Referer': 'https://fearproject.ru/',
+                        'Sec-Fetch-Dest': 'empty',
+                        'Sec-Fetch-Mode': 'cors',
+                        'Sec-Fetch-Site': 'same-site',
                         'Cookie': cookie
                     }
                 }, (apiRes) => {

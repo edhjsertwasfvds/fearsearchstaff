@@ -34,7 +34,7 @@ function fetchFearRecentReportsArray(fearAccessToken) {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
                 Origin: 'https://fearproject.ru',
                 Referer: 'https://fearproject.ru/',
-                Cookie: `__ddg1_=g7Ui979pOEjDNf5BOT9p; access_token=${fearAccessToken}`
+                ...(fearAccessToken ? { Cookie: `access_token=${fearAccessToken}` } : {})
             }
         }, (apiRes) => {
             let data = '';

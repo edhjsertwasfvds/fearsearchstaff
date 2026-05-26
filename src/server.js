@@ -459,15 +459,24 @@ function buildOnlinePlayersContext(servers) {
 }
 
 function fetchFearServers(callback) {
+    const cookieParts = [];
+    if (FEAR_ACCESS_TOKEN) {
+        cookieParts.push(`access_token=${FEAR_ACCESS_TOKEN}`);
+    }
     const opts = {
         headers: {
             'Accept': '*/*',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+            'sec-ch-ua': '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
             'Origin': 'https://fearproject.ru',
             'Referer': 'https://fearproject.ru/',
-            ...(FEAR_ACCESS_TOKEN ? {
-                'Cookie': `__ddg1_=g7Ui979pOEjDNf5BOT9p; access_token=${FEAR_ACCESS_TOKEN}`
-            } : {})
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
+            ...(cookieParts.length ? { 'Cookie': cookieParts.join('; ') } : {})
         }
     };
     https.get(API_URL, opts, (apiRes) => {
@@ -3490,7 +3499,7 @@ const server = http.createServer(async (req, res) => {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
                 'Origin': 'https://fearproject.ru',
                 'Referer': 'https://fearproject.ru/',
-                'Cookie': `__ddg1_=g7Ui979pOEjDNf5BOT9p; access_token=${FEAR_ACCESS_TOKEN}`
+                ...(FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {})
             }
         }, (apiRes) => {
             let data = '';
@@ -3515,7 +3524,7 @@ const server = http.createServer(async (req, res) => {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
                 'Origin': 'https://fearproject.ru',
                 'Referer': 'https://fearproject.ru/',
-                'Cookie': `__ddg1_=g7Ui979pOEjDNf5BOT9p; access_token=${FEAR_ACCESS_TOKEN}`
+                ...(FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {})
             }
         }, (apiRes) => {
             let data = '';
