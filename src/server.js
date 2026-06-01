@@ -2641,8 +2641,6 @@ const server = http.createServer(async (req, res) => {
             return { banned: bans.length > 0, reason: lb.reason, date: lb.date, expires: lb.expires, bans };
         };
 
-        const checkFear = () => httpGet(`https://api.fearproject.ru/profile/${encodeURIComponent(sid)}`);
-
         const checkYooma = () => new Promise((resolve) => {
             const cachedYooma = getCachedData('yoomaBans');
             if (cachedYooma?.allBans) {
@@ -2956,9 +2954,8 @@ const server = http.createServer(async (req, res) => {
         };
 
         try {
-            const [local, fear, yooma, steam, cs2red, deti00, pride, top2, faceit] = await Promise.allSettled([
+            const [local, yooma, steam, cs2red, deti00, pride, top2, faceit] = await Promise.allSettled([
                 checkLocal(),
-                checkFear(),
                 checkYooma(),
                 checkSteam(),
                 checkCs2red(),
@@ -2969,7 +2966,6 @@ const server = http.createServer(async (req, res) => {
             ]);
             const result = {
                 local: local.status === 'fulfilled' ? local.value : {},
-                fear: fear.status === 'fulfilled' ? fear.value : null,
                 yooma: yooma.status === 'fulfilled' ? yooma.value : null,
                 steam: steam.status === 'fulfilled' ? steam.value : null,
                 cs2red: cs2red.status === 'fulfilled' ? cs2red.value : null,
