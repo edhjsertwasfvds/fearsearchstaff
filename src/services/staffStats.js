@@ -31,10 +31,10 @@ async function refreshStaffList() {
     if (staffPunishmentsCache.staffListLoading) return;
     staffPunishmentsCache.staffListLoading = true;
 
-    // Стафф: group_id 1 (Модератор), 3 (STAFF), 5 (Ст. Модер), 6 (Мл. Модератор).
-    const allowedGroupIds = new Set([1, 3, 5, 6]);
-    const allowedGroupDisplayNames = new Set(['Стафф', 'Стаф', 'Ст. Модер', 'Модератор', 'Мл. Модератор']);
-    const allowedGroupNames = new Set(['STAFF', 'STMODER', 'MODER', 'MLMODER']);
+    // Стафф: group_id 1 (Модератор), 3 (STAFF), 5 (Ст. Модер), 6 (Мл. Модератор), 7 (Ст. Администратор), 8 (Гл. Администратор), 10 (Медиа).
+    const allowedGroupIds = new Set([1, 3, 5, 6, 7, 8, 10]);
+    const allowedGroupDisplayNames = new Set(['Стафф', 'Стаф', 'Ст. Модер', 'Модератор', 'Мл. Модератор', 'Ст. Администратор', 'Гл. Администратор', 'Медиа']);
+    const allowedGroupNames = new Set(['STAFF', 'STMODER', 'MODER', 'MLMODER', 'STADMIN', 'GLADMIN', 'MEDIA']);
 
     const normalizeAdminToStaff = (a) => ({
         steamid: String(a?.steamid || ''),
