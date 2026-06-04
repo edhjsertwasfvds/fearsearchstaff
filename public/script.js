@@ -1419,7 +1419,8 @@ function renderPanel() {
                 ? statsRows.map(r => window.StaffStatsSecure.computePayoutRow(
                     r,
                     ticketsMap[String(r.admin_steamid)] || 0,
-                    rolesMap[String(r.admin_steamid)] || 'AUTO'
+                    rolesMap[String(r.admin_steamid)] || 'AUTO',
+                    (state.punishments.staffCheckRanksBySid || {})[String(r.admin_steamid)] || ''
                 ))
                 : [];
             const totalTickets = secure ? payoutRows.reduce((s, r) => s + (r.tickets || 0), 0) : 0;
@@ -1515,7 +1516,7 @@ function renderPanel() {
                                     ${secure && !isOldTable ? (() => {
                                         const sid = String(r.admin_steamid || '');
                                         const cur = (ticketsMap && ticketsMap[sid] != null) ? ticketsMap[sid] : 0;
-                                        const pr = window.StaffStatsSecure.computePayoutRow(r, cur, rolesMap[String(r.admin_steamid)] || 'AUTO');
+                                        const pr = window.StaffStatsSecure.computePayoutRow(r, cur, rolesMap[String(r.admin_steamid)] || 'AUTO', (state.punishments.staffCheckRanksBySid || {})[String(r.admin_steamid)] || '');
                                         const fixed = pr.pay.fixed || 0;
                                         return `
                                         <td class="py-3 px-2">
@@ -1527,7 +1528,7 @@ function renderPanel() {
                                         </td>
                                         <td class="py-3 px-2 text-white font-semibold">
                                             ${pr.pay.total}
-                                            <div class="text-[10px] text-gray-600 mt-1">б:${pr.pay.bans} м:${pr.pay.mutes} т:${pr.pay.tickets}${fixed ? ` +фикс:${fixed}` : ''}</div>
+                                            <div class="text-[10px] text-gray-600 mt-1">б:${pr.pay.bans} м:${pr.pay.mutes} т:${pr.pay.tickets}${fixed ? ` +фикс:${fixed}` : ''}${pr.pay.rank ? ` +ранг:${pr.pay.rank}` : ''}</div>
                                         </td>`;
                                     })() : ''}
                                 </tr>
@@ -1944,7 +1945,8 @@ function exportStaffStatsCsv() {
         window.StaffStatsSecure.downloadCsv(`staff-stats-week-${ymd}.csv`, csv);
         return;
     }
-    const payout = rows.map(r => window.StaffStatsSecure.computePayoutRow(r, map[String(r.admin_steamid)] || 0, roles[String(r.admin_steamid)] || 'AUTO'));
+    const ranks = state.punishments.staffCheckRanksBySid || {};
+    const payout = rows.map(r => window.StaffStatsSecure.computePayoutRow(r, map[String(r.admin_steamid)] || 0, roles[String(r.admin_steamid)] || 'AUTO', ranks[String(r.admin_steamid)] || ''));
     const ym = getEffectiveYm(state.punishments.selectedMonth);
     const csv = window.StaffStatsSecure.toCsv(payout);
     window.StaffStatsSecure.downloadCsv(`staff-stats-${ym}.csv`, csv);

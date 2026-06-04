@@ -218,6 +218,19 @@
         return 0;
     }
 
+    function normalizeCheckRank(rankRaw) {
+        const r = String(rankRaw || '').trim().toUpperCase();
+        return r;
+    }
+
+    function checkRankFixedPay(rankRaw) {
+        const r = normalizeCheckRank(rankRaw);
+        if (r === 'GAMMA') return 500;
+        if (r === 'ALPHA') return 750;
+        if (r === 'METHOD') return 1000;
+        return 0;
+    }
+
     // Месячные нормы (минимум). Считаем наказания = bans+mutes, тикеты = вручную.
     // Снятые и "напиши тикет в дс" уже исключены из bans/mutes в secure-расчёте.
     function roleMonthlyNorms(role) {
@@ -230,11 +243,12 @@
         return { punish: 0, tickets: 0 };
     }
 
-    function computePayoutRow(row, ticketsCount, roleRaw) {
+    function computePayoutRow(row, ticketsCount, roleRaw, checkRankRaw) {
         const bans = toInt(row && row.bans, 0);
         const mutes = toInt(row && row.mutes, 0);
         const tickets = toInt(ticketsCount, 0);
         const role = normalizeRole(roleRaw);
+        const checkRank = normalizeCheckRank(checkRankRaw);
         const banRate = marginalRate(bans, BAN_TIERS);
         const ticketRate = marginalRate(tickets, TICKET_TIERS);
         const muteRate = 4;
@@ -248,9 +262,10 @@
                 ...row,
                 tickets,
                 role,
+                checkRank,
                 norms: { punish: 0, tickets: 0 },
                 rates: { banRate, muteRate, ticketRate },
-                pay: { bans: 0, mutes: 0, tickets: 0, fixed: 0, total: 0 }
+                pay: { bans: 0, mutes: 0, tickets: 0, fixed: 0, rank: 0, total: 0 }
             };
         }
 
@@ -264,10 +279,12 @@
         const meetsPunish = punishCount >= effectiveNormPunish;
         const meetsTickets = tickets >= effectiveNormTickets;
         const fixedPaid = (fixed > 0 && meetsPunish && meetsTickets) ? fixed : 0;
+        const rankPaid = checkRankFixedPay(checkRank);
         return {
             ...row,
             tickets,
             role,
+            checkRank,
             norms: { punish: effectiveNormPunish, tickets: effectiveNormTickets },
             rates: { banRate, muteRate, ticketRate },
             pay: {
@@ -275,7 +292,8 @@
                 mutes: payMutes,
                 tickets: payTickets,
                 fixed: fixedPaid,
-                total: payBans + payMutes + payTickets + fixedPaid
+                rank: rankPaid,
+                total: payBans + payMutes + payTickets + fixedPaid + rankPaid
             }
         };
     }
@@ -291,6 +309,7 @@
             'name',
             'group',
             'role',
+            'check_rank',
             'bans',
             'mutes',
             'tickets',
@@ -301,6 +320,7 @@
             'pay_mutes',
             'pay_tickets',
             'pay_fixed',
+            'pay_rank',
             'pay_total'
         ];
         const lines = [header.join(';')];
@@ -310,6 +330,7 @@
                 escape(r.admin),
                 escape(r.group),
                 escape(r.role || ''),
+                escape(r.checkRank || ''),
                 escape(toInt(r.bans, 0)),
                 escape(toInt(r.mutes, 0)),
                 escape(toInt(r.tickets, 0)),
@@ -320,6 +341,7 @@
                 escape(toInt(r.pay?.mutes, 0)),
                 escape(toInt(r.pay?.tickets, 0)),
                 escape(toInt(r.pay?.fixed, 0)),
+                escape(toInt(r.pay?.rank, 0)),
                 escape(toInt(r.pay?.total, 0))
             ].join(';'));
         });
