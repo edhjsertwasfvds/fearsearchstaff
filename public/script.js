@@ -2575,7 +2575,7 @@ function buildSuspiciousRowHtml(p, index) {
     const serverPort = Number(p.serverPort);
     const canConnect = Boolean(serverName && serverIp && Number.isFinite(serverPort) && serverPort > 0);
     const connectBtnHtml = canConnect
-        ? `<a href="steam://connect/${encodeURIComponent(serverIp)}:${serverPort}" class="shrink-0 max-w-[120px] px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 text-[10px] font-semibold transition-colors truncate" title="Подключиться к ${escapeHtml(serverName)}"><span class="inline-flex items-center gap-1 w-full">${serverGameIconHtml(p.serverGame)}<span class="truncate">${escapeHtml(serverName)}</span></span></a>`
+        ? `<a href="steam://connect/${encodeURIComponent(serverIp)}:${serverPort}" class="shrink-0 w-[150px] px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 text-[10px] font-semibold transition-colors" title="Подключиться к ${escapeHtml(serverName)}"><span class="inline-flex items-center gap-1 w-full">${serverGameIconHtml(p.serverGame)}<span class="truncate">${escapeHtml(serverName)}</span></span></a>`
         : '';
     const rCnt = getPlayerReportCount(sid);
     const rBadge = `<span data-report-sid="${sid}" class="ml-1 px-1.5 py-0.5 bg-red-500/20 text-red-400 text-[10px] font-bold rounded-full" style="display:${rCnt > 0 ? '' : 'none'}">${rCnt}</span>`;
@@ -2828,7 +2828,7 @@ function buildAllPlayersTable(players) {
             ${filterSummary ? `<div class="flex flex-wrap gap-2">${filterSummary}</div>` : ''}
             ${filtersMenu}
         </div>
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto hide-scrollbar">
                 <table class="w-full" data-table="suspicious">
                 <thead class="bg-white/[0.03] sticky top-0 z-10">
                     <tr>
