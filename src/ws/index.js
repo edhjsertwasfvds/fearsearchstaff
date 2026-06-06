@@ -107,6 +107,7 @@ function attachWss({
                     sendPlayerGames(ws, sid);
                 } else if (data.type === 'get_account_age_batch') {
                     const steamIds = Array.isArray(data.steamIds) ? data.steamIds.map(id => String(id)).filter(Boolean) : [];
+                    console.log('[WS AccAge] get_account_age_batch received, ids:', steamIds.length, 'STEAM_API_KEY set?', !!STEAM_API_KEY);
                     if (steamIds.length === 0) return;
                     if (steamIds.length > 100) {
                         if (ws.readyState === WebSocket.OPEN) {
@@ -127,6 +128,8 @@ function attachWss({
                         }
                     }
 
+                    console.log('[WS AccAge] cached:', results.length, 'toFetch:', toFetch.length);
+
                     if (results.length > 0 && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ type: 'account_age_batch', results }));
                     }
@@ -134,6 +137,7 @@ function attachWss({
                     if (toFetch.length === 0) return;
 
                     if (!STEAM_API_KEY) {
+                        console.log('[WS AccAge] no STEAM_API_KEY, returning 0 for all');
                         const fetched = toFetch.map(sid3 => ({ steamId: sid3, created: 0 }));
                         if (ws.readyState === WebSocket.OPEN) {
                             ws.send(JSON.stringify({ type: 'account_age_batch', results: fetched }));
@@ -146,6 +150,7 @@ function attachWss({
                         const batch = toFetch.slice(i, i + BATCH_SIZE);
                         const ids = batch.join(',');
                         const url = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${STEAM_API_KEY}&steamids=${encodeURIComponent(ids)}`;
+                        console.log('[WS AccAge] fetching Steam API for', batch.length, 'players');
                         https.get(url, (res) => {
                             let apiData = '';
                             res.on('data', chunk => apiData += chunk);
@@ -154,13 +159,15 @@ function attachWss({
                                 try {
                                     const result = JSON.parse(apiData || '{}');
                                     const players = result.response?.players || [];
+                                    console.log('[WS AccAge] Steam API returned', players.length, 'players for batch of', batch.length);
                                     const playerMap = new Map(players.map(p => [p.steamid, p.timecreated || 0]));
                                     for (const sid3 of batch) {
                                         const created = playerMap.get(sid3) || 0;
                                         cache.accountAge.set(sid3, { created, lastCheck: Date.now() });
                                         fetched.push({ steamId: sid3, created });
                                     }
-                                } catch (_) {
+                                } catch (e) {
+                                    console.log('[WS AccAge] Steam API error:', e?.message);
                                     for (const sid3 of batch) {
                                         fetched.push({ steamId: sid3, created: 0 });
                                     }
@@ -169,7 +176,8 @@ function attachWss({
                                     ws.send(JSON.stringify({ type: 'account_age_batch', results: fetched }));
                                 }
                             });
-                        }).on('error', () => {
+                        }).on('error', (err) => {
+                            console.log('[WS AccAge] Steam API request error:', err?.message);
                             const fetched = batch.map(sid3 => ({ steamId: sid3, created: 0 }));
                             if (ws.readyState === WebSocket.OPEN) {
                                 ws.send(JSON.stringify({ type: 'account_age_batch', results: fetched }));

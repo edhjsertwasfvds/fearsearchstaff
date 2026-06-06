@@ -796,6 +796,7 @@ function applyMessage(data) {
             applyAccountAge(data, { scheduleRefresh: isCreatedSortActive() });
             break;
         case 'account_age_batch':
+            console.log('[AccAge] account_age_batch received, results:', data.results?.length);
             if (Array.isArray(data.results)) {
                 data.results.forEach(r => applyAccountAge(r, { scheduleRefresh: false }));
                 if (isPlayersCategoryOpen() && isCreatedSortActive()) {
@@ -2848,6 +2849,7 @@ let _accAgeBatchQueue = [];
 let _accAgeBatchTimer = null;
 
 function requestAccountAgeFor(players, idKey) {
+    const ids = [];
     players.forEach(p => {
         const sid = p[idKey] != null ? String(p[idKey]) : '';
         if (!sid) return;
@@ -2858,8 +2860,10 @@ function requestAccountAgeFor(players, idKey) {
         }
         if (!_accAgeBatchQueue.includes(sid)) {
             _accAgeBatchQueue.push(sid);
+            ids.push(sid);
         }
     });
+    console.log('[AccAge] requestAccountAgeFor: queued', ids.length, 'new, total queue', _accAgeBatchQueue.length, 'ws open?', !!(ws && ws.readyState === WebSocket.OPEN));
     if (_accAgeBatchQueue.length > 0 && !_accAgeBatchTimer) {
         _accAgeBatchTimer = setTimeout(flushAccAgeBatch, 50);
     }
@@ -2868,6 +2872,7 @@ function requestAccountAgeFor(players, idKey) {
 function flushAccAgeBatch() {
     _accAgeBatchTimer = null;
     const ids = _accAgeBatchQueue.splice(0);
+    console.log('[AccAge] flushAccAgeBatch: sending', ids.length, 'ids, ws open?', !!(ws && ws.readyState === WebSocket.OPEN));
     if (ids.length === 0 || !ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: 'get_account_age_batch', steamIds: ids }));
 }
@@ -2981,6 +2986,7 @@ function applyAccountAge(data, options = {}) {
     const created = data.created || 0;
     _accAgeCache.set(sid, created);
     const el = document.getElementById(`acc-age-${sid}`);
+    console.log('[AccAge] applyAccountAge:', sid, 'created:', created, 'el found:', !!el);
     if (el) {
         const nextText = created > 0 ? formatAccountAge(created) : 'Скрыт';
         const nextClass = created > 0 ? 'text-blue-400 mt-0.5' : 'text-gray-600 mt-0.5';
