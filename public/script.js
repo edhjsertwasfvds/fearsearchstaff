@@ -2846,6 +2846,35 @@ function buildAllPlayersTable(players) {
 const _accAgeCache = new Map();
 let _accAgeBatchQueue = [];
 let _accAgeBatchTimer = null;
+const ACC_AGE_LOCAL_CACHE_KEY = 'accountAgeCache_v1';
+const ACC_AGE_LOCAL_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+function loadAccountAgeLocalCache() {
+    try {
+        const raw = localStorage.getItem(ACC_AGE_LOCAL_CACHE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return;
+        const now = Date.now();
+        for (const [sid, entry] of Object.entries(parsed)) {
+            if (entry && typeof entry.created === 'number' && typeof entry.ts === 'number' && (now - entry.ts) < ACC_AGE_LOCAL_CACHE_TTL_MS) {
+                _accAgeCache.set(sid, entry.created);
+            }
+        }
+    } catch (_) {}
+}
+
+function saveAccountAgeLocalCache() {
+    try {
+        const obj = {};
+        for (const [sid, created] of _accAgeCache.entries()) {
+            obj[sid] = { created, ts: Date.now() };
+        }
+        localStorage.setItem(ACC_AGE_LOCAL_CACHE_KEY, JSON.stringify(obj));
+    } catch (_) {}
+}
+
+loadAccountAgeLocalCache();
 
 function requestAccountAgeFor(players, idKey) {
     players.forEach(p => {
@@ -3003,9 +3032,10 @@ function applyAccountAge(data, options = {}) {
     if (!sid) return;
     const created = data.created || 0;
     _accAgeCache.set(sid, created);
+    saveAccountAgeLocalCache();
     const el = document.getElementById(`acc-age-${sid}`);
     if (el) {
-        const nextText = created > 0 ? formatAccountAge(created) : 'Скрыт';
+        const nextText = created > 0 ? formatAccountAge(created) : '—';
         const nextClass = created > 0 ? 'text-blue-400 mt-0.5' : 'text-gray-600 mt-0.5';
         if (el.textContent !== nextText) el.textContent = nextText;
         if (el.className !== nextClass) el.className = nextClass;
