@@ -932,6 +932,85 @@ async function getFearPunishmentsByAdmin(adminSteamId, limit = 100, offset = 0) 
     return rows;
 }
 
+async function getStaffPunishmentsDaily(days = 7) {
+    const since = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
+    const { rows } = await poolQuery(
+        `SELECT to_timestamp(created)::date as day, admin_steamid, admin_name,
+            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) as bans,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as mutes,
+            COUNT(*) as total
+         FROM panel_fear_punishments
+         WHERE created >= $1
+         GROUP BY day, admin_steamid
+         ORDER BY day DESC, total DESC`,
+        [since]
+    );
+    return rows;
+}
+
+async function getPunishmentsTrend(days = 30) {
+    const since = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
+    const { rows } = await poolQuery(
+        `SELECT to_timestamp(created)::date as day,
+            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) as bans,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as mutes,
+            COUNT(*) as total
+         FROM panel_fear_punishments
+         WHERE created >= $1
+         GROUP BY day
+         ORDER BY day ASC`,
+        [since]
+    );
+    return rows;
+}
+
+async function getPunishmentsMonthComparison() {
+    const now = new Date();
+    const currYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevYm = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+    const { rows: [curr] } = await poolQuery(
+        `SELECT
+            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) as bans,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as mutes,
+            COUNT(*) as total
+         FROM panel_fear_punishments
+         WHERE to_char(to_timestamp(created), 'YYYY-MM') = $1`,
+        [currYm]
+    );
+
+    const { rows: [prev] } = await poolQuery(
+        `SELECT
+            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) as bans,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as mutes,
+            COUNT(*) as total
+         FROM panel_fear_punishments
+         WHERE to_char(to_timestamp(created), 'YYYY-MM') = $1`,
+        [prevYm]
+    );
+
+    return { current: curr || { bans: 0, mutes: 0, total: 0 }, previous: prev || { bans: 0, mutes: 0, total: 0 } };
+}
+
+async function getTicketsMonthComparison() {
+    const now = new Date();
+    const currYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevYm = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+    const { rows: [curr] } = await poolQuery(
+        `SELECT COALESCE(SUM(tickets), 0) as total FROM panel_staff_tickets WHERE ym = $1`,
+        [currYm]
+    );
+    const { rows: [prev] } = await poolQuery(
+        `SELECT COALESCE(SUM(tickets), 0) as total FROM panel_staff_tickets WHERE ym = $1`,
+        [prevYm]
+    );
+
+    return { current: curr?.total || 0, previous: prev?.total || 0 };
+}
+
 async function getActivityByServer(days = 7) {
     const since = Date.now() - days * 24 * 60 * 60 * 1000;
     const { rows } = await poolQuery(
@@ -1030,5 +1109,9 @@ module.exports = {
     getActivityByServer,
     replaceFearPunishments,
     getFearPunishmentsStats,
-    getFearPunishmentsByAdmin
+    getFearPunishmentsByAdmin,
+    getStaffPunishmentsDaily,
+    getPunishmentsTrend,
+    getPunishmentsMonthComparison,
+    getTicketsMonthComparison
 };

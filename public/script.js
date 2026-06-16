@@ -26,6 +26,7 @@ const state = {
     changesTab: 'roles',
     rolesEditor: { authMode: 'cookie', accessToken: '', steamid: '', name: '', adminId: '', roleName: 'Модератор', log: [] }
 };
+let playersQuickSearch = '';
 const ROLES_EDITOR_ACCESS_TOKEN_KEY = 'rolesEditorAccessToken';
 
 let ws = null;
@@ -2599,8 +2600,16 @@ function sortAndFilterAllPlayers(players) {
     const afterCustom = applyCustomFilters(afterExclusions);
     const afterBanFilters = filterSuspiciousPlayers(afterCustom);
     const afterHide = applyHideFilters(afterBanFilters);
+    const afterSearch = playersQuickSearch
+        ? afterHide.filter(p => {
+            const q = playersQuickSearch;
+            const nick = String(p.nickname || '').toLowerCase();
+            const sid = String(p.steamId || '').toLowerCase();
+            return nick.includes(q) || sid.includes(q);
+          })
+        : afterHide;
     const sortMethod = localStorage.getItem('suspiciousSortMethod') || 'kills';
-    const sorted = [...afterHide];
+    const sorted = [...afterSearch];
     if (sortMethod === 'kills') sorted.sort((a, b) => (b.kills || 0) - (a.kills || 0));
     else if (sortMethod === 'kd') {
         sorted.sort((a, b) => {
@@ -2792,7 +2801,10 @@ function buildAllPlayersTable(players) {
                 ${countText}
             </div>
             <div class="flex flex-wrap gap-2 items-center justify-between w-full">
-                <div class="flex flex-wrap gap-2">${sortButtons}</div>
+                <div class="flex flex-wrap gap-2 items-center">
+                    ${sortButtons}
+                    <input type="text" id="playersQuickSearchInput" placeholder="Поиск по нику / SteamID..." value="${escapeHtml(playersQuickSearch)}" oninput="playersQuickSearch = this.value.trim().toLowerCase(); refreshAllPlayersPanel();" class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-indigo-500 w-44">
+                </div>
                 <div class="flex gap-2 items-center ml-auto overflow-visible">
                     <div class="relative" data-columns-dropdown="1">
                         <button type="button" onclick="togglePlayersColumnsMenu(event)" class="px-3 py-2 text-xs font-semibold rounded-lg bg-white/[0.08] text-gray-300 hover:bg-white/[0.12] flex items-center gap-1.5">

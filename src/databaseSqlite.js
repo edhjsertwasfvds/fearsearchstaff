@@ -691,6 +691,73 @@ function getFearPunishmentsByAdmin(adminSteamId, limit = 100, offset = 0) {
     ).all(adminSteamId, limit, offset);
 }
 
+function getStaffPunishmentsDaily(days = 7) {
+    const since = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
+    return db.prepare(
+        `SELECT date(created, 'unixepoch') as day, admin_steamid, admin_name,
+            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) as bans,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as mutes,
+            COUNT(*) as total
+         FROM fear_punishments
+         WHERE created >= ?
+         GROUP BY day, admin_steamid
+         ORDER BY day DESC, total DESC`
+    ).all(since);
+}
+
+function getPunishmentsTrend(days = 30) {
+    const since = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
+    return db.prepare(
+        `SELECT date(created, 'unixepoch') as day,
+            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) as bans,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as mutes,
+            COUNT(*) as total
+         FROM fear_punishments
+         WHERE created >= ?
+         GROUP BY day
+         ORDER BY day ASC`
+    ).all(since);
+}
+
+function getPunishmentsMonthComparison() {
+    const now = new Date();
+    const currYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevYm = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+    const curr = db.prepare(
+        `SELECT
+            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) as bans,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as mutes,
+            COUNT(*) as total
+         FROM fear_punishments
+         WHERE strftime('%Y-%m', created, 'unixepoch') = ?`
+    ).get(currYm);
+
+    const prev = db.prepare(
+        `SELECT
+            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) as bans,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as mutes,
+            COUNT(*) as total
+         FROM fear_punishments
+         WHERE strftime('%Y-%m', created, 'unixepoch') = ?`
+    ).get(prevYm);
+
+    return { current: curr || { bans: 0, mutes: 0, total: 0 }, previous: prev || { bans: 0, mutes: 0, total: 0 } };
+}
+
+function getTicketsMonthComparison() {
+    const now = new Date();
+    const currYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevYm = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+    const curr = db.prepare(`SELECT COALESCE(SUM(tickets), 0) as total FROM staff_tickets WHERE ym = ?`).get(currYm);
+    const prev = db.prepare(`SELECT COALESCE(SUM(tickets), 0) as total FROM staff_tickets WHERE ym = ?`).get(prevYm);
+
+    return { current: curr?.total || 0, previous: prev?.total || 0 };
+}
+
 module.exports = {
     initialize,
     getDbPath, closeDatabase, initDatabase,
@@ -712,5 +779,6 @@ module.exports = {
     deleteStaffCheckRank,
     getAllStaffCheckRanks,
     getActivityHeatmap, getActivityByServer,
-    replaceFearPunishments, getFearPunishmentsStats, getFearPunishmentsByAdmin
+    replaceFearPunishments, getFearPunishmentsStats, getFearPunishmentsByAdmin,
+    getStaffPunishmentsDaily, getPunishmentsTrend, getPunishmentsMonthComparison, getTicketsMonthComparison
 };
