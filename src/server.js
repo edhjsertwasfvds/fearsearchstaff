@@ -2529,7 +2529,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- Staff analytics (level >= 4) ---
-    if (req.url === '/api/staff-analytics/daily' && req.method === 'GET') {
+    if (req.url.startsWith('/api/staff-analytics/daily') && req.method === 'GET') {
         const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав');
@@ -2540,7 +2540,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { rows });
         return;
     }
-    if (req.url === '/api/staff-analytics/trend' && req.method === 'GET') {
+    if (req.url.startsWith('/api/staff-analytics/trend') && req.method === 'GET') {
         const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав');
@@ -2551,7 +2551,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { rows });
         return;
     }
-    if (req.url === '/api/staff-analytics/comparison' && req.method === 'GET') {
+    if (req.url.startsWith('/api/staff-analytics/comparison') && req.method === 'GET') {
         const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав');
@@ -2562,7 +2562,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { punishments, tickets });
         return;
     }
-    if (req.url === '/api/staff-analytics/roles' && req.method === 'GET') {
+    if (req.url.startsWith('/api/staff-analytics/roles') && req.method === 'GET') {
         const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             sendError(res, 403, 'FORBIDDEN', 'Недостаточно прав');
