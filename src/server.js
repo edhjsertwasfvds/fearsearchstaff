@@ -2448,10 +2448,12 @@ const server = http.createServer(async (req, res) => {
                             try {
                                 const result = JSON.parse(apiData || '{}');
                                 const players = result.response?.players || [];
+                                console.log('[AccountAge] Steam API returned', players.length, 'players for', ids.length, 'requested, sample:', players.slice(0, 3).map(p => ({ sid: p.steamid, tc: p.timecreated })));
                                 const playerMap = new Map(players.map(p => [p.steamid, p.timecreated || 0]));
                                 const results = ids.map(sid => ({ steamId: sid, created: playerMap.get(sid) || 0 }));
                                 resolve(results);
-                            } catch (_) {
+                            } catch (e) {
+                                console.log('[AccountAge] Steam API parse error:', e?.message, 'raw:', apiData.slice(0, 200));
                                 resolve(ids.map(sid => ({ steamId: sid, created: 0 })));
                             }
                         });

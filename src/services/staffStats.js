@@ -66,7 +66,7 @@ async function refreshStaffList() {
         } else {
             const cookie = `access_token=${config.FEAR_ACCESS_TOKEN}`;
             const admins = await new Promise((resolve) => {
-                const req = https.get('https://api.fearproject.ru/admins/', {
+                const req = https.get('https://api.fearproject.ru/admins', {
                     timeout: config.REQUEST_TIMEOUT_SLOW,
                     headers: {
                         'Accept': 'application/json, text/plain, */*',
@@ -88,14 +88,16 @@ async function refreshStaffList() {
                     apiRes.on('end', () => {
                         try {
                             const parsed = JSON.parse(data);
+                            console.log(`[Staff] Fear API status=${apiRes.statusCode}, count=${Array.isArray(parsed) ? parsed.length : 'N/A'}, sample=`, Array.isArray(parsed) && parsed.length > 0 ? parsed[0].name || parsed[0].nickname || parsed[0].steamId : parsed);
                             resolve(Array.isArray(parsed) ? parsed : []);
-                        } catch (_) {
+                        } catch (e) {
+                            console.log(`[Staff] Fear API status=${apiRes.statusCode}, parse error: ${e?.message}, data=${data.slice(0, 200)}`);
                             resolve([]);
                         }
                     });
                 });
-                req.on('error', () => resolve([]));
-                req.on('timeout', () => { try { req.destroy(); } catch {} resolve([]); });
+                req.on('error', (err) => { console.log('[Staff] Fear API request error:', err?.message); resolve([]); });
+                req.on('timeout', () => { console.log('[Staff] Fear API timeout'); try { req.destroy(); } catch {} resolve([]); });
             });
 
             staffList = admins.filter(filterAdmin).map(normalizeAdminToStaff);

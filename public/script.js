@@ -2912,6 +2912,7 @@ function flushAccAgeBatch() {
             if (!r.ok) return Promise.reject(new Error(r.status));
             return r.json();
         }).then(data => {
+            console.log('[AccAge] batch response:', data?.results?.length, 'results, sample:', data?.results?.slice(0, 3));
             if (Array.isArray(data?.results)) {
                 data.results.forEach(r => applyAccountAge(r, { scheduleRefresh: false }));
                 if (isPlayersCategoryOpen() && isCreatedSortActive()) {
