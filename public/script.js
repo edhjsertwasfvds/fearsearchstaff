@@ -1385,11 +1385,12 @@ function renderPanel() {
             };
             const roleRank = (roleRaw) => {
                 const r = String(roleRaw || '').trim().toUpperCase();
-                if (r === 'GA') return 0;
-                if (r === 'STA') return 1;
-                if (r === 'STM') return 2;
-                if (r === 'M') return 3;
-                if (r === 'ML') return 4;
+                if (r === 'CURATOR') return 0;
+                if (r === 'GA') return 1;
+                if (r === 'STA') return 2;
+                if (r === 'STM') return 3;
+                if (r === 'M') return 4;
+                if (r === 'ML') return 5;
                 return 9;
             };
             const baseRows = staffList.map(s => ({
