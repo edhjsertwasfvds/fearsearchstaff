@@ -994,11 +994,22 @@
                     return;
                 }
 
-                staffList.innerHTML = list.map(s => {
+                // Сортировка: ГА (CURATOR) → Куратор (GA) → СТА → СТМ → М → МЛ → Авто/прочие
+                const roleWeight = { CURATOR: 0, GA: 1, STA: 2, STM: 3, M: 4, ML: 5, AUTO: 6 };
+                const sortedList = list.slice().sort((a, b) => {
+                    const wa = roleWeight[staffRolesBySid[String(a.steamid || '').trim()] || 'AUTO'] ?? 6;
+                    const wb = roleWeight[staffRolesBySid[String(b.steamid || '').trim()] || 'AUTO'] ?? 6;
+                    if (wa !== wb) return wa - wb;
+                    const na = String(a.name || '').toLowerCase();
+                    const nb = String(b.name || '').toLowerCase();
+                    return na.localeCompare(nb);
+                });
+
+                staffList.innerHTML = sortedList.map(s => {
                     const avatar = (s.avatar_full || defaultAvatar).replace(/^http:\/\//i, 'https://');
                     const sid = String(s.steamid || '').trim();
                     const canEditRole = currentUserLevel >= 5 && sid;
-                    const roleMap = { AUTO: 'Авто', ML: 'МЛ', M: 'М', STM: 'СТМ', STA: 'СТА', GA: 'Куратор', CURATOR: 'ГА' };
+                    const roleMap = { CURATOR: 'ГА', GA: 'Куратор', STA: 'СТА', STM: 'СТМ', M: 'М', ML: 'МЛ', AUTO: 'Авто' };
                     const currentRole = (staffRolesBySid[sid] || 'AUTO').toUpperCase();
                     const roleSelectHtml = canEditRole
                         ? `<div class="mt-1 flex items-center gap-2">
