@@ -2386,7 +2386,7 @@ const server = http.createServer(async (req, res) => {
                 const { steamId, role } = JSON.parse(body || '{}');
                 const sid = String(steamId || '').trim();
                 const rawRole = String(role || '').trim().toUpperCase();
-                const allowed = new Set(['GA', 'STA', 'STM', 'M', 'ML', 'AUTO']);
+                const allowed = new Set(['GA', 'STA', 'STM', 'M', 'ML', 'AUTO', 'CURATOR']);
                 if (!sid || !allowed.has(rawRole)) {
                     console.warn('[StaffRoles] BAD_REQUEST steamId=', sid, 'role=', rawRole);
                     sendError(res, 400, 'BAD_REQUEST', 'Некорректные данные');
