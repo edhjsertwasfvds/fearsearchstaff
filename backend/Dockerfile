@@ -1,8 +1,8 @@
 # Build stage
 FROM golang:1.22-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
-COPY . .
+COPY backend/go.mod ./
+COPY backend/. .
 RUN go mod tidy
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux go build -o server .
