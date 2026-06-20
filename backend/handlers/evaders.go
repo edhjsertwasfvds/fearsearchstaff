@@ -28,14 +28,6 @@ type Evader struct {
 	DetectedAt    string `json:"detected_at"`
 }
 
-type vdfStore struct {
-	Checks map[string]struct {
-		Results   []vdfResult `json:"results"`
-		Filename  string      `json:"filename"`
-		Timestamp string      `json:"timestamp"`
-	} `json:"checks"`
-}
-
 type vdfResult struct {
 	SteamID      string                 `json:"steamid"`
 	Nickname     string                 `json:"nickname"`
@@ -133,14 +125,26 @@ func (h *EvadersHandler) writeJSON(w http.ResponseWriter, data []Evader) {
 }
 
 func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
+	// Пытаемся получить из БД
+	checks, err := h.db.GetVDFChecks()
+	if err == nil && len(checks) > 0 {
+		return h.computeEvadersFromDB(checks)
+	}
+
+	// Fallback на KV Store
 	vdfData, err := h.db.GetKVStore("vdf_checks.json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read vdf checks: %w", err)
 	}
 
-	var store vdfStore
+	var store map[string]interface{}
 	if err := json.Unmarshal(vdfData, &store); err != nil {
 		return nil, fmt.Errorf("failed to parse vdf checks: %w", err)
+	}
+
+	checksMap, ok := store["checks"].(map[string]interface{})
+	if !ok {
+		return []Evader{}, nil
 	}
 
 	servers, err := h.fetchServers()
@@ -152,26 +156,110 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 	seen := make(map[string]bool)
 	var evaders []Evader
 
-	for checkIDStr, check := range store.Checks {
+	for checkIDStr, checkData := range checksMap {
 		checkID, err := strconv.Atoi(checkIDStr)
 		if err != nil {
 			continue
 		}
 
+		check, ok := checkData.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		results, ok := check["results"].([]interface{})
+		if !ok {
+			continue
+		}
+
 		var bannedAccounts []vdfResult
-		for _, r := range check.Results {
-			if r.isBanned() {
-				bannedAccounts = append(bannedAccounts, r)
+		for _, r := range results {
+			result, ok := r.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			vdfRes := h.mapToVDFResult(result)
+			if vdfRes.isBanned() {
+				bannedAccounts = append(bannedAccounts, vdfRes)
 			}
 		}
+
 		if len(bannedAccounts) == 0 {
 			continue
 		}
 
-		for _, r := range check.Results {
+		for _, r := range results {
+			result, ok := r.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			vdfRes := h.mapToVDFResult(result)
+			if vdfRes.isBanned() {
+				continue
+			}
+
+			player, ok := online[vdfRes.SteamID]
+			if !ok {
+				continue
+			}
+			if seen[vdfRes.SteamID] {
+				continue
+			}
+			seen[vdfRes.SteamID] = true
+
+			banned := bannedAccounts[0]
+			banReason := detectBanReason(banned)
+
+			evaders = append(evaders, Evader{
+				SteamID:       vdfRes.SteamID,
+				Name:          player.name,
+				CheckID:       checkID,
+				Filename:      getString(check, "filename"),
+				BannedSteamID: banned.SteamID,
+				BanReason:     banReason,
+				ServerName:    getString(player.server, "site_name"),
+				ServerIP:      getString(player.server, "ip"),
+				ServerPort:    fmt.Sprintf("%v", player.server["port"]),
+				DetectedAt:    time.Now().UTC().Format(time.RFC3339),
+			})
+		}
+	}
+
+	return evaders, nil
+}
+
+func (h *EvadersHandler) computeEvadersFromDB(checks []database.VDFCheckData) ([]Evader, error) {
+	servers, err := h.fetchServers()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch online servers: %w", err)
+	}
+	online := extractOnlinePlayers(servers)
+
+	seen := make(map[string]bool)
+	var evaders []Evader
+
+	for _, check := range checks {
+		var results []vdfResult
+		if err := json.Unmarshal(check.Results, &results); err != nil {
+			continue
+		}
+
+		var bannedAccounts []vdfResult
+		for _, r := range results {
+			if r.isBanned() {
+				bannedAccounts = append(bannedAccounts, r)
+			}
+		}
+
+		if len(bannedAccounts) == 0 {
+			continue
+		}
+
+		for _, r := range results {
 			if r.isBanned() {
 				continue
 			}
+
 			player, ok := online[r.SteamID]
 			if !ok {
 				continue
@@ -187,7 +275,7 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 			evaders = append(evaders, Evader{
 				SteamID:       r.SteamID,
 				Name:          player.name,
-				CheckID:       checkID,
+				CheckID:       check.CheckID,
 				Filename:      check.Filename,
 				BannedSteamID: banned.SteamID,
 				BanReason:     banReason,
@@ -200,6 +288,28 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 	}
 
 	return evaders, nil
+}
+
+func (h *EvadersHandler) mapToVDFResult(m map[string]interface{}) vdfResult {
+	result := vdfResult{
+		SteamID:      getString(m, "steamid"),
+		Nickname:     getString(m, "nickname"),
+		FearBanned:   getBool(m, "fear_banned"),
+		FearReason:   getString(m, "fear_reason"),
+		VacBanned:    getBool(m, "vac_banned"),
+		CommunityBan: getBool(m, "community_ban"),
+		AdminGroup:   getString(m, "admin_group"),
+	}
+
+	if gameBans, ok := m["game_bans"].(float64); ok {
+		result.GameBans = int(gameBans)
+	}
+
+	if yoomaData, ok := m["yooma_data"].(map[string]interface{}); ok {
+		result.YoomaData = yoomaData
+	}
+
+	return result
 }
 
 func detectBanReason(r vdfResult) string {
@@ -282,9 +392,10 @@ func extractOnlinePlayers(servers []map[string]interface{}) map[string]onlinePla
 	return online
 }
 
-func getString(m map[string]interface{}, key string) string {
-	if v, ok := m[key].(string); ok {
+func getBool(m map[string]interface{}, key string) bool {
+	if v, ok := m[key].(bool); ok {
 		return v
 	}
-	return ""
+	return false
 }
+

@@ -26,18 +26,6 @@ type VDFCheckHistory struct {
 	SteamIDs      []string `json:"steamids"`
 }
 
-type vdfHistoryStore struct {
-	Checks map[string]struct {
-		Results       []vdfHistoryResult `json:"results"`
-		Filename      string             `json:"filename"`
-		Timestamp     string             `json:"timestamp"`
-		AttachmentURL string             `json:"attachment_url"`
-		MessageURL    string             `json:"message_url"`
-		Steamids      []string           `json:"steamids"`
-		LastRecheck   string             `json:"last_recheck"`
-	} `json:"checks"`
-}
-
 type vdfHistoryResult struct {
 	SteamID      string                 `json:"steamid"`
 	Nickname     string                 `json:"nickname"`
@@ -124,18 +112,30 @@ func (h *VDFHistoryHandler) writeJSON(w http.ResponseWriter, data []VDFCheckHist
 }
 
 func (h *VDFHistoryHandler) computeHistory() ([]VDFCheckHistory, error) {
+	// Сначала пытаемся получить из БД
+	checks, err := h.db.GetVDFChecks()
+	if err == nil && len(checks) > 0 {
+		return h.buildHistoryFromDB(checks)
+	}
+
+	// Fallback на KV Store (старый формат)
 	vdfData, err := h.db.GetKVStore("vdf_checks.json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read vdf checks: %w", err)
 	}
 
-	var store vdfHistoryStore
+	var store map[string]interface{}
 	if err := json.Unmarshal(vdfData, &store); err != nil {
 		return nil, fmt.Errorf("failed to parse vdf checks: %w", err)
 	}
 
-	ids := make([]int, 0, len(store.Checks))
-	for idStr := range store.Checks {
+	checksMap, ok := store["checks"].(map[string]interface{})
+	if !ok {
+		return []VDFCheckHistory{}, nil
+	}
+
+	ids := make([]int, 0, len(checksMap))
+	for idStr := range checksMap {
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
 			continue
@@ -146,30 +146,44 @@ func (h *VDFHistoryHandler) computeHistory() ([]VDFCheckHistory, error) {
 
 	history := make([]VDFCheckHistory, 0, len(ids))
 	for _, id := range ids {
-		check := store.Checks[strconv.Itoa(id)]
+		checkData, ok := checksMap[strconv.Itoa(id)].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		results, ok := checkData["results"].([]interface{})
+		if !ok {
+			continue
+		}
+
 		banned := 0
-		for _, r := range check.Results {
-			if r.isBanned() {
+		for _, r := range results {
+			result, ok := r.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if h.isResultBanned(result) {
 				banned++
 			}
 		}
-		steamids := check.Steamids
-		if len(steamids) == 0 {
-			steamids = make([]string, 0, len(check.Results))
-			for _, r := range check.Results {
-				if r.SteamID != "" {
-					steamids = append(steamids, r.SteamID)
+
+		steamids := []string{}
+		if sids, ok := checkData["steamids"].([]interface{}); ok {
+			for _, sid := range sids {
+				if s, ok := sid.(string); ok {
+					steamids = append(steamids, s)
 				}
 			}
 		}
+
 		history = append(history, VDFCheckHistory{
 			ID:            id,
-			Filename:      check.Filename,
-			Timestamp:     check.Timestamp,
-			LastRecheck:   check.LastRecheck,
-			AttachmentURL: check.AttachmentURL,
-			MessageURL:    check.MessageURL,
-			Count:         len(check.Results),
+			Filename:      getString(checkData, "filename"),
+			Timestamp:     getString(checkData, "timestamp"),
+			LastRecheck:   getString(checkData, "last_recheck"),
+			AttachmentURL: getString(checkData, "attachment_url"),
+			MessageURL:    getString(checkData, "message_url"),
+			Count:         len(results),
 			BannedCount:   banned,
 			SteamIDs:      steamids,
 		})
@@ -177,3 +191,85 @@ func (h *VDFHistoryHandler) computeHistory() ([]VDFCheckHistory, error) {
 
 	return history, nil
 }
+
+func (h *VDFHistoryHandler) buildHistoryFromDB(checks []database.VDFCheckData) ([]VDFCheckHistory, error) {
+	history := make([]VDFCheckHistory, 0, len(checks))
+
+	for _, check := range checks {
+		var results []vdfHistoryResult
+		if err := json.Unmarshal(check.Results, &results); err != nil {
+			continue
+		}
+
+		banned := 0
+		for _, r := range results {
+			if r.isBanned() {
+				banned++
+			}
+		}
+
+		lastRecheck := ""
+		if check.LastRecheck != nil {
+			lastRecheck = check.LastRecheck.Format(time.RFC3339)
+		}
+
+		history = append(history, VDFCheckHistory{
+			ID:            check.CheckID,
+			Filename:      check.Filename,
+			Timestamp:     check.Timestamp.Format(time.RFC3339),
+			LastRecheck:   lastRecheck,
+			AttachmentURL: check.AttachmentURL,
+			MessageURL:    check.MessageURL,
+			Count:         len(results),
+			BannedCount:   banned,
+			SteamIDs:      check.SteamIDs,
+		})
+	}
+
+	// Сортируем по ID в обратном порядке
+	sort.Slice(history, func(i, j int) bool {
+		return history[i].ID > history[j].ID
+	})
+
+	return history, nil
+}
+
+func (h *VDFHistoryHandler) isResultBanned(result map[string]interface{}) bool {
+	if fearBanned, ok := result["fear_banned"].(bool); ok && fearBanned {
+		return true
+	}
+	if vacBanned, ok := result["vac_banned"].(bool); ok && vacBanned {
+		return true
+	}
+	if communityBan, ok := result["community_ban"].(bool); ok && communityBan {
+		return true
+	}
+	if gameBans, ok := result["game_bans"].(float64); ok && gameBans > 0 {
+		return true
+	}
+	if yoomaData, ok := result["yooma_data"].(map[string]interface{}); ok {
+		if found, ok := yoomaData["found"].(bool); ok && found {
+			return true
+		}
+		if punishments, ok := yoomaData["punishments"].([]interface{}); ok {
+			for _, p := range punishments {
+				pm, ok := p.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if status, ok := pm["status"].(string); ok && status == "active" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func getString(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+

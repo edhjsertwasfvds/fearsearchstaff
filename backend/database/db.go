@@ -17,7 +17,7 @@ import (
 
 type DB struct {
 	pool      *pgxpool.Pool
- staffFile string
+	staffFile string
 	mu        sync.RWMutex
 }
 
@@ -79,6 +79,32 @@ func (db *DB) migrate() error {
 			value JSONB NOT NULL,
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS vdf_checks (
+			id SERIAL PRIMARY KEY,
+			check_id INTEGER UNIQUE NOT NULL,
+			filename VARCHAR(255) NOT NULL,
+			timestamp TIMESTAMPTZ NOT NULL,
+			last_recheck TIMESTAMPTZ,
+			attachment_url TEXT,
+			message_url TEXT,
+			results JSONB NOT NULL,
+			steamids TEXT[] DEFAULT '{}',
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS vdf_check_history (
+			id SERIAL PRIMARY KEY,
+			steam_id VARCHAR(64) NOT NULL,
+			check_id INTEGER NOT NULL,
+			filename VARCHAR(255) NOT NULL,
+			is_banned BOOLEAN DEFAULT FALSE,
+			ban_reason VARCHAR(255),
+			checked_at TIMESTAMPTZ DEFAULT NOW(),
+			FOREIGN KEY (check_id) REFERENCES vdf_checks(check_id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_vdf_checks_check_id ON vdf_checks(check_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_vdf_check_history_steam_id ON vdf_check_history(steam_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_vdf_check_history_check_id ON vdf_check_history(check_id)`,
 	}
 
 	for _, q := range queries {
@@ -209,6 +235,75 @@ func (db *DB) GetKVStore(key string) ([]byte, error) {
 	return value, nil
 }
 
+func (db *DB) SetKVStore(key string, value []byte) error {
+	if db.pool == nil {
+		return fmt.Errorf("no database available")
+	}
+	ctx := context.Background()
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO kv_store (key, value, updated_at) VALUES ($1, $2, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+	`, key, value)
+	return err
+}
+
+// VDF Check Storage Methods
+
+type VDFCheckData struct {
+	ID            int       `json:"id"`
+	CheckID       int       `json:"check_id"`
+	Filename      string    `json:"filename"`
+	Timestamp     time.Time `json:"timestamp"`
+	LastRecheck   *time.Time `json:"last_recheck,omitempty"`
+	AttachmentURL string    `json:"attachment_url,omitempty"`
+	MessageURL    string    `json:"message_url,omitempty"`
+	Results       []byte    `json:"results"`
+	SteamIDs      []string  `json:"steamids"`
+}
+
+func (db *DB) SaveVDFCheck(checkID int, filename string, timestamp time.Time, attachmentURL, messageURL string, results []byte, steamids []string) error {
+	if db.pool == nil {
+		return fmt.Errorf("no database available")
+	}
+	ctx := context.Background()
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO vdf_checks (check_id, filename, timestamp, attachment_url, message_url, results, steamids)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (check_id) DO UPDATE SET
+			filename = EXCLUDED.filename,
+			timestamp = EXCLUDED.timestamp,
+			attachment_url = EXCLUDED.attachment_url,
+			message_url = EXCLUDED.message_url,
+			results = EXCLUDED.results,
+			steamids = EXCLUDED.steamids,
+			updated_at = NOW()
+	`, checkID, filename, timestamp, attachmentURL, messageURL, results, steamids)
+	return err
+}
+
+func (db *DB) GetVDFChecks() ([]VDFCheckData, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database available")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT id, check_id, filename, timestamp, last_recheck, attachment_url, message_url, results, steamids
+		FROM vdf_checks ORDER BY check_id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var checks []VDFCheckData
+	for rows.Next() {
+		var c VDFCheckData
+		_ = rows.Scan(&c.ID, &c.CheckID, &c.Filename, &c.Timestamp, &c.LastRecheck, &c.AttachmentURL, &c.MessageURL, &c.Results, &c.SteamIDs)
+		checks = append(checks, c)
+	}
+	return checks, nil
+}
+
 // JSON fallback methods
 
 type staffDBEntry struct {
@@ -315,3 +410,4 @@ func getcwd() string {
 	dir, _ := filepath.Abs(".")
 	return dir
 }
+
