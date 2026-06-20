@@ -13,6 +13,7 @@ import BansAndMutesPage from './pages/BansAndMutesPage';
 import StatsPage from './pages/StatsPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import EvadersPage from './pages/EvadersPage';
+import VDFHistoryPage from './pages/VDFHistoryPage';
 
 function ProtectedRoute({ children, minLevel = 1 }: { children: React.ReactNode; minLevel?: number }) {
   const { user, loading, hasLevel } = useAuth();
@@ -137,11 +138,21 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/vdf-history"
+        path="/evaders"
         element={
           <ProtectedRoute>
             <Layout>
               <EvadersPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vdf-history"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <VDFHistoryPage />
             </Layout>
           </ProtectedRoute>
         }

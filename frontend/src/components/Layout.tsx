@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, Search, Shield, Settings, LogOut, AlertTriangle,
-  ChevronRight, Menu, X, Crown, Ban, BarChart3, ShieldCheck
+  ChevronRight, Menu, X, Crown, Ban, BarChart3, ShieldCheck, FileText
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../services/api';
@@ -24,7 +24,8 @@ const navSections = [
       { path: '/leaderboard', label: 'Топ-1000', icon: BarChart3, minLevel: 1 },
       { path: '/bans-mutes', label: 'Баны и муты', icon: Ban, minLevel: 1 },
       { path: '/staff-stats', label: 'Статистика', icon: BarChart3, minLevel: 1 },
-      { path: '/vdf-history', label: 'Обходники', icon: AlertTriangle, minLevel: 1 },
+      { path: '/evaders', label: 'Обходники', icon: AlertTriangle, minLevel: 1 },
+      { path: '/vdf-history', label: 'История VDF', icon: FileText, minLevel: 1 },
     ],
   },
   {

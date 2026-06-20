@@ -27,6 +27,7 @@ func main() {
 	admin := handlers.NewAdminHandler(cfg, db)
 	whitelist := handlers.NewWhitelistHandler(cfg)
 	evaders := handlers.NewEvadersHandler(cfg, db)
+	vdfHistory := handlers.NewVDFHistoryHandler(cfg, db)
 
 	mux := http.NewServeMux()
 
@@ -66,6 +67,7 @@ func main() {
 
 	mux.Handle("/api/check", handlers.AuthMiddleware(cfg, http.HandlerFunc(checker.Check)))
 	mux.Handle("/api/evaders", handlers.AuthMiddleware(cfg, http.HandlerFunc(evaders.GetEvaders)))
+	mux.Handle("/api/vdf-history", handlers.AuthMiddleware(cfg, http.HandlerFunc(vdfHistory.GetHistory)))
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

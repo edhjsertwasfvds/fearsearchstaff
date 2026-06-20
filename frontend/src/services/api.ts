@@ -147,6 +147,10 @@ class ApiService {
     return this.request('/api/evaders');
   }
 
+  async getVDFHistory() {
+    return this.request('/api/vdf-history');
+  }
+
   async getAdminUsers() {
     return this.request('/api/admin/users');
   }
