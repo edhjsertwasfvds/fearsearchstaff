@@ -1,4 +1,15 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const isDefaultOrPlaceholder = (val?: string) =>
+  !val || val.includes('localhost') || val.includes('api.example.com');
+
+const PROD_API_URL = 'https://gggggggggggfffffffffffffffff-production.up.railway.app';
+
+const API_BASE = (() => {
+  const env = import.meta.env.VITE_API_URL as string | undefined;
+  if (typeof window !== 'undefined' && window.location.hostname === 'fearsearchstaff.vercel.app') {
+    if (isDefaultOrPlaceholder(env)) return PROD_API_URL;
+  }
+  return env || 'http://localhost:8080';
+})();
 
 class ApiService {
   private token: string | null = null;
