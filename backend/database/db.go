@@ -122,6 +122,40 @@ func (db *DB) migrate() error {
 			data JSONB,
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS config_hashes (
+			id SERIAL PRIMARY KEY,
+			config_hash VARCHAR(64) UNIQUE NOT NULL,
+			filename TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS config_accounts (
+			id SERIAL PRIMARY KEY,
+			config_hash VARCHAR(64) NOT NULL REFERENCES config_hashes(config_hash) ON DELETE CASCADE,
+			steamid VARCHAR(32) NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE(config_hash, steamid)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_config_accounts_steamid ON config_accounts(steamid)`,
+		`CREATE TABLE IF NOT EXISTS vdf_history (
+			id SERIAL PRIMARY KEY,
+			check_id INTEGER,
+			steamid VARCHAR(32) NOT NULL,
+			nickname TEXT,
+			fear_banned BOOLEAN DEFAULT FALSE,
+			fear_reason TEXT,
+			fear_unban_time TEXT,
+			vac_banned BOOLEAN DEFAULT FALSE,
+			vac_days_ago INTEGER DEFAULT 0,
+			game_bans INTEGER DEFAULT 0,
+			yooma_banned BOOLEAN DEFAULT FALSE,
+			yooma_reason TEXT,
+			admin_group TEXT,
+			config_hash VARCHAR(64),
+			filename TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_vdf_history_steamid ON vdf_history(steamid)`,
+		`CREATE INDEX IF NOT EXISTS idx_vdf_history_check_id ON vdf_history(check_id)`,
 	}
 
 	for _, q := range queries {
@@ -722,4 +756,195 @@ func (db *DB) GetNextCheckID() (int, error) {
 		return 1, nil
 	}
 	return maxID + 1, nil
+}
+
+func (db *DB) SaveConfigAccounts(configHash string, steamIDs []string, filename string) error {
+	if db.pool == nil {
+		return nil
+	}
+	ctx := context.Background()
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO config_hashes (config_hash, filename, created_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (config_hash) DO UPDATE SET filename = EXCLUDED.filename
+	`, configHash, filename)
+	if err != nil {
+		return err
+	}
+	for _, sid := range steamIDs {
+		_, _ = db.pool.Exec(ctx, `
+			INSERT INTO config_accounts (config_hash, steamid, created_at)
+			VALUES ($1, $2, NOW())
+			ON CONFLICT (config_hash, steamid) DO NOTHING
+		`, configHash, sid)
+	}
+	return nil
+}
+
+func (db *DB) GetLinkedSteamIDs(steamID string) ([]string, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT DISTINCT ca2.steamid
+		FROM config_accounts ca1
+		JOIN config_accounts ca2 ON ca1.config_hash = ca2.config_hash
+		WHERE ca1.steamid = $1
+		ORDER BY ca2.steamid
+	`, steamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var sid string
+		if err := rows.Scan(&sid); err == nil {
+			ids = append(ids, sid)
+		}
+	}
+	return ids, nil
+}
+
+func (db *DB) SaveVDFHistoryEntry(checkID int, steamID, nickname string, fearBanned bool, fearReason, fearUnbanTime string, vacBanned bool, vacDaysAgo, gameBans int, yoomaBanned bool, yoomaReason, adminGroup, configHash, filename string) error {
+	if db.pool == nil {
+		return nil
+	}
+	ctx := context.Background()
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO vdf_history
+			(check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+			 vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
+			 admin_group, config_hash, filename, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
+	`, checkID, steamID, nickname, fearBanned, fearReason, fearUnbanTime,
+		vacBanned, vacDaysAgo, gameBans, yoomaBanned, yoomaReason,
+		adminGroup, configHash, filename)
+	return err
+}
+
+func (db *DB) GetVDFHistoryDetailed(limit int) ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+		       vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
+		       admin_group, config_hash, filename, check_id, created_at::text
+		FROM vdf_history
+		ORDER BY id DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []map[string]interface{}
+	for rows.Next() {
+		var (
+			steamID, nickname, fearReason, fearUnbanTime, yoomaReason string
+			adminGroup, configHash, filename, createdAt              string
+			fearBanned, vacBanned, yoomaBanned                       bool
+			vacDaysAgo, gameBans, checkID                            int
+		)
+		if err := rows.Scan(&steamID, &nickname, &fearBanned, &fearReason, &fearUnbanTime,
+			&vacBanned, &vacDaysAgo, &gameBans, &yoomaBanned, &yoomaReason,
+			&adminGroup, &configHash, &filename, &checkID, &createdAt); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"steamid":        steamID,
+			"nickname":       nickname,
+			"fear_banned":    fearBanned,
+			"fear_reason":    fearReason,
+			"fear_unban_time": fearUnbanTime,
+			"vac_banned":     vacBanned,
+			"vac_days_ago":   vacDaysAgo,
+			"game_bans":      gameBans,
+			"yooma_banned":   yoomaBanned,
+			"yooma_reason":   yoomaReason,
+			"admin_group":    adminGroup,
+			"config_hash":    configHash,
+			"filename":       filename,
+			"check_id":       checkID,
+			"created_at":     createdAt,
+		})
+	}
+	return result, nil
+}
+
+func (db *DB) GetVDFHistoryBySteamID(steamID string, limit int) ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+		       vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
+		       admin_group, config_hash, filename, check_id, created_at::text
+		FROM vdf_history
+		WHERE steamid = $1
+		ORDER BY id DESC
+		LIMIT $2
+	`, steamID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []map[string]interface{}
+	for rows.Next() {
+		var (
+			sid, nickname, fearReason, fearUnbanTime, yoomaReason string
+			adminGroup, configHash, filename, createdAt          string
+			fearBanned, vacBanned, yoomaBanned                   bool
+			vacDaysAgo, gameBans, checkID                        int
+		)
+		if err := rows.Scan(&sid, &nickname, &fearBanned, &fearReason, &fearUnbanTime,
+			&vacBanned, &vacDaysAgo, &gameBans, &yoomaBanned, &yoomaReason,
+			&adminGroup, &configHash, &filename, &checkID, &createdAt); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"steamid":        sid,
+			"nickname":       nickname,
+			"fear_banned":    fearBanned,
+			"fear_reason":    fearReason,
+			"fear_unban_time": fearUnbanTime,
+			"vac_banned":     vacBanned,
+			"vac_days_ago":   vacDaysAgo,
+			"game_bans":      gameBans,
+			"yooma_banned":   yoomaBanned,
+			"yooma_reason":   yoomaReason,
+			"admin_group":    adminGroup,
+			"config_hash":    configHash,
+			"filename":       filename,
+			"check_id":       checkID,
+			"created_at":     createdAt,
+		})
+	}
+	return result, nil
+}
+
+func (db *DB) GetConfigAccounts(configHash string) ([]string, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT steamid FROM config_accounts WHERE config_hash = $1 ORDER BY steamid
+	`, configHash)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var sid string
+		if err := rows.Scan(&sid); err == nil {
+			ids = append(ids, sid)
+		}
+	}
+	return ids, nil
 }

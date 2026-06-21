@@ -158,6 +158,21 @@ func (h *EvadersHandler) writeJSON(w http.ResponseWriter, data []Evader) {
 }
 
 func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
+	servers, err := h.fetchServers()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch online servers: %w", err)
+	}
+	online := extractOnlinePlayers(servers)
+
+	// Способ 1: из PostgreSQL vdf_history
+	if h.db != nil {
+		history, err := h.db.GetVDFHistoryDetailed(500)
+		if err == nil && len(history) > 0 {
+			return h.computeEvadersFromHistory(history, online), nil
+		}
+	}
+
+	// Способ 2: fallback на KV store
 	vdfData, err := h.db.GetKVStore("vdf_checks.json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read vdf checks: %w", err)
@@ -168,12 +183,140 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 		return nil, fmt.Errorf("failed to parse vdf checks: %w", err)
 	}
 
-	servers, err := h.fetchServers()
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch online servers: %w", err)
-	}
-	online := extractOnlinePlayers(servers)
+	return h.computeEvadersFromKV(store, online), nil
+}
 
+func (h *EvadersHandler) computeEvadersFromHistory(history []map[string]interface{}, online map[string]onlinePlayer) []Evader {
+	// Группируем по config_hash — один конфиг = одна «семья» аккаунтов
+	type configGroup struct {
+		accounts map[string]map[string]interface{} // steamid -> latest history entry
+	}
+
+	groups := make(map[string]*configGroup)
+	steamidToConfigs := make(map[string][]string)
+
+	for _, entry := range history {
+		hash, _ := entry["config_hash"].(string)
+		sid, _ := entry["steamid"].(string)
+		if hash == "" || sid == "" {
+			continue
+		}
+		if groups[hash] == nil {
+			groups[hash] = &configGroup{accounts: make(map[string]map[string]interface{})}
+		}
+		// Берём только последнюю запись для каждого steamid в конфиге
+		if _, exists := groups[hash].accounts[sid]; !exists {
+			groups[hash].accounts[sid] = entry
+		}
+		steamidToConfigs[sid] = appendUnique(steamidToConfigs[sid], hash)
+	}
+
+	seen := make(map[string]bool)
+	var evaders []Evader
+
+	for _, grp := range groups {
+		// Определяем забаненных в конфиге
+		var bannedSteamIDs []string
+		bannedDetails := make([]BannedDetail, 0)
+
+		for sid, entry := range grp.accounts {
+			isBanned := false
+			if fb, ok := entry["fear_banned"].(bool); ok && fb {
+				isBanned = true
+			}
+			if vb, ok := entry["vac_banned"].(bool); ok && vb {
+				isBanned = true
+			}
+			if gb, ok := entry["game_bans"].(float64); ok && gb > 0 {
+				isBanned = true
+			}
+			if yb, ok := entry["yooma_banned"].(bool); ok && yb {
+				isBanned = true
+			}
+
+			if isBanned {
+				bannedSteamIDs = append(bannedSteamIDs, sid)
+				parts := []string{}
+				var fearDetail *BanSourceDetail
+				if fb, _ := entry["fear_banned"].(bool); fb {
+					reason, _ := entry["fear_reason"].(string)
+					if reason == "" {
+						reason = "Обход"
+					}
+					parts = append(parts, "Fear: "+reason)
+					unban, _ := entry["fear_unban_time"].(string)
+					fearDetail = &BanSourceDetail{Reason: reason, UnbanDate: unban}
+				}
+				if vb, _ := entry["vac_banned"].(bool); vb {
+					parts = append(parts, "VAC")
+				}
+				if gb, _ := entry["game_bans"].(float64); gb > 0 {
+					parts = append(parts, fmt.Sprintf("Game Ban (×%d)", int(gb)))
+				}
+				if yb, _ := entry["yooma_banned"].(bool); yb {
+					reason, _ := entry["yooma_reason"].(string)
+					if reason == "" {
+						reason = "Yooma Ban"
+					}
+					parts = append(parts, "Yooma: "+reason)
+				}
+				banStr := "Banned"
+				if len(parts) > 0 {
+					banStr = strings.Join(parts, " | ")
+				}
+				nickname, _ := entry["nickname"].(string)
+				bannedDetails = append(bannedDetails, BannedDetail{
+					SteamID: sid,
+					Name:    nickname,
+					Bans:    banStr,
+					FearBan: fearDetail,
+					VacBan:  mustBool(entry["vac_banned"]),
+					GameBans: mustInt(entry["game_bans"]),
+					YoomaBan: extractYoomaDetail(entry),
+				})
+			}
+		}
+
+		if len(bannedSteamIDs) == 0 {
+			continue
+		}
+
+		// Ищем «чистых» игроков из этого конфига, которые сейчас онлайн
+		for sid, entry := range grp.accounts {
+			if isStringInSlice(sid, bannedSteamIDs) {
+				continue
+			}
+			player, ok := online[sid]
+			if !ok {
+				continue
+			}
+			if seen[sid] {
+				continue
+			}
+			seen[sid] = true
+
+			nickname, _ := entry["nickname"].(string)
+			evaders = append(evaders, Evader{
+				SteamID:       sid,
+				Name:          player.name,
+				BannedSteamID: bannedSteamIDs[0],
+				BanReason:     detectBanReasonFromHistory(bannedDetails),
+				BannedCount:   len(bannedSteamIDs),
+				BannedDetails: bannedDetails,
+				ServerName:    getString(player.server, "site_name"),
+				ServerIP:      getString(player.server, "ip"),
+				ServerPort:    fmt.Sprintf("%v", player.server["port"]),
+				Filename:      mustString(entry["filename"]),
+				DetectedAt:    time.Now().UTC().Format(time.RFC3339),
+			})
+			_ = nickname
+		}
+	}
+
+	return evaders
+}
+
+func (h *EvadersHandler) computeEvadersFromKV(store vdfStore, online map[string]onlinePlayer) []Evader {
 	seen := make(map[string]bool)
 	var evaders []Evader
 
@@ -290,7 +433,7 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 		}
 	}
 
-	return evaders, nil
+	return evaders
 }
 
 func detectBanReason(r vdfResult) string {
@@ -386,4 +529,65 @@ func getString(m map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+func mustBool(v interface{}) bool {
+	b, _ := v.(bool)
+	return b
+}
+
+func mustInt(v interface{}) int {
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	}
+	return 0
+}
+
+func mustString(v interface{}) string {
+	s, _ := v.(string)
+	return s
+}
+
+func appendUnique(slice []string, s string) []string {
+	for _, v := range slice {
+		if v == s {
+			return slice
+		}
+	}
+	return append(slice, s)
+}
+
+func isStringInSlice(s string, slice []string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func extractYoomaDetail(entry map[string]interface{}) *BanSourceDetail {
+	if yb, _ := entry["yooma_banned"].(bool); !yb {
+		return nil
+	}
+	reason, _ := entry["yooma_reason"].(string)
+	if reason == "" {
+		reason = "Yooma Ban"
+	}
+	return &BanSourceDetail{Reason: reason}
+}
+
+func detectBanReasonFromHistory(details []BannedDetail) string {
+	for _, d := range details {
+		if d.FearBan != nil {
+			return d.FearBan.Reason
+		}
+	}
+	if len(details) > 0 {
+		return details[0].Bans
+	}
+	return "Banned"
 }

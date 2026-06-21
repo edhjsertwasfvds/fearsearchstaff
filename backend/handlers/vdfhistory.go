@@ -146,6 +146,15 @@ func (h *VDFHistoryHandler) writeJSON(w http.ResponseWriter, data []VDFCheckHist
 }
 
 func (h *VDFHistoryHandler) computeHistory() ([]VDFCheckHistory, error) {
+	// Способ 1: из PostgreSQL vdf_history
+	if h.db != nil {
+		history, err := h.db.GetVDFHistoryDetailed(200)
+		if err == nil && len(history) > 0 {
+			return h.buildHistoryFromDB(history), nil
+		}
+	}
+
+	// Способ 2: fallback на KV store
 	vdfData, err := h.db.GetKVStore("vdf_checks.json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read vdf checks: %w", err)
@@ -235,4 +244,76 @@ func (h *VDFHistoryHandler) computeHistory() ([]VDFCheckHistory, error) {
 	}
 
 	return history, nil
+}
+
+func (h *VDFHistoryHandler) buildHistoryFromDB(rows []map[string]interface{}) []VDFCheckHistory {
+	type checkGroup struct {
+		filename   string
+		checkID    int
+		timestamp  string
+		results    []VDFHistoryItem
+	}
+
+	groups := make(map[int]*checkGroup)
+	groupOrder := make([]int, 0)
+
+	for _, row := range rows {
+		checkID := 0
+		if v, ok := row["check_id"].(float64); ok {
+			checkID = int(v)
+		}
+		if v, ok := row["check_id"].(int); ok {
+			checkID = v
+		}
+
+		if _, exists := groups[checkID]; !exists {
+			filename, _ := row["filename"].(string)
+			createdAt, _ := row["created_at"].(string)
+			groups[checkID] = &checkGroup{
+				filename:  filename,
+				checkID:   checkID,
+				timestamp: createdAt,
+			}
+			groupOrder = append(groupOrder, checkID)
+		}
+
+		g := groups[checkID]
+		g.results = append(g.results, VDFHistoryItem{
+			SteamID:     mustString(row["steamid"]),
+			Nickname:    mustString(row["nickname"]),
+			FearBanned:  mustBool(row["fear_banned"]),
+			FearReason:  mustString(row["fear_reason"]),
+			FearUnban:   mustString(row["fear_unban_time"]),
+			VacBanned:   mustBool(row["vac_banned"]),
+			GameBans:    mustInt(row["game_bans"]),
+			YoomaBanned: mustBool(row["yooma_banned"]),
+			YoomaReason: mustString(row["yooma_reason"]),
+		})
+	}
+
+	sort.Sort(sort.Reverse(sort.IntSlice(groupOrder)))
+
+	history := make([]VDFCheckHistory, 0, len(groupOrder))
+	for _, checkID := range groupOrder {
+		g := groups[checkID]
+		banned := 0
+		steamids := make([]string, 0, len(g.results))
+		for _, r := range g.results {
+			steamids = append(steamids, r.SteamID)
+			if r.FearBanned || r.VacBanned || r.GameBans > 0 || r.YoomaBanned {
+				banned++
+			}
+		}
+		history = append(history, VDFCheckHistory{
+			ID:          checkID,
+			Filename:    g.filename,
+			Timestamp:   g.timestamp,
+			Count:       len(g.results),
+			BannedCount: banned,
+			SteamIDs:    steamids,
+			Results:     g.results,
+		})
+	}
+
+	return history
 }
