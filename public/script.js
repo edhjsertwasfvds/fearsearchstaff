@@ -22,7 +22,7 @@ const state = {
     trackedMenuOpen: false,
     trackedPlayers: [],
     trackedPlayersLoading: false,
-    punishments: { count: 0, list: [], loading: false, lastSteamId: '', selectedMonth: null, view: 'list', staffList: null, staffStatsRows: null, staffStatsLoading: false, staffStatsData: {}, staffStatsProgress: null, staffTicketsYm: null, staffTicketsBySid: {}, staffTicketsLoading: false, staffRolesBySid: {}, staffRolesLoading: false, staffCheckRanksBySid: {}, staffCheckRanksLoading: false, staffPayConfig: {}, secureLoaded: false, staffTableMode: 'new', statsPeriodMode: 'month', selectedWeekStart: null, lastLoadedAt: 0, lastSource: '' },
+    punishments: { count: 0, list: [], loading: false, lastSteamId: '', selectedMonth: null, view: 'list', staffList: null, staffStatsRows: null, staffStatsLoading: false, staffStatsData: {}, staffStatsProgress: null, staffTicketsYm: null, staffTicketsBySid: {}, staffTicketsLoading: false, staffRolesBySid: {}, staffRolesLoading: false, staffCheckRanksBySid: {}, staffCheckRanksLoading: false, staffPayConfig: {}, secureLoaded: false, staffTableMode: 'new', statsPeriodMode: 'month', selectedWeekStart: null, customWeekStart: null, customWeekEnd: null, lastLoadedAt: 0, lastSource: '' },
     changesTab: 'roles',
     rolesEditor: { authMode: 'cookie', accessToken: '', steamid: '', name: '', adminId: '', roleName: 'Модератор', log: [] }
 };
@@ -1235,10 +1235,10 @@ function renderPanel() {
 
         const weekOptions = (() => {
             const starts = new Set();
-            // Fallback: последние 16 недель (среда -> вторник).
+            // Fallback: последние 16 недель (понедельник -> воскресенье).
             const now = new Date();
             now.setHours(12, 0, 0, 0);
-            const nowShift = (now.getDay() - 3 + 7) % 7;
+            const nowShift = (now.getDay() - 1 + 7) % 7; // Monday = 1
             const currentWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - nowShift, 12, 0, 0, 0);
             for (let i = 0; i < 16; i++) {
                 const w = new Date(currentWeekStart.getTime() - i * 7 * 24 * 60 * 60 * 1000);
@@ -1250,8 +1250,8 @@ function renderPanel() {
                 // Use "noon local time" to avoid timezone/DST edge cases shifting the weekday.
                 const d = new Date(ts * 1000);
                 d.setHours(12, 0, 0, 0);
-                // Wednesday-start week (Wed=0..Tue=6)
-                const day = (d.getDay() - 3 + 7) % 7;
+                // Monday-start week (Mon=0..Sun=6)
+                const day = (d.getDay() - 1 + 7) % 7;
                 const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - day, 12, 0, 0, 0);
                 const ymd = start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0');
                 starts.add(ymd);
@@ -1302,10 +1302,13 @@ function renderPanel() {
         }
         const effectiveView = (view === 'stats' && !canViewStaffStats) ? 'list' : view;
 
-        const isWeekMode = state.punishments.statsPeriodMode === 'week' && !!state.punishments.selectedWeekStart;
-        const currentPeriodLabel = isWeekMode
-            ? (weekOptions.find(w => w.value === state.punishments.selectedWeekStart)?.label || state.punishments.selectedWeekStart)
-            : (selectedMonth ? (monthOptions.months.find(m => m.value === selectedMonth)?.label || selectedMonth) : monthOptions.all.label);
+        const isCustomWeek = state.punishments.statsPeriodMode === 'week' && !!state.punishments.customWeekStart && !!state.punishments.customWeekEnd;
+        const isWeekMode = (state.punishments.statsPeriodMode === 'week' && !!state.punishments.selectedWeekStart) || isCustomWeek;
+        const currentPeriodLabel = isCustomWeek
+            ? `${state.punishments.customWeekStart} — ${state.punishments.customWeekEnd}`
+            : (isWeekMode
+                ? (weekOptions.find(w => w.value === state.punishments.selectedWeekStart)?.label || state.punishments.selectedWeekStart)
+                : (selectedMonth ? (monthOptions.months.find(m => m.value === selectedMonth)?.label || selectedMonth) : monthOptions.all.label));
         const monthDropdownItems = [
             `<button type="button" class="ui-select-item month-select-item ${!selectedMonth ? 'active' : ''}" onclick="setPunishmentsMonth('')">${monthOptions.all.label}</button>`,
             ...monthOptions.months.map(m =>
@@ -1317,7 +1320,7 @@ function renderPanel() {
         ).join('');
 
         const staffTableMode = getUserLevel() === 3 ? 'old' : (state.punishments.staffTableMode === 'old' ? 'old' : 'new');
-        const monthSelectHtml = `
+            const monthSelectHtml = `
             <div class="flex flex-wrap items-center gap-3 mb-4">
                 <div class="relative ui-select-wrap month-select-wrap" id="monthDropdownWrap">
                     <button type="button" onclick="toggleMonthDropdown()" class="ui-select-trigger month-select-trigger">
@@ -1329,6 +1332,13 @@ function renderPanel() {
                         ${monthDropdownItems}
                         ${weekOptions.length ? '<div class="my-1 border-t border-white/10"></div>' : ''}
                         ${weekDropdownItems}
+                        <div class="my-1 border-t border-white/10"></div>
+                        <div class="p-2 space-y-2">
+                            <div class="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">Свой период</div>
+                            <input type="date" id="customWeekStart" class="bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-xs w-full" value="${state.punishments.customWeekStart || ''}">
+                            <input type="date" id="customWeekEnd" class="bg-white/5 border border-white/10 rounded px-2 py-1 text-white text-xs w-full" value="${state.punishments.customWeekEnd || ''}">
+                            <button type="button" onclick="applyCustomWeekRange()" class="w-full px-2 py-1 bg-indigo-500/30 hover:bg-indigo-500/40 text-indigo-300 rounded text-xs font-semibold">Применить</button>
+                        </div>
                     </div>
                 </div>
                 <div class="flex flex-wrap gap-2 ml-auto justify-end">
@@ -1760,9 +1770,32 @@ function setPunishmentsMonth(value) {
     state.punishments.selectedMonth = value || null;
     state.punishments.statsPeriodMode = 'month';
     state.punishments.selectedWeekStart = null;
+    state.punishments.customWeekStart = null;
+    state.punishments.customWeekEnd = null;
     if (state.punishments.view === 'stats') {
         loadStaffTicketsForSelectedMonth();
         state.punishments.staffStatsRows = null;
+        loadStaffStatsFromServer();
+    }
+    scheduleRenderPanel();
+}
+
+function applyCustomWeekRange() {
+    const start = document.getElementById('customWeekStart')?.value;
+    const end = document.getElementById('customWeekEnd')?.value;
+    if (!start || !end) { alert('Выберите начало и конец периода'); return; }
+    if (start > end) { alert('Начало не может быть позже конца'); return; }
+    const list = document.getElementById('monthDropdownList');
+    if (list) list.classList.add('hidden');
+    const trigger = document.querySelector('#monthDropdownWrap .ui-select-trigger');
+    if (trigger) trigger.classList.remove('open');
+    state.punishments.statsPeriodMode = 'week';
+    state.punishments.selectedWeekStart = null;
+    state.punishments.selectedMonth = null;
+    state.punishments.customWeekStart = start;
+    state.punishments.customWeekEnd = end;
+    state.punishments.staffStatsRows = null;
+    if (state.punishments.view === 'stats') {
         loadStaffStatsFromServer();
     }
     scheduleRenderPanel();
@@ -1777,6 +1810,8 @@ function setPunishmentsWeekStart(startYmd) {
     if (trigger) trigger.classList.remove('open');
     state.punishments.statsPeriodMode = 'week';
     state.punishments.selectedWeekStart = s;
+    state.punishments.customWeekStart = null;
+    state.punishments.customWeekEnd = null;
     state.punishments.selectedMonth = null;
     state.punishments.staffStatsRows = null;
     if (state.punishments.view === 'stats') {
@@ -1947,8 +1982,13 @@ function exportStaffStatsCsv() {
     // Для недельного режима в CSV не включаем выплаты (тикеты/роль/нормы привязаны к месяцу).
     if (state?.punishments?.statsPeriodMode === 'week') {
         const csv = window.StaffStatsSecure.toCsv(rows.map(r => ({ ...r, tickets: 0, rates: { banRate: 0, muteRate: 0, ticketRate: 0 }, pay: { bans: 0, mutes: 0, tickets: 0, fixed: 0, total: 0 } })));
-        const ymd = String(state.punishments.selectedWeekStart || '').trim() || 'week';
-        window.StaffStatsSecure.downloadCsv(`staff-stats-week-${ymd}.csv`, csv);
+        let fname = 'week';
+        if (state.punishments.customWeekStart && state.punishments.customWeekEnd) {
+            fname = `${state.punishments.customWeekStart}-${state.punishments.customWeekEnd}`;
+        } else if (state.punishments.selectedWeekStart) {
+            fname = String(state.punishments.selectedWeekStart);
+        }
+        window.StaffStatsSecure.downloadCsv(`staff-stats-week-${fname}.csv`, csv);
         return;
     }
     const ranks = state.punishments.staffCheckRanksBySid || {};
@@ -1978,9 +2018,14 @@ async function loadStaffStatsFromServer() {
     try {
         state.punishments.staffStatsLoading = true;
         // Для old/new статистики передаем единый период в API.
-        const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
-            ? ('week:' + String(state.punishments.selectedWeekStart))
-            : String(state.punishments.selectedMonth || '');
+        const period = (() => {
+            if (state?.punishments?.statsPeriodMode !== 'week') return String(state.punishments.selectedMonth || '');
+            if (state.punishments.customWeekStart && state.punishments.customWeekEnd) {
+                return 'week:' + state.punishments.customWeekStart + ':' + state.punishments.customWeekEnd;
+            }
+            if (state.punishments.selectedWeekStart) return 'week:' + String(state.punishments.selectedWeekStart);
+            return '';
+        })();
         const isOldTable = state?.punishments?.staffTableMode === 'old' || getUserLevel() === 3;
         const qs = isOldTable
             ? (`?mode=old&period=${encodeURIComponent(period)}`)
@@ -2068,9 +2113,14 @@ async function openStaffPeriodPunishments(steamId) {
     const statsData = state.punishments.staffStatsData || {};
     const staffList = Array.isArray(state.punishments.staffList) ? state.punishments.staffList : [];
     const row = staffList.find(s => String(s?.steamid || '') === sid) || null;
-    const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
-        ? ('week:' + String(state.punishments.selectedWeekStart))
-        : state.punishments.selectedMonth;
+    const period = (() => {
+        if (state?.punishments?.statsPeriodMode !== 'week') return state.punishments.selectedMonth;
+        if (state.punishments.customWeekStart && state.punishments.customWeekEnd) {
+            return 'week:' + state.punishments.customWeekStart + ':' + state.punishments.customWeekEnd;
+        }
+        if (state.punishments.selectedWeekStart) return 'week:' + String(state.punishments.selectedWeekStart);
+        return null;
+    })();
     let staffPunishments = Array.isArray(statsData[sid]) ? statsData[sid] : null;
     if (!Array.isArray(staffPunishments)) {
         try {
@@ -2101,9 +2151,14 @@ async function openStaffPeriodPunishments(steamId) {
         if (!ts || !Number.isFinite(Number(ts))) return '—';
         return new Date(Number(ts) * 1000).toLocaleString('ru');
     };
-    const periodLabel = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
-        ? `Неделя ${state.punishments.selectedWeekStart}`
-        : (state.punishments.selectedMonth || 'Все время');
+    const periodLabel = (() => {
+        if (state?.punishments?.statsPeriodMode !== 'week') return state.punishments.selectedMonth || 'Все время';
+        if (state.punishments.customWeekStart && state.punishments.customWeekEnd) {
+            return `${state.punishments.customWeekStart} — ${state.punishments.customWeekEnd}`;
+        }
+        if (state.punishments.selectedWeekStart) return `Неделя ${state.punishments.selectedWeekStart}`;
+        return 'Все время';
+    })();
     const headerName = row?.name ? escapeHtml(row.name) : 'Стафф';
     const headerSid = escapeHtml(sid);
 
@@ -2193,9 +2248,14 @@ async function loadPunishmentsStaffList() {
 function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
     const isOldTable = state?.punishments?.staffTableMode === 'old' || getUserLevel() === 3;
     // Один и тот же период (месяц или неделя) для обеих таблиц; отличаются только фильтры строк.
-    const period = (state?.punishments?.statsPeriodMode === 'week' && state?.punishments?.selectedWeekStart)
-        ? ('week:' + String(state.punishments.selectedWeekStart))
-        : selectedMonth;
+    const period = (() => {
+        if (state?.punishments?.statsPeriodMode !== 'week') return selectedMonth;
+        if (state.punishments.customWeekStart && state.punishments.customWeekEnd) {
+            return 'week:' + state.punishments.customWeekStart + ':' + state.punishments.customWeekEnd;
+        }
+        if (state.punishments.selectedWeekStart) return 'week:' + String(state.punishments.selectedWeekStart);
+        return selectedMonth;
+    })();
     // Старая: все записи в периоде — любой статус, любая причина (computeStaffStatsRowsOld).
     // Новая: только 1/4 и без «тикет в дс» и т.п. (computeStaffStatsRowsSecure).
     if (isOldTable && window.StaffStatsSecure && typeof window.StaffStatsSecure.computeStaffStatsRowsOld === 'function') {

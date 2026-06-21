@@ -82,9 +82,18 @@
         if (ts == null) return false;
         const d = new Date(ts * 1000);
         if (sel.startsWith('week:')) {
-            const startStr = sel.slice(5).trim(); // YYYY-MM-DD
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(startStr)) return false;
-            const start = new Date(startStr + 'T00:00:00');
+            const rest = sel.slice(5).trim();
+            // custom range: week:start:end
+            if (/^\d{4}-\d{2}-\d{2}:\d{4}-\d{2}-\d{2}$/.test(rest)) {
+                const [startStr, endStr] = rest.split(':');
+                const start = new Date(startStr + 'T00:00:00');
+                const end = new Date(endStr + 'T23:59:59.999');
+                if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+                return d >= start && d <= end;
+            }
+            // standard 7-day week
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(rest)) return false;
+            const start = new Date(rest + 'T00:00:00');
             if (Number.isNaN(start.getTime())) return false;
             const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
             return d >= start && d < end;
