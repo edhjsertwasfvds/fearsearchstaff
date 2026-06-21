@@ -143,6 +143,13 @@ class ApiService {
     });
   }
 
+  async searchByQuery(query: string) {
+    return this.request('/api/check/search', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    });
+  }
+
   async getEvaders() {
     return this.request('/api/evaders');
   }

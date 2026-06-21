@@ -22,6 +22,7 @@ type Evader struct {
 	Filename      string `json:"filename"`
 	BannedSteamID string `json:"banned_steam_id"`
 	BanReason     string `json:"ban_reason"`
+	BannedCount   int    `json:"banned_count"`
 	ServerName    string `json:"server_name"`
 	ServerIP      string `json:"server_ip"`
 	ServerPort    string `json:"server_port"`
@@ -191,6 +192,7 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 				Filename:      check.Filename,
 				BannedSteamID: banned.SteamID,
 				BanReason:     banReason,
+				BannedCount:   len(bannedAccounts),
 				ServerName:    getString(player.server, "site_name"),
 				ServerIP:      getString(player.server, "ip"),
 				ServerPort:    fmt.Sprintf("%v", player.server["port"]),

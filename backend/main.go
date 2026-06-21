@@ -22,7 +22,7 @@ func main() {
 
 	auth := handlers.NewAuthHandler(cfg, db)
 	users := handlers.NewUserHandler(cfg, db)
-	checker := handlers.NewCheckHandler(cfg)
+	checker := handlers.NewCheckHandler(cfg, db)
 	fearAPI := handlers.NewFearAPIHandler(cfg)
 	admin := handlers.NewAdminHandler(cfg, db)
 	whitelist := handlers.NewWhitelistHandler(cfg)
@@ -66,6 +66,7 @@ func main() {
 	mux.Handle("/api/steam/level/", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetSteamLevel)))
 
 	mux.Handle("/api/check", handlers.AuthMiddleware(cfg, http.HandlerFunc(checker.Check)))
+	mux.Handle("/api/check/search", handlers.AuthMiddleware(cfg, http.HandlerFunc(checker.Search)))
 	mux.Handle("/api/evaders", handlers.AuthMiddleware(cfg, http.HandlerFunc(evaders.GetEvaders)))
 	mux.Handle("/api/vdf-history", handlers.AuthMiddleware(cfg, http.HandlerFunc(vdfHistory.GetHistory)))
 

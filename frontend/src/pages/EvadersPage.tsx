@@ -11,6 +11,7 @@ interface Evader {
   filename: string;
   banned_steam_id: string;
   ban_reason: string;
+  banned_count: number;
   server_name: string;
   server_ip: string;
   server_port: string;
@@ -94,6 +95,11 @@ export default function EvadersPage() {
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
                   <ShieldX className="w-3.5 h-3.5" />
                   <span>{evader.ban_reason}</span>
+                  {evader.banned_count > 1 && (
+                    <span className="px-1.5 py-0.5 bg-red-500/20 rounded text-[10px] font-bold ml-1">
+                      ×{evader.banned_count}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 text-xs text-gray-400">

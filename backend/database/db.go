@@ -196,6 +196,32 @@ func (db *DB) LogLogin(discordID, ip, userAgent string) {
 	`, discordID, ip, userAgent)
 }
 
+func (db *DB) SearchSteamIDs(query string) ([]string, error) {
+	if db.pool == nil {
+		return nil, nil
+	}
+	ctx := context.Background()
+	q := "%" + query + "%"
+	rows, err := db.pool.Query(ctx, `
+		SELECT DISTINCT steam_id FROM users
+		WHERE steam_id ILIKE $1 OR discord_id ILIKE $1 OR username ILIKE $1 OR display_name ILIKE $1
+		AND steam_id IS NOT NULL AND steam_id != ''
+	`, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var sid string
+		if err := rows.Scan(&sid); err == nil && sid != "" {
+			ids = append(ids, sid)
+		}
+	}
+	return ids, nil
+}
+
 func (db *DB) GetKVStore(key string) ([]byte, error) {
 	if db.pool == nil {
 		return nil, fmt.Errorf("no database available")

@@ -18,25 +18,51 @@ interface AccountCheckResult extends AccountResult {
   playtime?: number;
 }
 
+type SearchMode = 'steamid' | 'discord';
+
 export default function CheckerPage() {
   const [input, setInput] = useState('');
+  const [mode, setMode] = useState<SearchMode>('steamid');
   const [results, setResults] = useState<AccountCheckResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchNote, setSearchNote] = useState('');
 
   const handleCheck = useCallback(async () => {
-    const ids = input.split(/[\n,;\s]+/).map(s => s.trim()).filter(Boolean);
-    if (ids.length === 0) return;
+    const raw = input.trim();
+    if (!raw) return;
     setLoading(true);
     setResults([]);
+    setSearchNote('');
+
     try {
-      const res = await api.checkAccounts(ids);
-      setResults(res.data || []);
+      if (mode === 'discord') {
+        const searchRes = await api.searchByQuery(raw);
+        const steamIds: string[] = searchRes.steam_ids || [];
+        if (steamIds.length === 0) {
+          setSearchNote(`По запросу "${raw}" ничего не найдено в базе`);
+          setResults([]);
+          setLoading(false);
+          return;
+        }
+        setSearchNote(`Найдено ${steamIds.length} SteamID по запросу "${raw}"`);
+        const checkRes = await api.checkAccounts(steamIds);
+        setResults(checkRes.data || []);
+      } else {
+        const ids = raw.split(/[\n,;\s]+/).map(s => s.trim()).filter(Boolean);
+        if (ids.length > 50) {
+          setSearchNote('Максимум 50 аккаунтов');
+          setLoading(false);
+          return;
+        }
+        const res = await api.checkAccounts(ids);
+        setResults(res.data || []);
+      }
     } catch {
       setResults([]);
     } finally {
       setLoading(false);
     }
-  }, [input]);
+  }, [input, mode]);
 
   const getStatusInfo = (status: string) => {
     switch (status) {
@@ -58,19 +84,45 @@ export default function CheckerPage() {
         <p className="text-sm text-gray-500 mt-1">Проверка аккаунтов на баны и статус</p>
       </motion.div>
 
-      {/* Input */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
         className="bg-[#12151e] rounded-xl border border-white/5 p-4 mb-6"
       >
+        <div className="flex items-center gap-2 mb-3">
+          <button
+            onClick={() => setMode('steamid')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              mode === 'steamid'
+                ? 'bg-[#4f7cff] text-white'
+                : 'bg-[#1a1f2e] text-gray-400 border border-white/5 hover:text-white'
+            }`}
+          >
+            SteamID
+          </button>
+          <button
+            onClick={() => setMode('discord')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              mode === 'discord'
+                ? 'bg-[#5865F2] text-white'
+                : 'bg-[#1a1f2e] text-gray-400 border border-white/5 hover:text-white'
+            }`}
+          >
+            Discord / Никнейм
+          </button>
+        </div>
+
         <div className="flex gap-3 mb-3">
           <div className="flex-1 relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input
               type="text"
-              placeholder="Введите SteamID (через запятую или пробел)..."
+              placeholder={
+                mode === 'steamid'
+                  ? 'Введите SteamID (через запятую или пробел)...'
+                  : 'Введите Discord ID, Discord username или никнейм...'
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCheck()}
@@ -91,10 +143,16 @@ export default function CheckerPage() {
             )}
           </motion.button>
         </div>
-        <p className="text-xs text-gray-600">Максимум 50 аккаунтов за раз</p>
+        <p className="text-xs text-gray-600">
+          {mode === 'steamid'
+            ? 'Максимум 50 аккаунтов за раз'
+            : 'Поиск по базе пользователей Discord / Steam'}
+        </p>
+        {searchNote && (
+          <p className="text-xs text-blue-400 mt-2">{searchNote}</p>
+        )}
       </motion.div>
 
-      {/* Results */}
       <div className="space-y-3">
         <AnimatePresence>
           {results.map((r, i) => {
@@ -171,7 +229,11 @@ export default function CheckerPage() {
         {results.length === 0 && !loading && (
           <div className="text-center py-12">
             <Search className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-            <p className="text-gray-500">Введите SteamID для проверки</p>
+            <p className="text-gray-500">
+              {mode === 'steamid'
+                ? 'Введите SteamID для проверки'
+                : 'Введите Discord ID, username или никнейм для поиска'}
+            </p>
           </div>
         )}
       </div>

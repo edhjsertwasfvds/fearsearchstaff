@@ -1,13 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Ban, AlertTriangle, Clock, ShieldX, RefreshCw } from 'lucide-react';
+import { Search, AlertTriangle, Clock, ShieldX, RefreshCw, Users } from 'lucide-react';
 import { api } from '../services/api';
 import type { Punishment } from '../types';
 
 type Tab = 'bans' | 'mutes';
 
+const STAFF_LEVELS = new Set([1, 2, 3, 4, 5]);
+
+const ROLE_LEVELS: Record<string, number> = {
+  MLMODER: 2, DOSTUP: 2, STMODER: 2, MODER: 3, STADMIN: 4, GLADMIN: 4,
+  CURATOR: 5, OWNER: 5, OWNER_ALT: 5, ADMIN: 1, ADMIN_PLUS: 1,
+};
+
 function durStr(dur?: number): string {
-  if (dur == null || dur === undefined) return '—';
+  if (dur == null) return '—';
   if (dur <= 0) return '∞';
   if (dur >= 2592000) return `${Math.floor(dur / 2592000)}мес`;
   if (dur >= 86400) return `${Math.floor(dur / 86400)}д`;
@@ -29,15 +36,33 @@ export default function BansAndMutesPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [staffSteamIds, setStaffSteamIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    api.getStaff()
+      .then((res) => {
+        const list = (res?.data || res?.staff || (Array.isArray(res) ? res : [])) as any[];
+        const ids = new Set<string>();
+        for (const s of list) {
+          const sid = s.steam_id || s.steamid;
+          if (sid) ids.add(sid);
+        }
+        setStaffSteamIds(ids);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchPunishments = useCallback(async () => {
     setLoading(true);
     try {
       const type = activeTab === 'bans' ? '1' : '2';
       const res = await api.getAllPunishments({ page, type, search: search || undefined });
-      const items = res.punishments || [];
+      let items: Punishment[] = res.punishments || [];
 
-      // Bot.py logic: filter by staff_ids if available, sort by created desc
+      if (staffSteamIds.size > 0) {
+        items = items.filter((p) => staffSteamIds.has(p.admin_steamid));
+      }
+
       items.sort((a: any, b: any) => (b.created || 0) - (a.created || 0));
 
       setPunishments(items);
@@ -49,7 +74,7 @@ export default function BansAndMutesPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, page, search]);
+  }, [activeTab, page, search, staffSteamIds]);
 
   useEffect(() => {
     fetchPunishments();
@@ -61,7 +86,6 @@ export default function BansAndMutesPage() {
     setPage(1);
   }, [activeTab, search]);
 
-  // Bot.py status mapping: 1=active, 2=removed, 4=expired
   const getStatusLabel = (status: number) => {
     switch (status) {
       case 1: return { label: 'Активен', color: 'text-red-400 bg-red-400/10' };
@@ -81,7 +105,7 @@ export default function BansAndMutesPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">Баны и муты</h1>
           <p className="text-sm text-[#8a8a93] mt-1">
-            Найдено: {total} • Обновлено: {lastRefresh.toLocaleTimeString('ru-RU')}
+            Только от стаффа • Найдено: {total} • Обновлено: {lastRefresh.toLocaleTimeString('ru-RU')}
           </p>
         </div>
         <button
@@ -93,7 +117,6 @@ export default function BansAndMutesPage() {
         </button>
       </motion.div>
 
-      {/* Tabs + Search — matches screenshot 4 */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -123,6 +146,10 @@ export default function BansAndMutesPage() {
             <AlertTriangle className="w-4 h-4" />
             Муты
           </button>
+          <span className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-[#1a1f2e] border border-white/5 rounded-lg text-xs text-gray-500">
+            <Users className="w-3 h-3" />
+            Только стафф
+          </span>
         </div>
 
         <div className="relative">
@@ -137,7 +164,6 @@ export default function BansAndMutesPage() {
         </div>
       </motion.div>
 
-      {/* Table — matches screenshot 4: №, ИГРОК, STEAMID, ПРИЧИНА, АДМИН, СТАТУС, ДЛИТ., ДАТА */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}

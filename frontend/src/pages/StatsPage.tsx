@@ -14,7 +14,7 @@ export default function StatsPage() {
   const fetchStats = useCallback(async () => {
     try {
       const staffRes = await api.getStaff();
-      const staffList = staffRes?.staff || staffRes || [];
+      const staffList = (staffRes?.data || staffRes?.staff || (Array.isArray(staffRes) ? staffRes : [])) as any[];
       const steamIds = staffList.map((s: any) => s.steam_id || s.steamid).filter(Boolean);
 
       if (steamIds.length > 0) {

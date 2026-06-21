@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Trophy, Medal, Users } from 'lucide-react';
+import { Trophy, Users } from 'lucide-react';
 import { api } from '../services/api';
 import type { FearAPIServer } from '../types';
 
@@ -13,6 +13,20 @@ interface LeaderboardPlayer {
   avatar?: string;
 }
 
+function extractPlayers(data: any): LeaderboardPlayer[] {
+  if (!data) return [];
+  const raw = data.players || data.data?.players || data.data || data;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((p: any) => ({
+    steam_id: p.steam_id || p.steamid || '',
+    name: p.name || p.nickname || p.personaname || 'Unknown',
+    kills: Number(p.kills || 0),
+    deaths: Number(p.deaths || 0),
+    kd: Number(p.kd || (p.deaths > 0 ? p.kills / p.deaths : 0)),
+    avatar: p.avatar || p.avatarfull || '',
+  }));
+}
+
 export default function LeaderboardPage() {
   const [players, setPlayers] = useState<LeaderboardPlayer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -21,16 +35,28 @@ export default function LeaderboardPage() {
     const fetchLeaderboard = async () => {
       try {
         const res = await api.getLeaderboard();
-        const data = res?.players || res || [];
-        setPlayers(Array.isArray(data) ? data.slice(0, 1000) : []);
+        let parsed = extractPlayers(res);
+        if (parsed.length === 0 && res?.success === false) {
+          throw new Error('API returned success:false');
+        }
+        if (parsed.length === 0) {
+          throw new Error('No players in leaderboard response');
+        }
+        setPlayers(parsed.slice(0, 1000));
       } catch {
-        // Fallback: gather from servers
         try {
           const serversRes = await api.getServers();
-          const servers: FearAPIServer[] = Array.isArray(serversRes) ? serversRes : (serversRes.data || serversRes.servers || []);
+          const servers: FearAPIServer[] = Array.isArray(serversRes)
+            ? serversRes
+            : Array.isArray(serversRes?.data)
+              ? serversRes.data
+              : Array.isArray(serversRes?.servers)
+                ? serversRes.servers
+                : [];
           const playerMap = new Map<string, LeaderboardPlayer>();
           for (const s of servers) {
-            for (const p of s.live_data?.players || []) {
+            const livePlayers = s.live_data?.players || [];
+            for (const p of livePlayers) {
               const existing = playerMap.get(p.steam_id);
               if (existing) {
                 existing.kills += p.kills || 0;
@@ -105,7 +131,7 @@ export default function LeaderboardPage() {
             const medal = getMedal(i);
             return (
               <motion.div
-                key={p.steam_id}
+                key={`${p.steam_id}-${i}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: Math.min(i * 0.01, 0.5) }}
@@ -116,7 +142,7 @@ export default function LeaderboardPage() {
                 </span>
                 <div className="flex items-center gap-3 min-w-0">
                   {p.avatar ? (
-                    <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-lg object-cover ring-1 ring-white/10" />
+                    <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-lg object-cover ring-1 ring-white/10" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                   ) : (
                     <div className="w-8 h-8 bg-[#1e2333] rounded-lg flex items-center justify-center">
                       <span className="text-xs font-bold text-gray-500">{p.name?.charAt(0)?.toUpperCase() || '?'}</span>

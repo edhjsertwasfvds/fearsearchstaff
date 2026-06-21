@@ -51,13 +51,24 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const res = await api.getServers();
-        const servers = Array.isArray(res) ? res : (res.data || res.servers || []);
+        const [serversRes, staffRes] = await Promise.allSettled([
+          api.getServers(),
+          api.getStaff(),
+        ]);
         let totalPlayers = 0;
-        for (const s of servers) {
-          totalPlayers += s.players_online || s.live_data?.players?.length || 0;
+        if (serversRes.status === 'fulfilled') {
+          const servers = Array.isArray(serversRes.value) ? serversRes.value : (serversRes.value?.data || serversRes.value?.servers || []);
+          for (const s of servers) {
+            totalPlayers += s.players_online || s.live_data?.players?.length || 0;
+          }
         }
-        setServerStats({ admins: 12, players: totalPlayers || 156 });
+        let totalAdmins = 0;
+        if (staffRes.status === 'fulfilled') {
+          const staffData = staffRes.value;
+          const staffList = Array.isArray(staffData?.data) ? staffData.data : (Array.isArray(staffData) ? staffData : []);
+          totalAdmins = staffList.length;
+        }
+        setServerStats({ admins: totalAdmins, players: totalPlayers });
       } catch {
         setServerStats({ admins: 0, players: 0 });
       }
@@ -86,12 +97,12 @@ export default function Layout({ children }: { children: ReactNode }) {
   };
 
   const getLevelColor = (level: number) => {
-    if (level >= 5) return 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20';
-    if (level >= 4) return 'text-orange-400 bg-orange-400/10 border-orange-400/20';
-    if (level >= 3) return 'text-blue-400 bg-blue-400/10 border-blue-400/20';
-    if (level >= 2) return 'text-purple-400 bg-purple-400/10 border-purple-400/20';
-    if (level >= 1) return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
-    return 'text-red-400 bg-red-400/10 border-red-400/20';
+    if (level >= 5) return 'text-yellow-400/80 bg-yellow-400/5 border-yellow-400/10';
+    if (level >= 4) return 'text-orange-400/80 bg-orange-400/5 border-orange-400/10';
+    if (level >= 3) return 'text-blue-400/80 bg-blue-400/5 border-blue-400/10';
+    if (level >= 2) return 'text-purple-400/80 bg-purple-400/5 border-purple-400/10';
+    if (level >= 1) return 'text-emerald-400/80 bg-emerald-400/5 border-emerald-400/10';
+    return 'text-red-400/80 bg-red-400/5 border-red-400/10';
   };
 
   return (

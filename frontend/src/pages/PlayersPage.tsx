@@ -62,6 +62,8 @@ export default function PlayersPage() {
               const flags: string[] = [];
               if (ban?.vacBanned) flags.push('VAC');
               if (ban?.numberofGameBans > 0) flags.push('GAME BAN');
+              if (ban?.communityBanned) flags.push('COMMUNITY');
+              if (ban?.economyBan && ban.economyBan !== 'none') flags.push('TRADE');
               if (player) {
                 const ageDays = player.timecreated ? Math.floor((Date.now() / 1000 - player.timecreated) / 86400) : null;
                 if (ageDays !== null && ageDays < 365) flags.push(`NEW (${ageDays}д)`);

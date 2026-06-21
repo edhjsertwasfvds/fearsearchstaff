@@ -10,14 +10,16 @@ import (
 	"time"
 
 	"fearstaff-api/config"
+	"fearstaff-api/database"
 )
 
 type CheckHandler struct {
 	cfg *config.Config
+	db  *database.DB
 }
 
-func NewCheckHandler(cfg *config.Config) *CheckHandler {
-	return &CheckHandler{cfg: cfg}
+func NewCheckHandler(cfg *config.Config, db *database.DB) *CheckHandler {
+	return &CheckHandler{cfg: cfg, db: db}
 }
 
 type AccountResult struct {
@@ -36,6 +38,53 @@ type AccountResult struct {
 
 type checkRequest struct {
 	SteamIDs []string `json:"steam_ids"`
+}
+
+type searchRequest struct {
+	Query string `json:"query"`
+}
+
+func (h *CheckHandler) Search(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req searchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	q := strings.TrimSpace(req.Query)
+	if q == "" {
+		http.Error(w, `{"error":"query required"}`, http.StatusBadRequest)
+		return
+	}
+
+	steamIDs := make([]string, 0)
+
+	if h.db != nil {
+		found, _ := h.db.SearchSteamIDs(q)
+		steamIDs = append(steamIDs, found...)
+	}
+
+	seen := make(map[string]bool)
+	unique := make([]string, 0)
+	for _, sid := range steamIDs {
+		sid = strings.TrimSpace(sid)
+		if sid != "" && !seen[sid] {
+			seen[sid] = true
+			unique = append(unique, sid)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"steam_ids":  unique,
+		"query":      q,
+	})
 }
 
 func (h *CheckHandler) Check(w http.ResponseWriter, r *http.Request) {
