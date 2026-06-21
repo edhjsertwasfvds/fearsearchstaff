@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -23,15 +24,15 @@ func NewCheckHandler(cfg *config.Config, db *database.DB) *CheckHandler {
 }
 
 type AccountResult struct {
-	SteamID    string `json:"steam_id"`
-	Name       string `json:"name"`
-	Avatar     string `json:"avatar"`
-	Status     string `json:"status"`
-	BanType    string `json:"ban_type,omitempty"`
-	BanReason  string `json:"ban_reason,omitempty"`
-	BanDaysAgo *int   `json:"ban_days_ago,omitempty"`
-	BanDate    string `json:"ban_date,omitempty"`
-	FearStatus string `json:"fear_status,omitempty"`
+	SteamID    string   `json:"steam_id"`
+	Name       string   `json:"name"`
+	Avatar     string   `json:"avatar"`
+	Status     string   `json:"status"`
+	BanType    string   `json:"ban_type,omitempty"`
+	BanReason  string   `json:"ban_reason,omitempty"`
+	BanDaysAgo *int     `json:"ban_days_ago,omitempty"`
+	BanDate    string   `json:"ban_date,omitempty"`
+	FearStatus string   `json:"fear_status,omitempty"`
 	KD         *float64 `json:"kd,omitempty"`
 	Playtime   *int     `json:"playtime,omitempty"`
 }
@@ -81,9 +82,9 @@ func (h *CheckHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":    true,
-		"steam_ids":  unique,
-		"query":      q,
+		"success":   true,
+		"steam_ids": unique,
+		"query":     q,
 	})
 }
 
@@ -126,6 +127,81 @@ func (h *CheckHandler) Check(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data":    results,
+	})
+}
+
+func (h *CheckHandler) CheckVDF(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, `{"error":"invalid form"}`, http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, `{"error":"file required"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	body, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
+		return
+	}
+
+	re := regexp.MustCompile(`"SteamID"\s+"(7656\d{13})"`)
+	matches := re.FindAllStringSubmatch(string(body), -1)
+
+	steamIDs := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		if len(m) > 1 && !seen[m[1]] {
+			seen[m[1]] = true
+			steamIDs = append(steamIDs, m[1])
+		}
+	}
+
+	if len(steamIDs) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":    true,
+			"steam_ids":  []string{},
+			"count":      0,
+			"message":    "SteamID не найдены в файле",
+		})
+		return
+	}
+
+	results := make([]AccountResult, len(steamIDs))
+	var wg sync.WaitGroup
+	for i, sid := range steamIDs {
+		wg.Add(1)
+		go func(idx int, steamID string) {
+			defer wg.Done()
+			results[idx] = h.checkSingleAccount(steamID)
+		}(i, sid)
+	}
+	wg.Wait()
+
+	banned := 0
+	for _, r := range results {
+		if r.Status == "banned" {
+			banned++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"steam_ids":    steamIDs,
+		"count":        len(steamIDs),
+		"banned_count": banned,
+		"results":      results,
 	})
 }
 
@@ -246,10 +322,10 @@ func (h *CheckHandler) fetchProfile(steamID string) map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"name":      name,
-		"avatar":    avatar,
-		"kd":        kd,
-		"playtime":  playtime,
+		"name":     name,
+		"avatar":   avatar,
+		"kd":       kd,
+		"playtime": playtime,
 	}
 }
 

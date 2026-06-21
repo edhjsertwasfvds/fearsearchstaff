@@ -15,15 +15,29 @@ import (
 
 // VDFCheckHistory — сжатая информация об одной VDF-проверке.
 type VDFCheckHistory struct {
-	ID            int      `json:"id"`
-	Filename      string   `json:"filename"`
-	Timestamp     string   `json:"timestamp"`
-	LastRecheck   string   `json:"last_recheck,omitempty"`
-	AttachmentURL string   `json:"attachment_url,omitempty"`
-	MessageURL    string   `json:"message_url,omitempty"`
-	Count         int      `json:"count"`
-	BannedCount   int      `json:"banned_count"`
-	SteamIDs      []string `json:"steamids"`
+	ID            int               `json:"id"`
+	Filename      string            `json:"filename"`
+	Timestamp     string            `json:"timestamp"`
+	LastRecheck   string            `json:"last_recheck,omitempty"`
+	AttachmentURL string            `json:"attachment_url,omitempty"`
+	MessageURL    string            `json:"message_url,omitempty"`
+	Count         int               `json:"count"`
+	BannedCount   int               `json:"banned_count"`
+	SteamIDs      []string          `json:"steamids"`
+	Results       []VDFHistoryItem  `json:"results"`
+}
+
+type VDFHistoryItem struct {
+	SteamID     string `json:"steamid"`
+	Nickname    string `json:"nickname"`
+	FearBanned  bool   `json:"fear_banned"`
+	FearReason  string `json:"fear_reason"`
+	FearUnban   string `json:"fear_unban"`
+	VacBanned   bool   `json:"vac_banned"`
+	GameBans    int    `json:"game_bans"`
+	CommunityBan bool  `json:"community_ban"`
+	YoomaBanned bool   `json:"yooma_banned"`
+	YoomaReason string `json:"yooma_reason"`
 }
 
 type vdfHistoryStore struct {
@@ -42,6 +56,8 @@ type vdfHistoryResult struct {
 	SteamID      string                 `json:"steamid"`
 	Nickname     string                 `json:"nickname"`
 	FearBanned   bool                   `json:"fear_banned"`
+	FearReason   string                 `json:"fear_reason"`
+	FearUnban    string                 `json:"fear_unban"`
 	VacBanned    bool                   `json:"vac_banned"`
 	GameBans     int                    `json:"game_bans"`
 	CommunityBan bool                   `json:"community_ban"`
@@ -148,7 +164,43 @@ func (h *VDFHistoryHandler) computeHistory() ([]VDFCheckHistory, error) {
 	for _, id := range ids {
 		check := store.Checks[strconv.Itoa(id)]
 		banned := 0
+		results := make([]VDFHistoryItem, 0, len(check.Results))
 		for _, r := range check.Results {
+			yoomaBanned := false
+			yoomaReason := ""
+			if r.YoomaData != nil {
+				if found, _ := r.YoomaData["found"].(bool); found {
+					if punishments, ok := r.YoomaData["punishments"].([]interface{}); ok && len(punishments) > 0 {
+						for _, p := range punishments {
+							pm, ok := p.(map[string]interface{})
+							if !ok {
+								continue
+							}
+							if status, _ := pm["status"].(string); status == "active" {
+								yoomaBanned = true
+								reason, _ := pm["reason"].(string)
+								if reason == "" {
+									reason = "Haron Anti-Cheats"
+								}
+								yoomaReason = reason
+								break
+							}
+						}
+					}
+				}
+			}
+			results = append(results, VDFHistoryItem{
+				SteamID:      r.SteamID,
+				Nickname:     r.Nickname,
+				FearBanned:   r.FearBanned,
+				FearReason:   r.FearReason,
+				FearUnban:    r.FearUnban,
+				VacBanned:    r.VacBanned,
+				GameBans:     r.GameBans,
+				CommunityBan: r.CommunityBan,
+				YoomaBanned:  yoomaBanned,
+				YoomaReason:  yoomaReason,
+			})
 			if r.isBanned() {
 				banned++
 			}
@@ -172,6 +224,7 @@ func (h *VDFHistoryHandler) computeHistory() ([]VDFCheckHistory, error) {
 			Count:         len(check.Results),
 			BannedCount:   banned,
 			SteamIDs:      steamids,
+			Results:       results,
 		})
 	}
 

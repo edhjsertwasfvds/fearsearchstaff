@@ -50,6 +50,24 @@ func (h *UserHandler) GetStaff(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if len(result) == 0 && h.db != nil {
+		staffList, err := h.db.GetStaffListFromDB()
+		if err == nil && len(staffList) > 0 {
+			for _, s := range staffList {
+				rp, _ := h.cfg.RoleMap[s["group_name"].(string)]
+				result = append(result, map[string]interface{}{
+					"steam_id":     s["steamid"],
+					"name":         s["name"],
+					"discord_id":   s["discord_id"],
+					"discord_name": s["discord_nickname"],
+					"role":         s["group_display_name"],
+					"group_name":   s["group_name"],
+					"level":        rp.Level,
+				})
+			}
+		}
+	}
+
 	if len(result) == 0 {
 		staff, err := h.db.GetStaffFromFile()
 		if err == nil {
@@ -139,31 +157,31 @@ func (h *UserHandler) GetRoles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) GetDashboardStats(w http.ResponseWriter, r *http.Request) {
-	staff, err := h.db.GetStaffFromFile()
-	if err != nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"total_staff":      0,
-				"staff_by_role":    map[string]int{},
-				"online_staff":     0,
-			},
-		})
-		return
+	total := 0
+
+	if h.db != nil {
+		users, err := h.db.GetAllUsers()
+		if err == nil {
+			for _, u := range users {
+				if u.Level >= 1 {
+					total++
+				}
+			}
+		}
 	}
 
-	byRole := make(map[string]int)
-	total := 0
-	for _, s := range staff {
-		total++
-		byRole[s.GroupName]++
+	if total == 0 {
+		staff, err := h.db.GetStaffFromFile()
+		if err == nil {
+			total = len(staff)
+		}
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data": map[string]interface{}{
 			"total_staff":   total,
-			"staff_by_role": byRole,
+			"staff_by_role": map[string]int{},
 		},
 	})
 }

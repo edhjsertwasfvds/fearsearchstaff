@@ -20,6 +20,7 @@ type Config struct {
 	DatabaseURL          string
 	FrontendURL          string
 	Port                 string
+	FearCookie           string
 
 	RoleMap map[string]RolePermission
 }
@@ -46,6 +47,7 @@ func Load() *Config {
 		DatabaseURL:          getEnv("DATABASE_URL", ""),
 		FrontendURL:          getEnv("FRONTEND_URL", "http://localhost:5173"),
 		Port:                 getEnv("PORT", "8080"),
+		FearCookie:           getEnv("FEAR_COOKIE", ""),
 	}
 
 	cfg.RoleMap = map[string]RolePermission{

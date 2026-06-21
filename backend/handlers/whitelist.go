@@ -4,42 +4,62 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
-	"time"
+	"strconv"
 
 	"fearstaff-api/config"
+	"fearstaff-api/database"
 )
 
-type WhitelistEntry struct {
-	ID      string `json:"id"`
-	SteamID string `json:"steam_id"`
-	Name    string `json:"name"`
-	AddedBy string `json:"added_by"`
-	Date    string `json:"date"`
-}
-
 type WhitelistHandler struct {
-	cfg      *config.Config
-	entries  []WhitelistEntry
-	mu       sync.RWMutex
+	cfg *config.Config
+	db  *database.DB
 }
 
-func NewWhitelistHandler(cfg *config.Config) *WhitelistHandler {
-	return &WhitelistHandler{
-		cfg:     cfg,
-		entries: make([]WhitelistEntry, 0),
-	}
+func NewWhitelistHandler(cfg *config.Config, db *database.DB) *WhitelistHandler {
+	return &WhitelistHandler{cfg: cfg, db: db}
 }
 
 func (h *WhitelistHandler) GetEntries(w http.ResponseWriter, r *http.Request) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	if h.db == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"data":    []interface{}{},
+			"total":   0,
+		})
+		return
+	}
+
+	entries, err := h.db.GetWhitelist()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	type entryJSON struct {
+		ID      string `json:"id"`
+		SteamID string `json:"steam_id"`
+		Name    string `json:"name"`
+		AddedBy string `json:"added_by"`
+		Date    string `json:"date"`
+	}
+
+	result := make([]entryJSON, 0, len(entries))
+	for i, e := range entries {
+		result = append(result, entryJSON{
+			ID:      strconv.Itoa(i + 1),
+			SteamID: e.SteamID,
+			Name:    e.Name,
+			AddedBy: e.AddedBy,
+			Date:    e.Date,
+		})
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"data":    h.entries,
-		"total":   len(h.entries),
+		"data":    result,
+		"total":   len(result),
 	})
 }
 
@@ -69,29 +89,24 @@ func (h *WhitelistHandler) AddEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	for _, e := range h.entries {
-		if e.SteamID == req.SteamID {
-			http.Error(w, `{"error":"already in whitelist"}`, http.StatusConflict)
-			return
-		}
+	if h.db == nil {
+		http.Error(w, `{"error":"database not available"}`, http.StatusInternalServerError)
+		return
 	}
 
-	entry := WhitelistEntry{
-		ID:      fmt.Sprintf("wl_%d", time.Now().UnixNano()),
-		SteamID: req.SteamID,
-		Name:    req.Name,
-		AddedBy: claims.Username,
-		Date:    time.Now().UTC().Format("02.01.2006 15:04"),
+	if err := h.db.UpsertWhitelist(req.SteamID, req.Name, claims.Username); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
 	}
-	h.entries = append(h.entries, entry)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"data":    entry,
+		"data": map[string]interface{}{
+			"steam_id": req.SteamID,
+			"name":     req.Name,
+			"added_by": claims.Username,
+		},
 	})
 }
 
@@ -109,20 +124,19 @@ func (h *WhitelistHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	for i, e := range h.entries {
-		if e.ID == req.ID {
-			h.entries = append(h.entries[:i], h.entries[i+1:]...)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": true,
-				"message": "Entry removed",
-			})
-			return
-		}
+	if h.db == nil {
+		http.Error(w, `{"error":"database not available"}`, http.StatusInternalServerError)
+		return
 	}
 
-	http.Error(w, `{"error":"entry not found"}`, http.StatusNotFound)
+	if err := h.db.DeleteWhitelist(req.ID); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Entry removed",
+	})
 }

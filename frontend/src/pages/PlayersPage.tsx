@@ -74,6 +74,7 @@ export default function PlayersPage() {
               return {
                 steam_id: sid,
                 timecreated: player?.timecreated || 0,
+                avatar: player?.avatarmedium || player?.avatarfull || '',
                 flags,
               };
             } catch {
@@ -82,14 +83,17 @@ export default function PlayersPage() {
           });
 
           const summaries = await Promise.all(fetches);
-          const metaMap = new Map<string, { timecreated: number; flags: string[] }>();
-          summaries.forEach(s => metaMap.set(s.steam_id, { timecreated: s.timecreated, flags: s.flags }));
+          const metaMap = new Map<string, { timecreated: number; flags: string[]; avatar: string }>();
+          summaries.forEach(s => metaMap.set(s.steam_id, { timecreated: s.timecreated, flags: s.flags, avatar: s.avatar || '' }));
 
           for (const p of allPlayers) {
             const meta = metaMap.get(p.steam_id);
             if (meta) {
               p.account_created = meta.timecreated;
               p.flags = meta.flags;
+              if (!p.avatar && meta.avatar) {
+                p.avatar = meta.avatar;
+              }
             }
           }
         } catch {}

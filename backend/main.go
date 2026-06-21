@@ -18,14 +18,16 @@ func main() {
 	if err != nil {
 		log.Printf("⚠️ Database error: %v (continuing with file fallback)", err)
 	}
-	defer db.Close()
+	if db != nil {
+		defer db.Close()
+	}
 
 	auth := handlers.NewAuthHandler(cfg, db)
 	users := handlers.NewUserHandler(cfg, db)
 	checker := handlers.NewCheckHandler(cfg, db)
-	fearAPI := handlers.NewFearAPIHandler(cfg)
+	fearAPI := handlers.NewFearAPIHandler(cfg, db)
 	admin := handlers.NewAdminHandler(cfg, db)
-	whitelist := handlers.NewWhitelistHandler(cfg)
+	whitelist := handlers.NewWhitelistHandler(cfg, db)
 	evaders := handlers.NewEvadersHandler(cfg, db)
 	vdfHistory := handlers.NewVDFHistoryHandler(cfg, db)
 
@@ -58,6 +60,8 @@ func main() {
 	mux.Handle("/api/punishments/admin", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetPunishmentsByAdmin)))
 	mux.Handle("/api/punishments/staff-stats", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetStaffStats)))
 	mux.Handle("/api/bans/check/", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.CheckBan)))
+	mux.Handle("/api/admins", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetAdmins)))
+	mux.Handle("/api/resolve-names", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetResolveNames)))
 
 	mux.Handle("/api/yooma/bans/", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetYoomaBans)))
 	mux.Handle("/api/steam/summary/", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetSteamSummary)))
@@ -67,6 +71,7 @@ func main() {
 
 	mux.Handle("/api/check", handlers.AuthMiddleware(cfg, http.HandlerFunc(checker.Check)))
 	mux.Handle("/api/check/search", handlers.AuthMiddleware(cfg, http.HandlerFunc(checker.Search)))
+	mux.Handle("/api/check/vdf", handlers.AuthMiddleware(cfg, http.HandlerFunc(checker.CheckVDF)))
 	mux.Handle("/api/evaders", handlers.AuthMiddleware(cfg, http.HandlerFunc(evaders.GetEvaders)))
 	mux.Handle("/api/vdf-history", handlers.AuthMiddleware(cfg, http.HandlerFunc(vdfHistory.GetHistory)))
 

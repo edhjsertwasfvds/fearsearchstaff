@@ -3,6 +3,19 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, Download, ExternalLink, Loader2, Calendar, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { api } from '../services/api';
 
+interface VDFHistoryItem {
+  steamid: string;
+  nickname: string;
+  fear_banned: boolean;
+  fear_reason: string;
+  fear_unban: string;
+  vac_banned: boolean;
+  game_bans: number;
+  community_ban: boolean;
+  yooma_banned: boolean;
+  yooma_reason: string;
+}
+
 interface VDFCheck {
   id: number;
   filename: string;
@@ -13,6 +26,7 @@ interface VDFCheck {
   count: number;
   banned_count: number;
   steamids: string[];
+  results: VDFHistoryItem[];
 }
 
 export default function VDFHistoryPage() {
@@ -51,6 +65,10 @@ export default function VDFHistoryPage() {
     if (!iso) return '—';
     const d = new Date(iso);
     return isNaN(d.getTime()) ? iso : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const isAccountBanned = (r: VDFHistoryItem) => {
+    return r.fear_banned || r.vac_banned || r.game_bans > 0 || r.community_ban || r.yooma_banned;
   };
 
   return (
@@ -147,30 +165,79 @@ export default function VDFHistoryPage() {
                     >
                       <div className="px-5 pb-4 border-t border-white/5">
                         <p className="text-xs text-gray-500 uppercase tracking-wider mt-3 mb-2 font-semibold">
-                          SteamID из файла ({check.steamids.length}):
+                          Аккаунты ({check.results.length}):
                         </p>
-                        {check.steamids.length > 0 ? (
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
-                            {check.steamids.map((sid, si) => (
-                              <div
-                                key={si}
-                                className="flex items-center gap-2 px-3 py-2 bg-[#0c0e14] rounded-lg border border-white/5"
-                              >
-                                <span className="text-xs text-gray-400 font-mono truncate">{sid}</span>
-                                <a
-                                  href={`https://steamcommunity.com/profiles/${sid}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-gray-600 hover:text-blue-400 transition-colors flex-shrink-0"
-                                  title="Steam профиль"
+                        {check.results.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {check.results.map((r, ri) => {
+                              const banned = isAccountBanned(r);
+                              return (
+                                <div
+                                  key={ri}
+                                  className={`flex items-center gap-3 px-3 py-2 rounded-lg border ${banned ? 'bg-red-500/5 border-red-500/10' : 'bg-[#0c0e14] border-white/5'}`}
                                 >
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                              </div>
-                            ))}
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className={`text-xs font-mono ${banned ? 'text-red-400' : 'text-gray-400'}`}>{r.steamid}</span>
+                                    <a
+                                      href={`https://fearproject.ru/profile/${r.steamid}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-gray-600 hover:text-blue-400 transition-colors flex-shrink-0"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                    <a
+                                      href={`https://steamcommunity.com/profiles/${r.steamid}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-gray-600 hover:text-blue-400 transition-colors flex-shrink-0"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                    {r.nickname && r.nickname !== r.steamid && (
+                                      <span className="text-xs text-gray-600 truncate hidden sm:inline">{r.nickname}</span>
+                                    )}
+                                  </div>
+                                  {banned ? (
+                                    <div className="flex flex-wrap gap-1.5 flex-shrink-0">
+                                      {r.fear_banned && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#4f7cff]/10 border border-[#4f7cff]/20 rounded text-[11px] text-[#7aa2ff]">
+                                          Fear: {r.fear_reason || 'Обход'}
+                                          {r.fear_unban && (
+                                            <span className="text-[#5a86d8] ml-1">до {r.fear_unban}</span>
+                                          )}
+                                        </span>
+                                      )}
+                                      {r.vac_banned && (
+                                        <span className="inline-flex items-center px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded text-[11px] text-red-400">
+                                          VAC
+                                        </span>
+                                      )}
+                                      {r.game_bans > 0 && (
+                                        <span className="inline-flex items-center px-2 py-0.5 bg-orange-500/10 border border-orange-500/20 rounded text-[11px] text-orange-400">
+                                          Game Ban (x{r.game_bans})
+                                        </span>
+                                      )}
+                                      {r.community_ban && (
+                                        <span className="inline-flex items-center px-2 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded text-[11px] text-yellow-400">
+                                          Community
+                                        </span>
+                                      )}
+                                      {r.yooma_banned && (
+                                        <span className="inline-flex items-center px-2 py-0.5 bg-purple-500/10 border border-purple-500/20 rounded text-[11px] text-purple-400">
+                                          Yooma: {r.yooma_reason}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] text-green-400/60 flex-shrink-0">чисто</span>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : (
-                          <p className="text-xs text-gray-600">SteamID не сохранены</p>
+                          <p className="text-xs text-gray-600">Данные результатов не сохранены</p>
                         )}
                       </div>
                     </motion.div>

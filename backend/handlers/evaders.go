@@ -32,9 +32,18 @@ type Evader struct {
 }
 
 type BannedDetail struct {
-	SteamID string `json:"steam_id"`
-	Name    string `json:"name"`
-	Bans    string `json:"bans"`
+	SteamID   string            `json:"steam_id"`
+	Name      string            `json:"name"`
+	Bans      string            `json:"bans"`
+	FearBan   *BanSourceDetail  `json:"fear_ban,omitempty"`
+	VacBan    bool              `json:"vac_ban"`
+	GameBans  int               `json:"game_bans"`
+	YoomaBan  *BanSourceDetail  `json:"yooma_ban,omitempty"`
+}
+
+type BanSourceDetail struct {
+	Reason    string `json:"reason"`
+	UnbanDate string `json:"unban_date,omitempty"`
 }
 
 type vdfStore struct {
@@ -51,6 +60,7 @@ type vdfResult struct {
 	OnFear       bool                   `json:"on_fear"`
 	FearBanned   bool                   `json:"fear_banned"`
 	FearReason   string                 `json:"fear_reason"`
+	FearUnban    string                 `json:"fear_unban"`
 	VacBanned    bool                   `json:"vac_banned"`
 	GameBans     int                    `json:"game_bans"`
 	CommunityBan bool                   `json:"community_ban"`
@@ -196,12 +206,14 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 			details := make([]BannedDetail, 0, len(bannedAccounts))
 			for _, ba := range bannedAccounts {
 				parts := []string{}
+				var fearDetail *BanSourceDetail
 				if ba.FearBanned {
 					reason := ba.FearReason
 					if reason == "" {
 						reason = "Обход"
 					}
 					parts = append(parts, "Fear: "+reason)
+					fearDetail = &BanSourceDetail{Reason: reason, UnbanDate: ba.FearUnban}
 				}
 				if ba.VacBanned {
 					parts = append(parts, "VAC")
@@ -209,6 +221,7 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 				if ba.GameBans > 0 {
 					parts = append(parts, fmt.Sprintf("Game Ban (×%d)", ba.GameBans))
 				}
+				var yoomaDetail *BanSourceDetail
 				if ba.YoomaData != nil {
 					if found, _ := ba.YoomaData["found"].(bool); found {
 						if punishments, ok := ba.YoomaData["punishments"].([]interface{}); ok && len(punishments) > 0 {
@@ -223,11 +236,19 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 										reason = "Haron Anti-Cheats"
 									}
 									parts = append(parts, "Yooma.su: "+reason)
+									yDate := ""
+									if ts, ok := pm["created_at"].(float64); ok && ts > 0 {
+										yDate = time.Unix(int64(ts), 0).UTC().Format("02.01.2006 15:04")
+									} else if ds, ok := pm["date"].(string); ok && ds != "" {
+										yDate = ds
+									}
+									yoomaDetail = &BanSourceDetail{Reason: reason, UnbanDate: yDate}
 									break
 								}
 							}
 						} else {
 							parts = append(parts, "Yooma.su: Ban")
+							yoomaDetail = &BanSourceDetail{Reason: "Ban"}
 						}
 					}
 				}
@@ -236,9 +257,13 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 					banStr = strings.Join(parts, " | ")
 				}
 				details = append(details, BannedDetail{
-					SteamID: ba.SteamID,
-					Name:    ba.Nickname,
-					Bans:    banStr,
+					SteamID:  ba.SteamID,
+					Name:     ba.Nickname,
+					Bans:     banStr,
+					FearBan:  fearDetail,
+					VacBan:   ba.VacBanned,
+					GameBans: ba.GameBans,
+					YoomaBan: yoomaDetail,
 				})
 			}
 

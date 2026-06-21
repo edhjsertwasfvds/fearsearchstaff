@@ -194,6 +194,30 @@ class ApiService {
     });
   }
 
+  async getAdmins() {
+    return this.request('/api/admins');
+  }
+
+  async resolveNames(ids: string[]) {
+    return this.request(`/api/resolve-names?ids=${ids.join(',')}`);
+  }
+
+  async checkVDF(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers: Record<string, string> = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    const res = await fetch(`${API_BASE}/api/check/vdf`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`API Error ${res.status}`);
+    return res.json();
+  }
+
   async getHealth() {
     const res = await fetch(`${API_BASE}/api/health`);
     return res.json();

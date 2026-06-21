@@ -17,7 +17,7 @@ import (
 
 type DB struct {
 	pool      *pgxpool.Pool
- staffFile string
+	staffFile string
 	mu        sync.RWMutex
 }
 
@@ -77,6 +77,29 @@ func (db *DB) migrate() error {
 		`CREATE TABLE IF NOT EXISTS kv_store (
 			key TEXT PRIMARY KEY,
 			value JSONB NOT NULL,
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS whitelist (
+			id SERIAL PRIMARY KEY,
+			steam_id VARCHAR(64) UNIQUE NOT NULL,
+			name VARCHAR(255),
+			added_by VARCHAR(255),
+			added_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS profile_cache (
+			steam_id VARCHAR(64) PRIMARY KEY,
+			name VARCHAR(255),
+			avatar TEXT,
+			fetched_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS staff_list (
+			steam_id VARCHAR(64) PRIMARY KEY,
+			name VARCHAR(255),
+			nickname VARCHAR(255),
+			discord_id VARCHAR(64),
+			discord_name VARCHAR(255),
+			group_name VARCHAR(64),
+			group_display_name VARCHAR(128),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
 	}
@@ -198,27 +221,45 @@ func (db *DB) LogLogin(discordID, ip, userAgent string) {
 
 func (db *DB) SearchSteamIDs(query string) ([]string, error) {
 	if db.pool == nil {
-		return nil, nil
+		return db.searchSteamIDsJSON(query)
 	}
 	ctx := context.Background()
 	q := "%" + query + "%"
+
+	ids := make([]string, 0)
+
 	rows, err := db.pool.Query(ctx, `
 		SELECT DISTINCT steam_id FROM users
-		WHERE steam_id ILIKE $1 OR discord_id ILIKE $1 OR username ILIKE $1 OR display_name ILIKE $1
+		WHERE (steam_id ILIKE $1 OR discord_id ILIKE $1 OR username ILIKE $1 OR display_name ILIKE $1)
 		AND steam_id IS NOT NULL AND steam_id != ''
 	`, q)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []string
-	for rows.Next() {
-		var sid string
-		if err := rows.Scan(&sid); err == nil && sid != "" {
-			ids = append(ids, sid)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var sid string
+			if err := rows.Scan(&sid); err == nil && sid != "" {
+				ids = append(ids, sid)
+			}
 		}
 	}
+
+	if len(ids) == 0 {
+		rows2, err2 := db.pool.Query(ctx, `
+			SELECT DISTINCT steam_id FROM staff_list
+			WHERE (steam_id ILIKE $1 OR name ILIKE $1 OR nickname ILIKE $1 OR discord_id ILIKE $1 OR discord_name ILIKE $1)
+			AND steam_id IS NOT NULL AND steam_id != ''
+		`, q)
+		if err2 == nil {
+			defer rows2.Close()
+			for rows2.Next() {
+				var sid string
+				if err := rows2.Scan(&sid); err == nil && sid != "" {
+					ids = append(ids, sid)
+				}
+			}
+		}
+	}
+
 	return ids, nil
 }
 
@@ -235,7 +276,215 @@ func (db *DB) GetKVStore(key string) ([]byte, error) {
 	return value, nil
 }
 
-// JSON fallback methods
+func (db *DB) SetKVStore(key string, value []byte) error {
+	if db.pool == nil {
+		return fmt.Errorf("no database available")
+	}
+	ctx := context.Background()
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO kv_store (key, value, updated_at) VALUES ($1, $2, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+	`, key, value)
+	return err
+}
+
+func (db *DB) UpsertStaffList(staff []map[string]interface{}) error {
+	if db.pool == nil {
+		return nil
+	}
+	ctx := context.Background()
+
+	for _, s := range staff {
+		sid := ""
+		if v, ok := s["steamid"].(string); ok {
+			sid = v
+		} else if v, ok := s["steam_id"].(string); ok {
+			sid = v
+		}
+		if sid == "" {
+			continue
+		}
+		name := getString(s, "name")
+		nickname := getString(s, "nickname")
+		discordID := fmt.Sprintf("%v", s["discord_id"])
+		discordName := getString(s, "discord_nickname")
+		groupName := getString(s, "group_name")
+		groupDisplayName := getString(s, "group_display_name")
+
+		_, err := db.pool.Exec(ctx, `
+			INSERT INTO staff_list (steam_id, name, nickname, discord_id, discord_name, group_name, group_display_name, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+			ON CONFLICT (steam_id) DO UPDATE SET
+				name = EXCLUDED.name, nickname = EXCLUDED.nickname,
+				discord_id = EXCLUDED.discord_id, discord_name = EXCLUDED.discord_name,
+				group_name = EXCLUDED.group_name, group_display_name = EXCLUDED.group_display_name,
+				updated_at = NOW()
+		`, sid, name, nickname, discordID, discordName, groupName, groupDisplayName)
+		if err != nil {
+			log.Printf("⚠️ UpsertStaffList error for %s: %v", sid, err)
+		}
+	}
+	return nil
+}
+
+func (db *DB) GetStaffListFromDB() ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT steam_id, name, nickname, discord_id, discord_name, group_name, group_display_name FROM staff_list
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []map[string]interface{}
+	for rows.Next() {
+		var steamID, name, nickname, discordID, discordName, groupName, groupDisplayName string
+		if err := rows.Scan(&steamID, &name, &nickname, &discordID, &discordName, &groupName, &groupDisplayName); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"steamid":             steamID,
+			"name":                name,
+			"nickname":            nickname,
+			"discord_id":          discordID,
+			"discord_nickname":    discordName,
+			"group_name":          groupName,
+			"group_display_name":  groupDisplayName,
+		})
+	}
+	return result, nil
+}
+
+func (db *DB) GetProfilesBatch(steamIDs []string) (map[string]ProfileCache, error) {
+	if db.pool == nil || len(steamIDs) == 0 {
+		return nil, nil
+	}
+	ctx := context.Background()
+	result := make(map[string]ProfileCache)
+
+	rows, err := db.pool.Query(ctx, `
+		SELECT steam_id, name, avatar FROM profile_cache
+		WHERE steam_id = ANY($1) AND fetched_at > NOW() - INTERVAL '24 hours'
+	`, steamIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var pc ProfileCache
+		if err := rows.Scan(&pc.SteamID, &pc.Name, &pc.Avatar); err == nil {
+			result[pc.SteamID] = pc
+		}
+	}
+	return result, nil
+}
+
+func (db *DB) UpsertProfileCache(steamID, name, avatar string) {
+	if db.pool == nil {
+		return
+	}
+	ctx := context.Background()
+	_, _ = db.pool.Exec(ctx, `
+		INSERT INTO profile_cache (steam_id, name, avatar, fetched_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (steam_id) DO UPDATE SET name = EXCLUDED.name, avatar = EXCLUDED.avatar, fetched_at = NOW()
+	`, steamID, name, avatar)
+}
+
+type ProfileCache struct {
+	SteamID string
+	Name    string
+	Avatar  string
+}
+
+func (db *DB) UpsertWhitelist(steamID, name, addedBy string) error {
+	if db.pool == nil {
+		return fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO whitelist (steam_id, name, added_by, added_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (steam_id) DO UPDATE SET name = EXCLUDED.name, added_by = EXCLUDED.added_by, added_at = NOW()
+	`, steamID, name, addedBy)
+	return err
+}
+
+func (db *DB) DeleteWhitelist(steamID string) error {
+	if db.pool == nil {
+		return fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	_, err := db.pool.Exec(ctx, `DELETE FROM whitelist WHERE steam_id = $1`, steamID)
+	return err
+}
+
+func (db *DB) GetWhitelist() ([]WhitelistEntryDB, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT steam_id, name, added_by, added_at::text FROM whitelist ORDER BY added_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []WhitelistEntryDB
+	for rows.Next() {
+		var e WhitelistEntryDB
+		if err := rows.Scan(&e.SteamID, &e.Name, &e.AddedBy, &e.Date); err == nil {
+			entries = append(entries, e)
+		}
+	}
+	return entries, nil
+}
+
+type WhitelistEntryDB struct {
+	SteamID string
+	Name    string
+	AddedBy string
+	Date    string
+}
+
+func getString(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func (db *DB) searchSteamIDsJSON(query string) ([]string, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	path := db.staffFile
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil
+	}
+
+	var data map[string]staffDBEntry
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, nil
+	}
+
+	var ids []string
+	q := query
+	for sid, entry := range data {
+		if entry.Name == q || entry.DiscordID == q || entry.DiscordName == q || sid == q {
+			ids = append(ids, sid)
+		}
+	}
+	return ids, nil
+}
 
 type staffDBEntry struct {
 	Name        string `json:"name"`

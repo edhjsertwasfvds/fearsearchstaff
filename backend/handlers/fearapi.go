@@ -4,46 +4,176 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"fearstaff-api/config"
+	"fearstaff-api/database"
 )
 
 type FearAPIHandler struct {
 	cfg    *config.Config
+	db     *database.DB
 	client *http.Client
+	nameMu sync.RWMutex
+	nameMap map[string]ProfileInfo
 }
 
-func NewFearAPIHandler(cfg *config.Config) *FearAPIHandler {
+type ProfileInfo struct {
+	Name   string `json:"name"`
+	Avatar string `json:"avatar"`
+}
+
+func NewFearAPIHandler(cfg *config.Config, db *database.DB) *FearAPIHandler {
 	return &FearAPIHandler{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: 15 * time.Second,
-		},
+		cfg:    cfg,
+		db:     db,
+		client: &http.Client{Timeout: 15 * time.Second},
+		nameMap: make(map[string]ProfileInfo),
 	}
+}
+
+func (h *FearAPIHandler) fearHeaders() http.Header {
+	headers := http.Header{}
+	headers.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	headers.Set("Accept", "application/json, text/plain, */*")
+	headers.Set("Referer", "https://fearproject.ru/")
+	headers.Set("Origin", "https://fearproject.ru")
+	if h.cfg.FearCookie != "" {
+		headers.Set("Cookie", h.cfg.FearCookie)
+	}
+	return headers
+}
+
+func (h *FearAPIHandler) fearGet(url string) map[string]interface{} {
+	req, _ := http.NewRequest("GET", url, nil)
+	for k, v := range h.fearHeaders() {
+		req.Header[k] = v
+	}
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil
+	}
+	return result
+}
+
+func (h *FearAPIHandler) fearGetRaw(url string) []byte {
+	req, _ := http.NewRequest("GET", url, nil)
+	for k, v := range h.fearHeaders() {
+		req.Header[k] = v
+	}
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return body
 }
 
 func (h *FearAPIHandler) proxyGet(w http.ResponseWriter, r *http.Request, apiURL string) {
 	req, _ := http.NewRequest("GET", apiURL, nil)
-	req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Referer", "https://fearproject.ru")
-	req.Header.Set("Origin", "https://fearproject.ru")
-
+	for k, v := range h.fearHeaders() {
+		req.Header[k] = v
+	}
 	resp, err := h.client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"fear api error: %s"}`, err.Error()), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
 	body, _ := io.ReadAll(resp.Body)
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
+}
+
+func (h *FearAPIHandler) resolveNames(steamIDs []string) {
+	if len(steamIDs) == 0 {
+		return
+	}
+
+	var toFetch []string
+	h.nameMu.RLock()
+	for _, sid := range steamIDs {
+		if _, ok := h.nameMap[sid]; !ok {
+			toFetch = append(toFetch, sid)
+		}
+	}
+	h.nameMu.RUnlock()
+
+	if len(toFetch) == 0 {
+		return
+	}
+
+	if h.db != nil {
+		cached, _ := h.db.GetProfilesBatch(toFetch)
+		var stillMissing []string
+		for _, sid := range toFetch {
+			if c, ok := cached[sid]; ok {
+				h.nameMu.Lock()
+				h.nameMap[sid] = ProfileInfo{Name: c.Name, Avatar: c.Avatar}
+				h.nameMu.Unlock()
+			} else {
+				stillMissing = append(stillMissing, sid)
+			}
+		}
+		toFetch = stillMissing
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 20)
+
+	for _, sid := range toFetch {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(s string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			data := h.fearGet(fmt.Sprintf("https://api.fearproject.ru/profile/%s", s))
+			if data == nil {
+				return
+			}
+			name := ""
+			if n, ok := data["name"].(string); ok {
+				name = n
+			}
+			avatar := ""
+			if a, ok := data["avatar_full"].(string); ok {
+				avatar = a
+			} else if a, ok := data["avatar"].(string); ok {
+				avatar = a
+			}
+			mu.Lock()
+			h.nameMap[s] = ProfileInfo{Name: name, Avatar: avatar}
+			mu.Unlock()
+			if h.db != nil {
+				h.db.UpsertProfileCache(s, name, avatar)
+			}
+		}(sid)
+	}
+	wg.Wait()
+}
+
+func (h *FearAPIHandler) GetName(steamID string) ProfileInfo {
+	h.nameMu.RLock()
+	defer h.nameMu.RUnlock()
+	if p, ok := h.nameMap[steamID]; ok {
+		return p
+	}
+	return ProfileInfo{}
 }
 
 func (h *FearAPIHandler) GetServers(w http.ResponseWriter, r *http.Request) {
@@ -125,24 +255,14 @@ func (h *FearAPIHandler) GetPunishmentsByAdmin(w http.ResponseWriter, r *http.Re
 		page := 1
 		for page <= 50 {
 			apiURL := fmt.Sprintf("https://api.fearproject.ru/punishments/search?q=%s&page=%d&limit=20&type=%d", adminSteamID, page, ptype)
-			req, _ := http.NewRequest("GET", apiURL, nil)
-			req.Header.Set("User-Agent", "Mozilla/5.0")
-			req.Header.Set("Accept", "application/json")
-			req.Header.Set("Referer", "https://fearproject.ru")
-			req.Header.Set("Origin", "https://fearproject.ru")
-
-			resp, err := h.client.Do(req)
-			if err != nil {
+			body := h.fearGetRaw(apiURL)
+			if body == nil {
 				break
 			}
-			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-
 			var data punishResp
 			if err := json.Unmarshal(body, &data); err != nil {
 				break
 			}
-
 			for _, p := range data.Punishments {
 				if strings.TrimSpace(p.AdminSteam) == strings.TrimSpace(adminSteamID) {
 					allPunishments = append(allPunishments, map[string]interface{}{
@@ -161,7 +281,6 @@ func (h *FearAPIHandler) GetPunishmentsByAdmin(w http.ResponseWriter, r *http.Re
 					})
 				}
 			}
-
 			if len(data.Punishments) < 20 {
 				break
 			}
@@ -171,9 +290,9 @@ func (h *FearAPIHandler) GetPunishmentsByAdmin(w http.ResponseWriter, r *http.Re
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
-		"punishments":  allPunishments,
-		"total":        len(allPunishments),
+		"success":     true,
+		"punishments": allPunishments,
+		"total":       len(allPunishments),
 	})
 }
 
@@ -197,7 +316,73 @@ func (h *FearAPIHandler) GetAllPunishments(w http.ResponseWriter, r *http.Reques
 		apiURL += "&q=" + search
 	}
 
-	h.proxyGet(w, r, apiURL)
+	body := h.fearGetRaw(apiURL)
+	if body == nil {
+		http.Error(w, `{"error":"fear api error"}`, http.StatusBadGateway)
+		return
+	}
+
+	type rawPunishment struct {
+		ID           int64  `json:"id"`
+		SteamID      string `json:"steamid"`
+		AdminSteamID string `json:"admin_steamid"`
+		AdminName    string `json:"admin_name"`
+		Name         string `json:"name"`
+		Reason       string `json:"reason"`
+		Type         int    `json:"type"`
+		Status       int    `json:"status"`
+		Duration     int    `json:"duration"`
+		Created      int64  `json:"created"`
+	}
+	type rawResp struct {
+		Punishments []rawPunishment `json:"punishments"`
+		Total       int             `json:"total"`
+	}
+
+	var resp rawResp
+	if err := json.Unmarshal(body, &resp); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(body)
+		return
+	}
+
+	steamIDsToResolve := make([]string, 0)
+	for _, p := range resp.Punishments {
+		if p.Name == "" && p.SteamID != "" {
+			steamIDsToResolve = append(steamIDsToResolve, p.SteamID)
+		}
+		if p.AdminName == "" && p.AdminSteamID != "" {
+			steamIDsToResolve = append(steamIDsToResolve, p.AdminSteamID)
+		}
+	}
+
+	if len(steamIDsToResolve) > 0 {
+		unique := make([]string, 0)
+		seen := make(map[string]bool)
+		for _, sid := range steamIDsToResolve {
+			if !seen[sid] {
+				seen[sid] = true
+				unique = append(unique, sid)
+			}
+		}
+		h.resolveNames(unique)
+	}
+
+	for i := range resp.Punishments {
+		if resp.Punishments[i].Name == "" {
+			if p := h.GetName(resp.Punishments[i].SteamID); p.Name != "" {
+				resp.Punishments[i].Name = p.Name
+			}
+		}
+		if resp.Punishments[i].AdminName == "" {
+			if p := h.GetName(resp.Punishments[i].AdminSteamID); p.Name != "" {
+				resp.Punishments[i].AdminName = p.Name
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (h *FearAPIHandler) CheckBan(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +419,6 @@ func (h *FearAPIHandler) GetYoomaBans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-
 	body, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(body)
@@ -248,19 +432,16 @@ func (h *FearAPIHandler) GetSteamSummary(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	steamID := parts[len(parts)-1]
-
 	apiURL := fmt.Sprintf("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=9EA60BC3158081747D77604EB9819F19&steamids=%s", steamID)
 	req, _ := http.NewRequest("GET", apiURL, nil)
 	req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
 	req.Header.Set("Accept", "application/json")
-
 	resp, err := h.client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"steam api error: %s"}`, err.Error()), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
 	body, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(body)
@@ -274,19 +455,16 @@ func (h *FearAPIHandler) GetSteamBans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	steamID := parts[len(parts)-1]
-
 	apiURL := fmt.Sprintf("https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=9EA60BC3158081747D77604EB9819F19&steamids=%s", steamID)
 	req, _ := http.NewRequest("GET", apiURL, nil)
 	req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
 	req.Header.Set("Accept", "application/json")
-
 	resp, err := h.client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"steam api error: %s"}`, err.Error()), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
 	body, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(body)
@@ -300,19 +478,16 @@ func (h *FearAPIHandler) GetSteamFriends(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	steamID := parts[len(parts)-1]
-
 	apiURL := fmt.Sprintf("https://api.steampowered.com/ISteamUser/GetFriendList/v1/?key=9EA60BC3158081747D77604EB9819F19&steamid=%s&relationship=friend", steamID)
 	req, _ := http.NewRequest("GET", apiURL, nil)
 	req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
 	req.Header.Set("Accept", "application/json")
-
 	resp, err := h.client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"steam api error: %s"}`, err.Error()), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
 	body, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(body)
@@ -326,19 +501,16 @@ func (h *FearAPIHandler) GetSteamLevel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	steamID := parts[len(parts)-1]
-
 	apiURL := fmt.Sprintf("https://api.steampowered.com/IPlayer/GetSteamLevel/v1/?key=9EA60BC3158081747D77604EB9819F19&steamid=%s", steamID)
 	req, _ := http.NewRequest("GET", apiURL, nil)
 	req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
 	req.Header.Set("Accept", "application/json")
-
 	resp, err := h.client.Do(req)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"steam api error: %s"}`, err.Error()), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
 	body, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(body)
@@ -354,19 +526,13 @@ func (h *FearAPIHandler) GetStaffStats(w http.ResponseWriter, r *http.Request) {
 	type punishment struct {
 		AdminSteam  string `json:"admin_steamid"`
 		SteamID     string `json:"steamid"`
-		Reason      string `json:"reason"`
 		Type        int    `json:"type"`
 		Status      int    `json:"status"`
-		Time        string `json:"time"`
-		ServerID    int    `json:"server_id"`
-		AdminName   string `json:"admin_name"`
 		Duration    int    `json:"duration"`
-		Created     int64  `json:"created"`
+		AdminName   string `json:"admin_name"`
 	}
-
 	type punishResp struct {
 		Punishments []punishment `json:"punishments"`
-		Total       int          `json:"total"`
 	}
 
 	ids := strings.Split(adminSteamIDs, ",")
@@ -379,18 +545,10 @@ func (h *FearAPIHandler) GetStaffStats(w http.ResponseWriter, r *http.Request) {
 		}
 		statsMap[sid] = map[string]interface{}{
 			"steamid":      sid,
-			"total_bans":   0,
-			"total_mutes":  0,
-			"active_bans":  0,
-			"active_mutes": 0,
-			"removed_bans": 0,
-			"removed_mutes": 0,
-			"expired_bans": 0,
-			"expired_mutes": 0,
-			"ban_perm":     0,
-			"ban_week":     0,
-			"ban_day":      0,
-			"ban_short":    0,
+			"total_bans":   0, "total_mutes": 0,
+			"active_bans":  0, "active_mutes": 0,
+			"removed_bans": 0, "removed_mutes": 0,
+			"expired_bans": 0, "expired_mutes": 0,
 			"name":         "",
 		}
 	}
@@ -402,24 +560,14 @@ func (h *FearAPIHandler) GetStaffStats(w http.ResponseWriter, r *http.Request) {
 			}
 			for page := 1; page <= 10; page++ {
 				apiURL := fmt.Sprintf("https://api.fearproject.ru/punishments?page=%d&limit=100&type=%d&status=%d", page, ptype, status)
-				req, _ := http.NewRequest("GET", apiURL, nil)
-				req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
-				req.Header.Set("Accept", "application/json")
-				req.Header.Set("Referer", "https://fearproject.ru")
-				req.Header.Set("Origin", "https://fearproject.ru")
-
-				resp, err := h.client.Do(req)
-				if err != nil {
+				body := h.fearGetRaw(apiURL)
+				if body == nil {
 					break
 				}
-				body, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
-
 				var data punishResp
 				if err := json.Unmarshal(body, &data); err != nil {
 					break
 				}
-
 				for _, p := range data.Punishments {
 					adminID := strings.TrimSpace(p.AdminSteam)
 					if _, ok := statsMap[adminID]; !ok {
@@ -433,18 +581,6 @@ func (h *FearAPIHandler) GetStaffStats(w http.ResponseWriter, r *http.Request) {
 							statsMap[adminID]["removed_bans"] = statsMap[adminID]["removed_bans"].(int) + 1
 						} else if status == 4 {
 							statsMap[adminID]["expired_bans"] = statsMap[adminID]["expired_bans"].(int) + 1
-						}
-						dur := p.Duration
-						if status == 1 {
-							if dur <= 0 || dur >= 5184000 {
-								statsMap[adminID]["ban_perm"] = statsMap[adminID]["ban_perm"].(int) + 1
-							} else if dur >= 604800 {
-								statsMap[adminID]["ban_week"] = statsMap[adminID]["ban_week"].(int) + 1
-							} else if dur >= 86400 {
-								statsMap[adminID]["ban_day"] = statsMap[adminID]["ban_day"].(int) + 1
-							} else {
-								statsMap[adminID]["ban_short"] = statsMap[adminID]["ban_short"].(int) + 1
-							}
 						}
 					} else if p.Type == 2 {
 						statsMap[adminID]["total_mutes"] = statsMap[adminID]["total_mutes"].(int) + 1
@@ -460,7 +596,6 @@ func (h *FearAPIHandler) GetStaffStats(w http.ResponseWriter, r *http.Request) {
 						statsMap[adminID]["name"] = p.AdminName
 					}
 				}
-
 				if len(data.Punishments) < 100 {
 					break
 				}
@@ -481,5 +616,79 @@ func (h *FearAPIHandler) GetStaffStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"stats":   result,
+	})
+}
+
+func (h *FearAPIHandler) GetAdmins(w http.ResponseWriter, r *http.Request) {
+	if h.cfg.FearCookie == "" {
+		http.Error(w, `{"error":"FEAR_COOKIE not configured"}`, http.StatusInternalServerError)
+		return
+	}
+
+	body := h.fearGetRaw("https://api.fearproject.ru/admins/")
+	if body == nil {
+		http.Error(w, `{"error":"failed to fetch admins from fearproject"}`, http.StatusBadGateway)
+		return
+	}
+
+	var admins []map[string]interface{}
+	if err := json.Unmarshal(body, &admins); err != nil {
+		var resp map[string]interface{}
+		if err2 := json.Unmarshal(body, &resp); err2 == nil {
+			if arr, ok := resp["admins"].([]interface{}); ok {
+				admins = make([]map[string]interface{}, 0, len(arr))
+				for _, a := range arr {
+					if m, ok := a.(map[string]interface{}); ok {
+						admins = append(admins, m)
+					}
+				}
+			}
+		}
+	}
+
+	if h.db != nil && len(admins) > 0 {
+		if err := h.db.UpsertStaffList(admins); err != nil {
+			log.Printf("⚠️ Failed to save staff list to DB: %v", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"admins":  admins,
+		"total":   len(admins),
+	})
+}
+
+func (h *FearAPIHandler) GetResolveNames(w http.ResponseWriter, r *http.Request) {
+	idsParam := r.URL.Query().Get("ids")
+	if idsParam == "" {
+		http.Error(w, `{"error":"ids required"}`, http.StatusBadRequest)
+		return
+	}
+	ids := strings.Split(idsParam, ",")
+	unique := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	h.resolveNames(unique)
+	result := make(map[string]ProfileInfo)
+	h.nameMu.RLock()
+	for _, id := range unique {
+		if p, ok := h.nameMap[id]; ok {
+			result[id] = p
+		}
+	}
+	h.nameMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"profiles": result,
 	})
 }
