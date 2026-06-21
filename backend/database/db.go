@@ -102,6 +102,26 @@ func (db *DB) migrate() error {
 			group_display_name VARCHAR(128),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS vdf_checks (
+			id SERIAL PRIMARY KEY,
+			check_id INTEGER UNIQUE,
+			filename VARCHAR(255),
+			timestamp TIMESTAMPTZ DEFAULT NOW(),
+			attachment_url TEXT,
+			message_url TEXT,
+			results JSONB DEFAULT '[]',
+			steamids TEXT[] DEFAULT '{}',
+			banned_count INTEGER DEFAULT 0,
+			last_recheck TIMESTAMPTZ
+		)`,
+		`CREATE TABLE IF NOT EXISTS app_logs (
+			id SERIAL PRIMARY KEY,
+			service VARCHAR(64),
+			level VARCHAR(16),
+			message TEXT,
+			data JSONB,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 
 	for _, q := range queries {
@@ -589,4 +609,117 @@ func (db *DB) GetStaffFromFile() (map[string]models.StaffMember, error) {
 func getcwd() string {
 	dir, _ := filepath.Abs(".")
 	return dir
+}
+
+func (db *DB) SaveVDFCheck(checkID int, filename, attachmentURL, messageURL string, results []byte, steamids []string, bannedCount int) error {
+	if db.pool == nil {
+		return db.saveVDFCheckKV(checkID, filename, attachmentURL, messageURL, results, steamids, bannedCount)
+	}
+	ctx := context.Background()
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO vdf_checks (check_id, filename, timestamp, attachment_url, message_url, results, steamids, banned_count)
+		VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7)
+		ON CONFLICT (check_id) DO UPDATE SET
+			filename = EXCLUDED.filename,
+			attachment_url = EXCLUDED.attachment_url,
+			message_url = EXCLUDED.message_url,
+			results = EXCLUDED.results,
+			steamids = EXCLUDED.steamids,
+			banned_count = EXCLUDED.banned_count,
+			last_recheck = NOW()
+	`, checkID, filename, attachmentURL, messageURL, results, steamids, bannedCount)
+	return err
+}
+
+func (db *DB) GetVDFChecks() ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT check_id, filename, timestamp, attachment_url, message_url, results, steamids, banned_count, COALESCE(last_recheck::text, '')
+		FROM vdf_checks ORDER BY check_id DESC LIMIT 100
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var checks []map[string]interface{}
+	for rows.Next() {
+		var checkID int
+		var filename, attachmentURL, messageURL, lastRecheck string
+		var timestamp interface{}
+		var results []byte
+		var steamids []string
+		var bannedCount int
+		if err := rows.Scan(&checkID, &filename, &timestamp, &attachmentURL, &messageURL, &results, &steamids, &bannedCount, &lastRecheck); err != nil {
+			continue
+		}
+		checks = append(checks, map[string]interface{}{
+			"check_id":       checkID,
+			"filename":       filename,
+			"timestamp":      fmt.Sprintf("%v", timestamp),
+			"attachment_url": attachmentURL,
+			"message_url":    messageURL,
+			"results":        json.RawMessage(results),
+			"steamids":       steamids,
+			"banned_count":   bannedCount,
+			"last_recheck":   lastRecheck,
+		})
+	}
+	return checks, nil
+}
+
+func (db *DB) saveVDFCheckKV(checkID int, filename, attachmentURL, messageURL string, results []byte, steamids []string, bannedCount int) error {
+	data, err := db.GetKVStore("vdf_checks.json")
+	if err != nil {
+		data = []byte(`{"checks":{}}`)
+	}
+	var store map[string]interface{}
+	if err := json.Unmarshal(data, &store); err != nil {
+		store = map[string]interface{}{"checks": map[string]interface{}{}}
+	}
+	checks, _ := store["checks"].(map[string]interface{})
+	checkKey := fmt.Sprintf("%d", checkID)
+	checks[checkKey] = map[string]interface{}{
+		"filename":       filename,
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		"attachment_url": attachmentURL,
+		"message_url":    messageURL,
+		"results":        json.RawMessage(results),
+		"steamids":       steamids,
+		"banned_count":   bannedCount,
+	}
+	store["checks"] = checks
+	raw, _ := json.Marshal(store)
+	return db.SetKVStore("vdf_checks.json", raw)
+}
+
+func (db *DB) LogService(service, level, message string, data interface{}) {
+	if db.pool == nil {
+		return
+	}
+	ctx := context.Background()
+	var dataJSON []byte
+	if data != nil {
+		dataJSON, _ = json.Marshal(data)
+	}
+	_, _ = db.pool.Exec(ctx, `
+		INSERT INTO app_logs (service, level, message, data, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+	`, service, level, message, dataJSON)
+}
+
+func (db *DB) GetNextCheckID() (int, error) {
+	if db.pool == nil {
+		return 1, nil
+	}
+	ctx := context.Background()
+	var maxID int
+	err := db.pool.QueryRow(ctx, `SELECT COALESCE(MAX(check_id), 0) FROM vdf_checks`).Scan(&maxID)
+	if err != nil {
+		return 1, nil
+	}
+	return maxID + 1, nil
 }
