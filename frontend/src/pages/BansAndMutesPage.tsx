@@ -89,7 +89,7 @@ export default function BansAndMutesPage() {
 
   useEffect(() => {
     fetchPunishments();
-    const interval = setInterval(fetchPunishments, 60000);
+    const interval = setInterval(fetchPunishments, 30000);
     return () => clearInterval(interval);
   }, [fetchPunishments]);
 

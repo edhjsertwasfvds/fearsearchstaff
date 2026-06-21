@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Trophy, Users } from 'lucide-react';
+import { Trophy, Users, Wifi } from 'lucide-react';
 import { api } from '../services/api';
 import type { FearAPIServer } from '../types';
 
@@ -30,20 +30,21 @@ function extractPlayers(data: any): LeaderboardPlayer[] {
 export default function LeaderboardPage() {
   const [players, setPlayers] = useState<LeaderboardPlayer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [onlineOnly, setOnlineOnly] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
-  useEffect(() => {
-    const fetchLeaderboard = async () => {
-      try {
-        const res = await api.getLeaderboard();
-        let parsed = extractPlayers(res);
-        if (parsed.length === 0 && res?.success === false) {
-          throw new Error('API returned success:false');
-        }
-        if (parsed.length === 0) {
-          throw new Error('No players in leaderboard response');
-        }
-        setPlayers(parsed.slice(0, 1000));
-      } catch {
+  const fetchLeaderboard = useCallback(async () => {
+    try {
+      const res = await api.getLeaderboard();
+      let parsed = extractPlayers(res);
+      if (parsed.length === 0 && res?.success === false) {
+        throw new Error('API returned success:false');
+      }
+      if (parsed.length === 0) {
+        throw new Error('No players in leaderboard response');
+      }
+
+      if (onlineOnly) {
         try {
           const serversRes = await api.getServers();
           const servers: FearAPIServer[] = Array.isArray(serversRes)
@@ -53,38 +54,80 @@ export default function LeaderboardPage() {
               : Array.isArray(serversRes?.servers)
                 ? serversRes.servers
                 : [];
-          const playerMap = new Map<string, LeaderboardPlayer>();
+          const onlineSet = new Set<string>();
           for (const s of servers) {
             const livePlayers = s.live_data?.players || [];
             for (const p of livePlayers) {
-              const existing = playerMap.get(p.steam_id);
-              if (existing) {
-                existing.kills += p.kills || 0;
-                existing.deaths += p.deaths || 0;
-                existing.kd = existing.deaths > 0 ? existing.kills / existing.deaths : existing.kills;
-              } else {
-                playerMap.set(p.steam_id, {
-                  steam_id: p.steam_id,
-                  name: p.name || p.nickname || 'Unknown',
-                  kills: p.kills || 0,
-                  deaths: p.deaths || 0,
-                  kd: p.kd || (p.deaths > 0 ? p.kills / p.deaths : p.kills),
-                  avatar: p.avatar,
-                });
+              onlineSet.add(p.steam_id);
+            }
+          }
+
+          const onlineTop = parsed.filter(p => onlineSet.has(p.steam_id));
+
+          for (const p of onlineTop) {
+            for (const s of servers) {
+              const lp = (s.live_data?.players || []).find((lp: any) => lp.steam_id === p.steam_id);
+              if (lp?.avatar && !p.avatar) {
+                p.avatar = lp.avatar;
               }
             }
           }
-          const sorted = Array.from(playerMap.values()).sort((a, b) => b.kills - a.kills).slice(0, 1000);
-          setPlayers(sorted);
+
+          setPlayers(onlineTop.slice(0, 1000));
         } catch {
-          setPlayers([]);
+          setPlayers(parsed.slice(0, 1000));
         }
-      } finally {
-        setLoading(false);
+      } else {
+        setPlayers(parsed.slice(0, 1000));
       }
-    };
+      setLastRefresh(new Date());
+    } catch {
+      try {
+        const serversRes = await api.getServers();
+        const servers: FearAPIServer[] = Array.isArray(serversRes)
+          ? serversRes
+          : Array.isArray(serversRes?.data)
+            ? serversRes.data
+            : Array.isArray(serversRes?.servers)
+              ? serversRes.servers
+              : [];
+        const playerMap = new Map<string, LeaderboardPlayer>();
+        for (const s of servers) {
+          const livePlayers = s.live_data?.players || [];
+          for (const p of livePlayers) {
+            const existing = playerMap.get(p.steam_id);
+            if (existing) {
+              existing.kills += p.kills || 0;
+              existing.deaths += p.deaths || 0;
+              existing.kd = existing.deaths > 0 ? existing.kills / existing.deaths : existing.kills;
+            } else {
+              playerMap.set(p.steam_id, {
+                steam_id: p.steam_id,
+                name: p.name || p.nickname || 'Unknown',
+                kills: p.kills || 0,
+                deaths: p.deaths || 0,
+                kd: p.kd || (p.deaths > 0 ? p.kills / p.deaths : p.kills),
+                avatar: p.avatar,
+              });
+            }
+          }
+        }
+        const sorted = Array.from(playerMap.values()).sort((a, b) => b.kills - a.kills).slice(0, 1000);
+        setPlayers(sorted);
+      } catch {
+        setPlayers([]);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [onlineOnly]);
+
+  useEffect(() => {
+    setLoading(true);
     fetchLeaderboard();
-  }, []);
+    const interval = setInterval(fetchLeaderboard, 30000);
+    return () => clearInterval(interval);
+  }, [fetchLeaderboard]);
 
   const getMedal = (i: number) => {
     if (i === 0) return '🥇';
@@ -106,10 +149,25 @@ export default function LeaderboardPage() {
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mb-6"
+        className="mb-6 flex items-center justify-between"
       >
-        <h1 className="text-2xl font-bold text-white">Топ-1000</h1>
-        <p className="text-sm text-gray-500 mt-1">Лучшие игроки по убийствам</p>
+        <div>
+          <h1 className="text-2xl font-bold text-white">Топ-1000</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {onlineOnly ? 'Онлайн игроки из топ-1000' : 'Лучшие игроки по убийствам'} • Обновлено: {lastRefresh.toLocaleTimeString('ru-RU')}
+          </p>
+        </div>
+        <button
+          onClick={() => setOnlineOnly(v => !v)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            onlineOnly
+              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+              : 'bg-[#141822] text-gray-400 border border-white/5 hover:text-white'
+          }`}
+        >
+          <Wifi className="w-4 h-4" />
+          {onlineOnly ? 'Только онлайн' : 'Все из топа'}
+        </button>
       </motion.div>
 
       <motion.div
@@ -164,7 +222,7 @@ export default function LeaderboardPage() {
         {players.length === 0 && (
           <div className="text-center py-12">
             <Trophy className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-            <p className="text-gray-500">Нет данных</p>
+            <p className="text-gray-500">{onlineOnly ? 'Нет онлайн игроков из топа' : 'Нет данных'}</p>
           </div>
         )}
       </motion.div>

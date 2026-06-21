@@ -291,6 +291,32 @@ func (h *FearAPIHandler) GetPunishmentsByAdmin(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	idsToResolve := []string{adminSteamID}
+	for _, p := range allPunishments {
+		if pm, ok := p.(map[string]interface{}); ok {
+			if sid, ok := pm["steamid"].(string); ok && sid != "" {
+				idsToResolve = append(idsToResolve, sid)
+			}
+		}
+	}
+	h.resolveNames(idsToResolve)
+	for _, p := range allPunishments {
+		if pm, ok := p.(map[string]interface{}); ok {
+			if sid, ok := pm["steamid"].(string); ok {
+				if info := h.GetName(sid); info.Name != "" {
+					pm["name"] = info.Name
+				}
+				pm["avatar"] = h.GetName(sid).Avatar
+			}
+			if asid, ok := pm["admin_steamid"].(string); ok {
+				if info := h.GetName(asid); info.Name != "" {
+					pm["admin_name"] = info.Name
+				}
+				pm["admin_avatar"] = h.GetName(asid).Avatar
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":     true,
@@ -613,6 +639,25 @@ func (h *FearAPIHandler) GetStaffStats(w http.ResponseWriter, r *http.Request) {
 		v["expired_total"] = v["expired_bans"].(int) + v["expired_mutes"].(int)
 		v["removed_total"] = v["removed_bans"].(int) + v["removed_mutes"].(int)
 		result = append(result, v)
+	}
+
+	steamIDsToResolve := make([]string, 0)
+	for _, sid := range ids {
+		sid = strings.TrimSpace(sid)
+		if sid != "" {
+			steamIDsToResolve = append(steamIDsToResolve, sid)
+		}
+	}
+	if len(steamIDsToResolve) > 0 {
+		h.resolveNames(steamIDsToResolve)
+	}
+
+	for _, v := range result {
+		sid, _ := v["steamid"].(string)
+		if p := h.GetName(sid); p.Name != "" {
+			v["name"] = p.Name
+		}
+		v["avatar"] = h.GetName(sid).Avatar
 	}
 
 	w.Header().Set("Content-Type", "application/json")

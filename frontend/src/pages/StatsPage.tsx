@@ -6,6 +6,7 @@ import { api } from '../services/api';
 interface StaffStats {
   steamid: string;
   name?: string;
+  avatar?: string;
   total_bans: number;
   total_mutes: number;
   active_bans: number;
@@ -67,7 +68,7 @@ export default function StatsPage() {
 
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 60000);
+    const interval = setInterval(fetchStats, 30000);
     return () => clearInterval(interval);
   }, [fetchStats]);
 
@@ -145,13 +146,24 @@ export default function StatsPage() {
                 <span className="text-sm text-gray-600">{i + 1}</span>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-white truncate">{s.name || admin?.name || admin?.nickname || s.steamid}</p>
-                    <a href={`https://fearproject.ru/profile/${s.steamid}`} target="_blank" rel="noopener noreferrer"
-                      className="text-gray-600 hover:text-blue-400 transition-colors flex-shrink-0">
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    {s.avatar ? (
+                      <img src={s.avatar} alt="" className="w-7 h-7 rounded-lg object-cover ring-1 ring-white/10 flex-shrink-0" />
+                    ) : (
+                      <div className="w-7 h-7 bg-[#1e2333] rounded-lg flex items-center justify-center flex-shrink-0">
+                        <span className="text-[10px] font-bold text-gray-500">{(s.name || admin?.name || admin?.nickname || '?').charAt(0).toUpperCase()}</span>
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-white truncate">{s.name || admin?.name || admin?.nickname || s.steamid}</p>
+                        <a href={`https://fearproject.ru/profile/${s.steamid}`} target="_blank" rel="noopener noreferrer"
+                          className="text-gray-600 hover:text-blue-400 transition-colors flex-shrink-0">
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                      <p className="text-[11px] text-gray-500 font-mono truncate">{s.steamid}</p>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-gray-500 font-mono truncate">{s.steamid}</p>
                 </div>
                 <span className="text-[11px] text-blue-400 truncate">{admin?.group_display_name || admin?.group_name || '—'}</span>
                 <span className="text-sm text-red-400 font-medium">{s.total_bans || 0}</span>

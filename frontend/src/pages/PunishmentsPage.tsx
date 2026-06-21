@@ -1,30 +1,27 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Search, AlertTriangle, ShieldX, Clock } from 'lucide-react';
+import { Search, AlertTriangle, ShieldX, Clock, Check, Scissors } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
-import type { Punishment } from '../types';
 
 export default function PunishmentsPage() {
   const { user } = useAuth();
   const [steamId, setSteamId] = useState('');
   const [loading, setLoading] = useState(false);
-  const [punishments, setPunishments] = useState<Punishment[]>([]);
-  const [total, setTotal] = useState(0);
+  const [punishments, setPunishments] = useState<any[]>([]);
   const [searched, setSearched] = useState(false);
 
-  const handleSearch = async () => {
-    const id = steamId.trim();
-    if (!id) return;
+  const handleSearch = async (id?: string) => {
+    const sid = (id || steamId).trim();
+    if (!sid) return;
     setLoading(true);
     setSearched(true);
+    setSteamId(sid);
     try {
-      const res = await api.getPunishmentsByAdmin(id);
+      const res = await api.getPunishmentsByAdmin(sid);
       setPunishments(res.punishments || []);
-      setTotal(res.total || 0);
     } catch {
       setPunishments([]);
-      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -32,23 +29,21 @@ export default function PunishmentsPage() {
 
   const handleShowOwn = async () => {
     if (!user?.steam_id) return;
-    setLoading(true);
-    setSearched(true);
     setSteamId(user.steam_id);
-    try {
-      const res = await api.getPunishmentsByAdmin(user.steam_id);
-      setPunishments(res.punishments || []);
-      setTotal(res.total || 0);
-    } catch {
-      setPunishments([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
+    await handleSearch(user.steam_id);
   };
 
-  const bansCount = punishments.filter(p => p.type === 0).length;
-  const mutesCount = punishments.filter(p => p.type === 1).length;
+  const bansActive = punishments.filter(p => p.type === 0 && p.status === 1).length;
+  const bansRemoved = punishments.filter(p => p.type === 0 && p.status === 2).length;
+  const bansExpired = punishments.filter(p => p.type === 0 && p.status === 4).length;
+  const bansTotal = punishments.filter(p => p.type === 0).length;
+
+  const mutesActive = punishments.filter(p => p.type === 1 && p.status === 1).length;
+  const mutesRemoved = punishments.filter(p => p.type === 1 && p.status === 2).length;
+  const mutesExpired = punishments.filter(p => p.type === 1 && p.status === 4).length;
+  const mutesTotal = punishments.filter(p => p.type === 1).length;
+
+  const effective = (bansTotal - bansRemoved) + (mutesTotal - mutesRemoved);
 
   const getServerName = (id: number) => {
     const servers: Record<number, string> = {
@@ -58,6 +53,27 @@ export default function PunishmentsPage() {
     return servers[id] || `Server #${id}`;
   };
 
+  const getStatusLabel = (status: number) => {
+    switch (status) {
+      case 1: return { label: 'Активен', color: 'text-red-400 bg-red-400/10' };
+      case 2: return { label: 'Снят', color: 'text-emerald-400 bg-emerald-400/10' };
+      case 4: return { label: 'Истёк', color: 'text-gray-400 bg-gray-400/10' };
+      default: return { label: '—', color: 'text-gray-400 bg-gray-400/10' };
+    }
+  };
+
+  const durStr = (dur?: number) => {
+    if (dur == null) return '—';
+    if (dur <= 0) return '∞';
+    if (dur >= 2592000) return `${Math.floor(dur / 2592000)}мес`;
+    if (dur >= 86400) return `${Math.floor(dur / 86400)}д`;
+    if (dur >= 3600) return `${Math.floor(dur / 3600)}ч`;
+    if (dur >= 60) return `${Math.floor(dur / 60)}м`;
+    return `${dur}с`;
+  };
+
+  const sorted = [...punishments].sort((a, b) => (b.created || 0) - (a.created || 0));
+
   return (
     <div className="max-w-[1100px] mx-auto">
       <motion.div
@@ -66,10 +82,9 @@ export default function PunishmentsPage() {
         className="mb-6"
       >
         <h1 className="text-2xl font-bold text-white">Наказания</h1>
-        <p className="text-sm text-gray-500 mt-1">Статистика наказаний администратора</p>
+        <p className="text-sm text-gray-500 mt-1">Наказания выданные стаффом</p>
       </motion.div>
 
-      {/* Search */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -81,7 +96,7 @@ export default function PunishmentsPage() {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input
               type="text"
-              placeholder="SteamID администратора"
+              placeholder="SteamID стаффа (напр. 76561198751025670)"
               value={steamId}
               onChange={(e) => setSteamId(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -91,7 +106,7 @@ export default function PunishmentsPage() {
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={handleSearch}
+            onClick={() => handleSearch()}
             disabled={loading || !steamId.trim()}
             className="px-6 py-3 bg-[#4f7cff] hover:bg-[#3d6aff] text-white font-medium rounded-xl transition-all disabled:opacity-50"
           >
@@ -110,72 +125,105 @@ export default function PunishmentsPage() {
           )}
         </div>
 
-        {/* Stats */}
-        <div className="flex items-center gap-4 mt-4">
-          <div className="flex items-center gap-2 px-4 py-2 bg-[#1a1f2e] rounded-lg border border-white/5">
-            <ShieldX className="w-4 h-4 text-red-400" />
-            <span className="text-sm text-gray-400">{bansCount}</span>
-            <span className="text-sm text-red-400 font-medium">банов</span>
+        {punishments.length > 0 && (
+          <div className="grid grid-cols-5 gap-3 mt-4">
+            <div className="flex items-center gap-2 px-3 py-2 bg-red-500/5 border border-red-500/10 rounded-lg">
+              <ShieldX className="w-4 h-4 text-red-400" />
+              <div>
+                <p className="text-lg font-bold text-white">{bansTotal}</p>
+                <p className="text-[10px] text-gray-500">Банов</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/5 border border-amber-500/10 rounded-lg">
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <div>
+                <p className="text-lg font-bold text-white">{mutesTotal}</p>
+                <p className="text-[10px] text-gray-500">Мутов</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/5 border border-blue-500/10 rounded-lg">
+              <Check className="w-4 h-4 text-blue-400" />
+              <div>
+                <p className="text-lg font-bold text-white">{effective}</p>
+                <p className="text-[10px] text-gray-500">Всего (без снятых)</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/5 border border-emerald-500/10 rounded-lg">
+              <Scissors className="w-4 h-4 text-emerald-400" />
+              <div>
+                <p className="text-lg font-bold text-white">{bansRemoved + mutesRemoved}</p>
+                <p className="text-[10px] text-gray-500">Снято</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-2 bg-purple-500/5 border border-purple-500/10 rounded-lg">
+              <Clock className="w-4 h-4 text-purple-400" />
+              <div>
+                <p className="text-lg font-bold text-white">{bansExpired + mutesExpired}</p>
+                <p className="text-[10px] text-gray-500">Истекло</p>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2 px-4 py-2 bg-[#1a1f2e] rounded-lg border border-white/5">
-            <AlertTriangle className="w-4 h-4 text-amber-400" />
-            <span className="text-sm text-gray-400">{mutesCount}</span>
-            <span className="text-sm text-amber-400 font-medium">мутов</span>
-          </div>
-          <div className="flex items-center gap-2 px-4 py-2 bg-[#1a1f2e] rounded-lg border border-white/5">
-            <span className="text-sm text-gray-400">{total}</span>
-            <span className="text-sm text-gray-400">всего</span>
-          </div>
-        </div>
+        )}
       </motion.div>
 
-      {/* Table */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
         className="bg-[#12151e] rounded-xl border border-white/5 overflow-hidden"
       >
-        <div className="grid grid-cols-[40px_1fr_1fr_1fr_120px_100px_120px] gap-4 px-5 py-3 border-b border-white/5 text-xs text-gray-500 uppercase tracking-wider font-semibold">
-          <span>№</span>
-          <span>Игрок</span>
-          <span>SteamID</span>
-          <span>Причина</span>
-          <span>Сервер</span>
-          <span>Тип</span>
-          <span>Дата</span>
+        <div className="grid grid-cols-[40px_1fr_80px_1fr_80px_80px_80px_100px] gap-3 px-4 py-3 border-b border-white/5 text-xs text-gray-500 uppercase tracking-wider font-semibold">
+          <span>№</span><span>Игрок</span><span>SteamID</span><span>Причина</span><span>Тип</span><span>Статус</span><span>Длит.</span><span>Дата</span>
         </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-6 h-6 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
           </div>
-        ) : punishments.length > 0 ? (
-          <div className="divide-y divide-white/[0.03] max-h-[calc(100vh-380px)] overflow-y-auto">
-            {punishments.map((p) => (
-              <div key={p.id} className="grid grid-cols-[40px_1fr_1fr_1fr_120px_100px_120px] gap-4 px-5 py-3 hover:bg-[#161a25] transition-colors items-center">
-                <span className="text-sm text-gray-600">{p.id}</span>
-                <span className="text-sm text-white truncate">{p.steamid}</span>
-                <span className="text-sm text-gray-400 font-mono truncate">{p.steamid}</span>
-                <span className="text-sm text-gray-300 truncate">{p.reason || '—'}</span>
-                <span className="text-xs text-gray-400">{getServerName(p.server_id)}</span>
-                <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                  p.type === 0 ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
-                }`}>
-                  {p.type === 0 ? 'BAN' : 'MUTE'}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {p.time ? new Date(p.time).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-                </span>
-              </div>
-            ))}
+        ) : sorted.length > 0 ? (
+          <div className="divide-y divide-white/[0.03] max-h-[calc(100vh-420px)] overflow-y-auto">
+            {sorted.map((p, i) => {
+              const statusInfo = getStatusLabel(p.status);
+              return (
+                <div key={p.id} className="grid grid-cols-[40px_1fr_80px_1fr_80px_80px_80px_100px] gap-3 px-4 py-3 hover:bg-[#161a25] transition-colors items-center">
+                  <span className="text-sm text-gray-600">{i + 1}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {p.avatar ? (
+                      <img src={p.avatar} alt="" className="w-7 h-7 rounded-lg object-cover ring-1 ring-white/10 flex-shrink-0" />
+                    ) : (
+                      <div className="w-7 h-7 bg-[#1e2333] rounded-lg flex items-center justify-center flex-shrink-0">
+                        <span className="text-[10px] font-bold text-gray-500">{(p.name || '?').charAt(0).toUpperCase()}</span>
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-sm text-white truncate">{p.name || p.steamid}</p>
+                      {p.name && p.name !== p.steamid && (
+                        <a href={`https://fearproject.ru/profile/${p.steamid}`} target="_blank" rel="noopener noreferrer"
+                          className="text-[10px] text-gray-500 hover:text-blue-400 font-mono truncate block">{p.steamid}</a>
+                      )}
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-400 font-mono truncate">{p.steamid}</span>
+                  <span className="text-sm text-gray-300 truncate">{p.reason || '—'}</span>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded ${p.type === 0 ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                    {p.type === 0 ? 'BAN' : 'MUTE'}
+                  </span>
+                  <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${statusInfo.color}`}>{statusInfo.label}</span>
+                  <span className="text-xs text-gray-400"><Clock className="w-3 h-3 inline mr-1" />{durStr(p.duration)}</span>
+                  <span className="text-xs text-gray-500">
+                    {p.time ? new Date(p.time).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+                      : p.created ? new Date(p.created * 1000).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-12">
             {searched ? (
               <p className="text-gray-500">Наказания не найдены</p>
             ) : (
-              <p className="text-gray-500">Введите SteamID администратора или нажмите «Мои наказания»</p>
+              <p className="text-gray-500">Введите SteamID стаффа</p>
             )}
           </div>
         )}

@@ -28,6 +28,7 @@ interface AccountCheckResult {
 interface VDFResult {
   steam_id: string;
   name: string;
+  avatar?: string;
   fear_banned: boolean;
   fear_reason?: string;
   fear_unban_time?: string;
@@ -186,9 +187,13 @@ export default function CheckerPage() {
                 <motion.div key={r.steam_id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
                   className={`bg-[#12151e] rounded-xl border p-4 ${banned ? 'border-red-500/20' : 'border-white/5'}`}>
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-[#1e2333] rounded-xl flex items-center justify-center">
-                      {banned ? <ShieldX className="w-5 h-5 text-red-400" /> : <Check className="w-5 h-5 text-green-400" />}
-                    </div>
+                    {r.avatar ? (
+                      <img src={r.avatar} alt={r.name} className="w-12 h-12 rounded-xl object-cover ring-1 ring-white/10" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    ) : (
+                      <div className="w-12 h-12 bg-[#1e2333] rounded-xl flex items-center justify-center">
+                        {banned ? <ShieldX className="w-5 h-5 text-red-400" /> : <Check className="w-5 h-5 text-green-400" />}
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate">{r.name || r.steam_id}</p>
                       <p className="text-xs text-gray-500 font-mono">{r.steam_id}</p>

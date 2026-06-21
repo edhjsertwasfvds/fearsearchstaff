@@ -327,12 +327,27 @@ func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 	}
 
 	type fearProfileResp struct {
-		Name    string `json:"name"`
+		Name        string `json:"name"`
+		AvatarFull  string `json:"avatar_full"`
+		Avatar      string `json:"avatar"`
 		BanInfo struct {
 			IsBanned       bool        `json:"isBanned"`
 			UnbanTimestamp interface{} `json:"unbanTimestamp"`
 			Reason         interface{} `json:"reason"`
 		} `json:"banInfo"`
+	}
+
+	type steamSummaryResp struct {
+		Response struct {
+			Players []struct {
+				SteamId      string `json:"steamid"`
+				Personaname  string `json:"personaname"`
+				Avatarfull   string `json:"avatarfull"`
+				Avatarmedium string `json:"avatarmedium"`
+				Profileurl   string `json:"profileurl"`
+				Personastate int    `json:"personastate"`
+			} `json:"players"`
+		} `json:"response"`
 	}
 
 	type steamBansResp struct {
@@ -356,11 +371,12 @@ func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 	}
 
 	var profile fearProfileResp
+	var steamSummary steamSummaryResp
 	var steamBans steamBansResp
 	var yooma yoomaResp
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 
 	go func() {
 		defer wg.Done()
@@ -370,6 +386,11 @@ func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 			if n, ok := data["name"].(string); ok {
 				profile.Name = n
 			}
+			if a, ok := data["avatar_full"].(string); ok {
+				profile.AvatarFull = a
+			} else if a, ok := data["avatar"].(string); ok {
+				profile.Avatar = a
+			}
 			if bi, ok := data["banInfo"].(map[string]interface{}); ok {
 				if ib, ok := bi["isBanned"].(bool); ok {
 					profile.BanInfo.IsBanned = ib
@@ -378,6 +399,24 @@ func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 				profile.BanInfo.Reason = bi["reason"]
 			}
 		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		steamKey := h.cfg.SteamAPIKey
+		if steamKey == "" {
+			steamKey = "9EA60BC3158081747D77604EB9819F19"
+		}
+		url := fmt.Sprintf("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=%s&steamids=%s", steamKey, steamID)
+		client := &http.Client{Timeout: 10 * time.Second}
+		req, _ := http.NewRequest("GET", url, nil)
+		req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
+		resp, err := client.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		json.NewDecoder(resp.Body).Decode(&steamSummary)
 	}()
 
 	go func() {
@@ -416,6 +455,22 @@ func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 	wg.Wait()
 
 	result.Name = profile.Name
+
+	if profile.AvatarFull != "" {
+		result.Avatar = profile.AvatarFull
+	} else if profile.Avatar != "" {
+		result.Avatar = profile.Avatar
+	} else if len(steamSummary.Response.Players) > 0 {
+		sp := steamSummary.Response.Players[0]
+		if sp.Avatarfull != "" {
+			result.Avatar = sp.Avatarfull
+		} else if sp.Avatarmedium != "" {
+			result.Avatar = sp.Avatarmedium
+		}
+		if result.Name == "" && sp.Personaname != "" {
+			result.Name = sp.Personaname
+		}
+	}
 
 	if profile.BanInfo.IsBanned {
 		result.FearBanned = true
