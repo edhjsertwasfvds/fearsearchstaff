@@ -3,6 +3,12 @@ import { motion } from 'framer-motion';
 import { AlertTriangle, Server, ShieldX, ExternalLink, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
 
+interface BannedDetail {
+  steam_id: string;
+  name: string;
+  bans: string;
+}
+
 interface Evader {
   steam_id: string;
   name: string;
@@ -12,6 +18,7 @@ interface Evader {
   banned_steam_id: string;
   ban_reason: string;
   banned_count: number;
+  banned_details: BannedDetail[];
   server_name: string;
   server_ip: string;
   server_port: string;
@@ -92,16 +99,6 @@ export default function EvadersPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
-                  <ShieldX className="w-3.5 h-3.5" />
-                  <span>{evader.ban_reason}</span>
-                  {evader.banned_count > 1 && (
-                    <span className="px-1.5 py-0.5 bg-red-500/20 rounded text-[10px] font-bold ml-1">
-                      ×{evader.banned_count}
-                    </span>
-                  )}
-                </div>
-
                 <div className="flex items-center gap-2 text-xs text-gray-400">
                   <Server className="w-3.5 h-3.5" />
                   <span>
@@ -130,6 +127,32 @@ export default function EvadersPage() {
                   </a>
                 </div>
               </div>
+
+              {evader.banned_details && evader.banned_details.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-white/5 space-y-2">
+                  <p className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">
+                    Забаненные аккаунты ({evader.banned_details.length}):
+                  </p>
+                  {evader.banned_details.map((bd, di) => (
+                    <div key={di} className="flex items-center gap-2 px-3 py-2 bg-[#0c0e14] rounded-lg border border-white/5">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400 font-mono">{bd.steam_id}</span>
+                          <a
+                            href={`https://fearproject.ru/profile/${bd.steam_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gray-600 hover:text-blue-400 transition-colors"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                        <p className="text-xs text-red-400 mt-0.5">{bd.bans}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </motion.div>
           ))}
         </div>

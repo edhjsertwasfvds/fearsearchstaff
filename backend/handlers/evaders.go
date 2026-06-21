@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,18 +16,25 @@ import (
 // Evader — игрок, у которого в одном из .vdf-файлов есть забаненный аккаунт,
 // а сам он сейчас играет с другого аккаунта из того же файла.
 type Evader struct {
-	SteamID       string `json:"steam_id"`
-	Name          string `json:"name"`
-	Avatar        string `json:"avatar,omitempty"`
-	CheckID       int    `json:"check_id"`
-	Filename      string `json:"filename"`
-	BannedSteamID string `json:"banned_steam_id"`
-	BanReason     string `json:"ban_reason"`
-	BannedCount   int    `json:"banned_count"`
-	ServerName    string `json:"server_name"`
-	ServerIP      string `json:"server_ip"`
-	ServerPort    string `json:"server_port"`
-	DetectedAt    string `json:"detected_at"`
+	SteamID       string         `json:"steam_id"`
+	Name          string         `json:"name"`
+	Avatar        string         `json:"avatar,omitempty"`
+	CheckID       int            `json:"check_id"`
+	Filename      string         `json:"filename"`
+	BannedSteamID string         `json:"banned_steam_id"`
+	BanReason     string         `json:"ban_reason"`
+	BannedCount   int            `json:"banned_count"`
+	BannedDetails []BannedDetail `json:"banned_details"`
+	ServerName    string         `json:"server_name"`
+	ServerIP      string         `json:"server_ip"`
+	ServerPort    string         `json:"server_port"`
+	DetectedAt    string         `json:"detected_at"`
+}
+
+type BannedDetail struct {
+	SteamID string `json:"steam_id"`
+	Name    string `json:"name"`
+	Bans    string `json:"bans"`
 }
 
 type vdfStore struct {
@@ -185,6 +193,55 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 			banned := bannedAccounts[0]
 			banReason := detectBanReason(banned)
 
+			details := make([]BannedDetail, 0, len(bannedAccounts))
+			for _, ba := range bannedAccounts {
+				parts := []string{}
+				if ba.FearBanned {
+					reason := ba.FearReason
+					if reason == "" {
+						reason = "Обход"
+					}
+					parts = append(parts, "Fear: "+reason)
+				}
+				if ba.VacBanned {
+					parts = append(parts, "VAC")
+				}
+				if ba.GameBans > 0 {
+					parts = append(parts, fmt.Sprintf("Game Ban (×%d)", ba.GameBans))
+				}
+				if ba.YoomaData != nil {
+					if found, _ := ba.YoomaData["found"].(bool); found {
+						if punishments, ok := ba.YoomaData["punishments"].([]interface{}); ok && len(punishments) > 0 {
+							for _, p := range punishments {
+								pm, ok := p.(map[string]interface{})
+								if !ok {
+									continue
+								}
+								if status, _ := pm["status"].(string); status == "active" {
+									reason, _ := pm["reason"].(string)
+									if reason == "" {
+										reason = "Haron Anti-Cheats"
+									}
+									parts = append(parts, "Yooma.su: "+reason)
+									break
+								}
+							}
+						} else {
+							parts = append(parts, "Yooma.su: Ban")
+						}
+					}
+				}
+				banStr := "Banned"
+				if len(parts) > 0 {
+					banStr = strings.Join(parts, " | ")
+				}
+				details = append(details, BannedDetail{
+					SteamID: ba.SteamID,
+					Name:    ba.Nickname,
+					Bans:    banStr,
+				})
+			}
+
 			evaders = append(evaders, Evader{
 				SteamID:       r.SteamID,
 				Name:          player.name,
@@ -193,6 +250,7 @@ func (h *EvadersHandler) computeEvaders() ([]Evader, error) {
 				BannedSteamID: banned.SteamID,
 				BanReason:     banReason,
 				BannedCount:   len(bannedAccounts),
+				BannedDetails: details,
 				ServerName:    getString(player.server, "site_name"),
 				ServerIP:      getString(player.server, "ip"),
 				ServerPort:    fmt.Sprintf("%v", player.server["port"]),
