@@ -97,20 +97,20 @@ func Load() *Config {
 				"dashboard.admin", "reports.view",
 			},
 		},
-		"MODER": {
-			Level:    3,
-			RoleName: "Модератор",
-			RoleID:   getEnv("DISCORD_ROLE_MODER", "1503512364404703392"),
-			Permissions: []string{
-				"staff.view", "punishments.manage", "punishments.view", "reports.view",
-			},
-		},
 		"STMODER": {
-			Level:    2,
+			Level:    3,
 			RoleName: "Ст. Модератор",
 			RoleID:   getEnv("DISCORD_ROLE_STMODER", "1503512343202758666"),
 			Permissions: []string{
 				"staff.view", "punishments.view", "reports.view",
+			},
+		},
+		"MODER": {
+			Level:    2,
+			RoleName: "Модератор",
+			RoleID:   getEnv("DISCORD_ROLE_MODER", "1503512364404703392"),
+			Permissions: []string{
+				"staff.view", "punishments.manage", "punishments.view", "reports.view",
 			},
 		},
 		"MLMODER": {

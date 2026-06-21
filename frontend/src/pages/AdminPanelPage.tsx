@@ -10,8 +10,8 @@ const OWNER_DISCORD_ID = '1500235583367417866';
 const LEVEL_OPTIONS = [
   { value: -1, label: 'Заблокирован', color: 'text-red-400' },
   { value: 1, label: 'LVL 1 — Админ', color: 'text-emerald-400' },
-  { value: 2, label: 'LVL 2 — Ст.Модер', color: 'text-purple-400' },
-  { value: 3, label: 'LVL 3 — Модератор', color: 'text-blue-400' },
+  { value: 2, label: 'LVL 2 — Модератор', color: 'text-purple-400' },
+  { value: 3, label: 'LVL 3 — Ст.Модер', color: 'text-blue-400' },
   { value: 4, label: 'LVL 4 — Ст.Админ', color: 'text-orange-400' },
   { value: 5, label: 'LVL 5 — Владелец', color: 'text-yellow-400' },
 ];
@@ -19,8 +19,8 @@ const LEVEL_OPTIONS = [
 const GROUP_MAP: Record<number, string> = {
   '-1': 'UNDEFINED',
   '1': 'ADMIN',
-  '2': 'STMODER',
-  '3': 'MODER',
+  '2': 'MODER',
+  '3': 'STMODER',
   '4': 'STADMIN',
   '5': 'OWNER',
 };

@@ -136,9 +136,32 @@ func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 		Status:  "not_found",
 	}
 
-	profile := h.fetchProfile(steamID)
+	var profile map[string]interface{}
+	var vacStatus map[string]interface{}
+	var fearStatus map[string]interface{}
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		profile = h.fetchProfile(steamID)
+	}()
+	go func() {
+		defer wg.Done()
+		vacStatus = h.checkVAC(steamID)
+	}()
+	go func() {
+		defer wg.Done()
+		fearStatus = h.checkFearBan(steamID)
+	}()
+
+	wg.Wait()
+
 	if profile != nil {
-		result.Name = profile["name"].(string)
+		if n, ok := profile["name"].(string); ok {
+			result.Name = n
+		}
 		if avatar, ok := profile["avatar"].(string); ok {
 			result.Avatar = avatar
 		}
@@ -150,9 +173,8 @@ func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 		}
 	}
 
-	vacStatus := h.checkVAC(steamID)
 	if vacStatus != nil {
-		if vacStatus["banned"].(bool) {
+		if banned, ok := vacStatus["banned"].(bool); ok && banned {
 			result.Status = "banned"
 			result.BanType = "VAC"
 			if days, ok := vacStatus["days_ago"].(int); ok {
@@ -165,11 +187,12 @@ func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 		}
 	}
 
-	fearStatus := h.checkFearBan(steamID)
 	if fearStatus != nil {
-		if fearStatus["banned"].(bool) {
+		if banned, ok := fearStatus["banned"].(bool); ok && banned {
 			result.Status = "banned"
-			result.BanType = fearStatus["type"].(string)
+			if t, ok := fearStatus["type"].(string); ok {
+				result.BanType = t
+			}
 			if reason, ok := fearStatus["reason"].(string); ok {
 				result.BanReason = reason
 			}

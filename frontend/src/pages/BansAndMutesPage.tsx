@@ -9,7 +9,7 @@ type Tab = 'bans' | 'mutes';
 const STAFF_LEVELS = new Set([1, 2, 3, 4, 5]);
 
 const ROLE_LEVELS: Record<string, number> = {
-  MLMODER: 2, DOSTUP: 2, STMODER: 2, MODER: 3, STADMIN: 4, GLADMIN: 4,
+  MLMODER: 2, DOSTUP: 2, MODER: 2, STMODER: 3, STADMIN: 4, GLADMIN: 4,
   CURATOR: 5, OWNER: 5, OWNER_ALT: 5, ADMIN: 1, ADMIN_PLUS: 1,
 };
 

@@ -53,17 +53,18 @@ export default function PlayersPage() {
           const batch = steamIds.slice(0, 100);
           const fetches = batch.map(async (sid) => {
             try {
-              const [summaryRes, banRes] = await Promise.allSettled([
+              const [summaryRes, banRes, yoomaRes] = await Promise.allSettled([
                 api.getSteamSummary(sid),
                 api.getSteamBans(sid),
+                api.getYoomaBans(sid),
               ]);
               const player = summaryRes.status === 'fulfilled' ? summaryRes.value?.response?.players?.[0] : null;
               const ban = banRes.status === 'fulfilled' ? banRes.value?.players?.[0] : null;
+              const yoomaData = yoomaRes.status === 'fulfilled' ? yoomaRes.value : null;
               const flags: string[] = [];
               if (ban?.vacBanned) flags.push('VAC');
               if (ban?.numberofGameBans > 0) flags.push('GAME BAN');
-              if (ban?.communityBanned) flags.push('COMMUNITY');
-              if (ban?.economyBan && ban.economyBan !== 'none') flags.push('TRADE');
+              if (yoomaData?.found) flags.push('YOOMA');
               if (player) {
                 const ageDays = player.timecreated ? Math.floor((Date.now() / 1000 - player.timecreated) / 86400) : null;
                 if (ageDays !== null && ageDays < 365) flags.push(`NEW (${ageDays}д)`);
@@ -269,7 +270,9 @@ export default function PlayersPage() {
                       <div className="flex gap-1">
                         {player.flags.map((f, fi) => (
                           <span key={fi} className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                            f.includes('VAC') || f.includes('BAN') ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                            f.includes('VAC') || f.includes('BAN') ? 'bg-red-500/20 text-red-400' :
+                            f.includes('YOOMA') ? 'bg-orange-500/20 text-orange-400' :
+                            'bg-amber-500/20 text-amber-400'
                           }`}>
                             {f}
                           </span>
