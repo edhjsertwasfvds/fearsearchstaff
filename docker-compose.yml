@@ -30,6 +30,8 @@ services:
       DATABASE_URL: postgresql://fearstaff:fearstaff_dev@postgres:5432/fearstaff
       FRONTEND_URL: http://localhost:5173
       PORT: 8080
+      STEAM_API_KEY: ${STEAM_API_KEY:-}
+      FEAR_COOKIE: ${FEAR_COOKIE:-}
     depends_on:
       postgres:
         condition: service_healthy

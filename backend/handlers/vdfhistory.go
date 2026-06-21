@@ -109,6 +109,12 @@ func NewVDFHistoryHandler(cfg *config.Config, db *database.DB) *VDFHistoryHandle
 }
 
 func (h *VDFHistoryHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": []interface{}{}})
+		return
+	}
+
 	h.cache.mu.RLock()
 	if time.Since(h.cache.timestamp) < 30*time.Second && h.cache.data != nil {
 		h.writeJSON(w, h.cache.data)

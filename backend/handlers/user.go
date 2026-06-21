@@ -54,14 +54,16 @@ func (h *UserHandler) GetStaff(w http.ResponseWriter, r *http.Request) {
 		staffList, err := h.db.GetStaffListFromDB()
 		if err == nil && len(staffList) > 0 {
 			for _, s := range staffList {
-				rp, _ := h.cfg.RoleMap[s["group_name"].(string)]
+				gn, _ := s["group_name"].(string)
+				rp, _ := h.cfg.RoleMap[gn]
+				gdn, _ := s["group_display_name"].(string)
 				result = append(result, map[string]interface{}{
 					"steam_id":     s["steamid"],
 					"name":         s["name"],
 					"discord_id":   s["discord_id"],
 					"discord_name": s["discord_nickname"],
-					"role":         s["group_display_name"],
-					"group_name":   s["group_name"],
+					"role":         gdn,
+					"group_name":   gn,
 					"level":        rp.Level,
 				})
 			}

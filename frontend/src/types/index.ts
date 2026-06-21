@@ -189,7 +189,15 @@ export interface AccountResult {
   ban_reason?: string;
   ban_days_ago?: number;
   ban_date?: string;
-  fear_status?: string;
-  kd?: number;
-  playtime?: number;
+  fear_banned: boolean;
+  fear_reason?: string;
+  fear_unban_time?: string;
+  vac_banned: boolean;
+  vac_days_ago?: number;
+  game_bans?: number;
+  yooma_banned: boolean;
+  yooma_reason?: string;
+  fear_url?: string;
+  steam_url?: string;
+  yooma_url?: string;
 }

@@ -22,6 +22,12 @@ func NewAdminHandler(cfg *config.Config, db *database.DB) *AdminHandler {
 func (h *AdminHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
 	claims, _ := r.Context().Value(UserContextKey).(*JWTClaims)
 
+	if h.db == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": []interface{}{}})
+		return
+	}
+
 	users, err := h.db.GetAllUsers()
 	if err != nil {
 		http.Error(w, `{"error":"failed to fetch users"}`, http.StatusInternalServerError)
@@ -103,6 +109,11 @@ func (h *AdminHandler) UpdateUserLevel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.db == nil {
+		http.Error(w, `{"error":"database not available"}`, http.StatusInternalServerError)
+		return
+	}
+
 	if req.DiscordID == OWNER_DISCORD_ID {
 		http.Error(w, `{"error":"Нельзя изменить владельца"}`, http.StatusForbidden)
 		return
@@ -181,6 +192,11 @@ func (h *AdminHandler) BlockUser(w http.ResponseWriter, r *http.Request) {
 
 	if req.DiscordID == OWNER_DISCORD_ID {
 		http.Error(w, `{"error":"Нельзя заблокировать владельца"}`, http.StatusForbidden)
+		return
+	}
+
+	if h.db == nil {
+		http.Error(w, `{"error":"database not available"}`, http.StatusInternalServerError)
 		return
 	}
 

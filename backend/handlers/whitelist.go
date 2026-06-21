@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"fearstaff-api/config"
 	"fearstaff-api/database"
@@ -45,9 +44,9 @@ func (h *WhitelistHandler) GetEntries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := make([]entryJSON, 0, len(entries))
-	for i, e := range entries {
+	for _, e := range entries {
 		result = append(result, entryJSON{
-			ID:      strconv.Itoa(i + 1),
+			ID:      e.SteamID,
 			SteamID: e.SteamID,
 			Name:    e.Name,
 			AddedBy: e.AddedBy,

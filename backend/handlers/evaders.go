@@ -121,6 +121,12 @@ func NewEvadersHandler(cfg *config.Config, db *database.DB) *EvadersHandler {
 }
 
 func (h *EvadersHandler) GetEvaders(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": []interface{}{}})
+		return
+	}
+
 	h.cache.mu.RLock()
 	if time.Since(h.cache.timestamp) < 2*time.Minute && h.cache.data != nil {
 		h.writeJSON(w, h.cache.data)
@@ -315,6 +321,14 @@ func (h *EvadersHandler) fetchServers() ([]map[string]interface{}, error) {
 	req, _ := http.NewRequest("GET", "https://api.fearproject.ru/servers", nil)
 	req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Referer", "https://fearproject.ru/")
+	req.Header.Set("Origin", "https://fearproject.ru")
+	if h.cfg.FearCookie != "" {
+		cleaned := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(h.cfg.FearCookie, "\n", ""), "\r", ""))
+		if cleaned != "" {
+			req.Header.Set("Cookie", cleaned)
+		}
+	}
 
 	resp, err := h.client.Do(req)
 	if err != nil {

@@ -43,7 +43,10 @@ func (h *FearAPIHandler) fearHeaders() http.Header {
 	headers.Set("Referer", "https://fearproject.ru/")
 	headers.Set("Origin", "https://fearproject.ru")
 	if h.cfg.FearCookie != "" {
-		headers.Set("Cookie", h.cfg.FearCookie)
+		cleaned := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(h.cfg.FearCookie, "\n", ""), "\r", ""))
+		if cleaned != "" {
+			headers.Set("Cookie", cleaned)
+		}
 	}
 	return headers
 }

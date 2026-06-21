@@ -21,6 +21,7 @@ type Config struct {
 	FrontendURL          string
 	Port                 string
 	FearCookie           string
+	SteamAPIKey          string
 
 	RoleMap map[string]RolePermission
 }
@@ -48,6 +49,7 @@ func Load() *Config {
 		FrontendURL:          getEnv("FRONTEND_URL", "http://localhost:5173"),
 		Port:                 getEnv("PORT", "8080"),
 		FearCookie:           getEnv("FEAR_COOKIE", ""),
+		SteamAPIKey:          getEnv("STEAM_API_KEY", ""),
 	}
 
 	cfg.RoleMap = map[string]RolePermission{
@@ -160,7 +162,7 @@ func Load() *Config {
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
-		return v
+		return strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(v, "\n", ""), "\r", ""))
 	}
 	return fallback
 }

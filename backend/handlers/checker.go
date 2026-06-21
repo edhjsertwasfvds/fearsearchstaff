@@ -24,17 +24,25 @@ func NewCheckHandler(cfg *config.Config, db *database.DB) *CheckHandler {
 }
 
 type AccountResult struct {
-	SteamID    string   `json:"steam_id"`
-	Name       string   `json:"name"`
-	Avatar     string   `json:"avatar"`
-	Status     string   `json:"status"`
-	BanType    string   `json:"ban_type,omitempty"`
-	BanReason  string   `json:"ban_reason,omitempty"`
-	BanDaysAgo *int     `json:"ban_days_ago,omitempty"`
-	BanDate    string   `json:"ban_date,omitempty"`
-	FearStatus string   `json:"fear_status,omitempty"`
-	KD         *float64 `json:"kd,omitempty"`
-	Playtime   *int     `json:"playtime,omitempty"`
+	SteamID        string  `json:"steam_id"`
+	Name           string  `json:"name"`
+	Avatar         string  `json:"avatar"`
+	Status         string  `json:"status"`
+	BanType        string  `json:"ban_type,omitempty"`
+	BanReason      string  `json:"ban_reason,omitempty"`
+	BanDaysAgo     *int    `json:"ban_days_ago,omitempty"`
+	BanDate        string  `json:"ban_date,omitempty"`
+	FearBanned     bool    `json:"fear_banned"`
+	FearReason     string  `json:"fear_reason,omitempty"`
+	FearUnbanTime  string  `json:"fear_unban_time,omitempty"`
+	VACBanned      bool    `json:"vac_banned"`
+	VACDaysAgo     int     `json:"vac_days_ago,omitempty"`
+	GameBans       int     `json:"game_bans,omitempty"`
+	YoomaBanned    bool    `json:"yooma_banned"`
+	YoomaReason    string  `json:"yooma_reason,omitempty"`
+	FearURL        string  `json:"fear_url"`
+	SteamURL       string  `json:"steam_url"`
+	YoomaURL       string  `json:"yooma_url"`
 }
 
 type checkRequest struct {
@@ -68,6 +76,86 @@ func (h *CheckHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if h.db != nil {
 		found, _ := h.db.SearchSteamIDs(q)
 		steamIDs = append(steamIDs, found...)
+	}
+
+	if len(steamIDs) == 0 && h.db != nil {
+		adminsRaw, _ := h.db.GetKVStore("admins_cache.json")
+		if adminsRaw != nil {
+			var admins []map[string]interface{}
+			if json.Unmarshal(adminsRaw, &admins) == nil {
+				qLower := strings.ToLower(q)
+				for _, a := range admins {
+					name := ""
+					if v, ok := a["name"].(string); ok {
+						name = v
+					}
+					discordName := ""
+					if v, ok := a["discord_nickname"].(string); ok {
+						discordName = v
+					}
+					discordID := ""
+					if v, ok := a["discord_id"].(string); ok {
+						discordID = v
+					}
+					sid := ""
+					if v, ok := a["steamid"].(string); ok {
+						sid = v
+					}
+
+					if strings.Contains(strings.ToLower(name), qLower) || strings.Contains(strings.ToLower(discordName), qLower) || discordID == q || sid == q {
+						if sid != "" {
+							steamIDs = append(steamIDs, sid)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(steamIDs) == 0 && h.cfg.FearCookie != "" {
+		type fearAdmin struct {
+			SteamID string `json:"steamid"`
+			Name    string `json:"name"`
+			DiscID  string `json:"discord_id"`
+		}
+		client := &http.Client{Timeout: 15 * time.Second}
+		cleanedCookie := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(h.cfg.FearCookie, "\n", ""), "\r", ""))
+		fearReq, _ := http.NewRequest("GET", "https://api.fearproject.ru/admins/", nil)
+		fearReq.Header.Set("Cookie", cleanedCookie)
+		fearReq.Header.Set("Referer", "https://fearproject.ru/")
+		fearReq.Header.Set("Origin", "https://fearproject.ru")
+		fearReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+		resp, err := client.Do(fearReq)
+		if err == nil {
+			defer resp.Body.Close()
+			var raw json.RawMessage
+			if json.NewDecoder(resp.Body).Decode(&raw) == nil {
+				var adminsArr []fearAdmin
+				var adminsObj map[string]interface{}
+				if json.Unmarshal(raw, &adminsArr) == nil {
+					qLower := strings.ToLower(q)
+					for _, a := range adminsArr {
+						if strings.Contains(strings.ToLower(a.Name), qLower) || a.DiscID == q || a.SteamID == q {
+							steamIDs = append(steamIDs, a.SteamID)
+						}
+					}
+				} else if json.Unmarshal(raw, &adminsObj) == nil {
+					if arr, ok := adminsObj["admins"].([]interface{}); ok {
+						qLower := strings.ToLower(q)
+						for _, item := range arr {
+							if m, ok := item.(map[string]interface{}); ok {
+								sid, _ := m["steamid"].(string)
+								name, _ := m["name"].(string)
+								discID, _ := m["discord_id"].(string)
+								if strings.Contains(strings.ToLower(name), qLower) || discID == q || sid == q {
+									steamIDs = append(steamIDs, sid)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	seen := make(map[string]bool)
@@ -154,15 +242,38 @@ func (h *CheckHandler) CheckVDF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	re := regexp.MustCompile(`"SteamID"\s+"(7656\d{13})"`)
-	matches := re.FindAllStringSubmatch(string(body), -1)
-
 	steamIDs := make([]string, 0)
 	seen := make(map[string]bool)
-	for _, m := range matches {
+	text := string(body)
+
+	// 1. config.vdf: "SteamID" "76561..."
+	re1 := regexp.MustCompile(`"SteamID"\s+"(7656\d{13})"`)
+	for _, m := range re1.FindAllStringSubmatch(text, -1) {
 		if len(m) > 1 && !seen[m[1]] {
 			seen[m[1]] = true
 			steamIDs = append(steamIDs, m[1])
+		}
+	}
+
+	// 2. loginusers.vdf: "76561198000000000" (SteamID как ключ секции)
+	if len(steamIDs) == 0 {
+		re2 := regexp.MustCompile(`"(7656119\d{10})"`)
+		for _, m := range re2.FindAllStringSubmatch(text, -1) {
+			if len(m) > 1 && !seen[m[1]] {
+				seen[m[1]] = true
+				steamIDs = append(steamIDs, m[1])
+			}
+		}
+	}
+
+	// 3. Фоллбек: любой 7656119 + 10 цифр
+	if len(steamIDs) == 0 {
+		re3 := regexp.MustCompile(`(7656119\d{10})`)
+		for _, m := range re3.FindAllStringSubmatch(text, -1) {
+			if len(m) > 1 && !seen[m[1]] {
+				seen[m[1]] = true
+				steamIDs = append(steamIDs, m[1])
+			}
 		}
 	}
 
@@ -207,184 +318,202 @@ func (h *CheckHandler) CheckVDF(w http.ResponseWriter, r *http.Request) {
 
 func (h *CheckHandler) checkSingleAccount(steamID string) AccountResult {
 	result := AccountResult{
-		SteamID: steamID,
-		Name:    "",
-		Status:  "not_found",
+		SteamID:  steamID,
+		Name:     "",
+		Status:   "not_found",
+		FearURL:  fmt.Sprintf("https://fearproject.ru/profile/%s", steamID),
+		SteamURL: fmt.Sprintf("https://steamcommunity.com/profiles/%s", steamID),
+		YoomaURL: fmt.Sprintf("https://yooma.su/card/%s", steamID),
 	}
 
-	var profile map[string]interface{}
-	var vacStatus map[string]interface{}
-	var fearStatus map[string]interface{}
+	type fearProfileResp struct {
+		Name     string `json:"name"`
+		BanInfo  struct {
+			IsBanned       bool        `json:"isBanned"`
+			UnbanTimestamp interface{} `json:"unbanTimestamp"`
+			Reason         interface{} `json:"reason"`
+		} `json:"banInfo"`
+	}
+
+	type fearBanResp struct {
+		Banned    bool   `json:"banned"`
+		Type      string `json:"type"`
+		Reason    string `json:"reason"`
+		UnbanDate string `json:"unban_date"`
+	}
+
+	type steamBansResp struct {
+		Players []struct {
+			SteamId          string `json:"SteamId"`
+			VACBanned        bool   `json:"VACBanned"`
+			NumberOfVACBans  int    `json:"NumberOfVACBans"`
+			DaysSinceLastBan int    `json:"DaysSinceLastBan"`
+			NumberOfGameBans int    `json:"NumberOfGameBans"`
+			CommunityBanned  bool   `json:"CommunityBanned"`
+		} `json:"players"`
+	}
+
+	type yoomaResp struct {
+		Found        bool `json:"found"`
+		Punishments  []struct {
+			Status   string `json:"status"`
+			Reason   string `json:"reason"`
+			TypeName string `json:"type_name"`
+		} `json:"punishments"`
+	}
+
+	var profile fearProfileResp
+	var fearBan fearBanResp
+	var steamBans steamBansResp
+	var yooma yoomaResp
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 
 	go func() {
 		defer wg.Done()
-		profile = h.fetchProfile(steamID)
+		url := fmt.Sprintf("https://api.fearproject.ru/profile/%s", steamID)
+		data := h.httpGet(url)
+		if data != nil {
+			if n, ok := data["name"].(string); ok {
+				profile.Name = n
+			}
+			if bi, ok := data["banInfo"].(map[string]interface{}); ok {
+				if ib, ok := bi["isBanned"].(bool); ok {
+					profile.BanInfo.IsBanned = ib
+				}
+				profile.BanInfo.UnbanTimestamp = bi["unbanTimestamp"]
+				profile.BanInfo.Reason = bi["reason"]
+			}
+		}
 	}()
+
 	go func() {
 		defer wg.Done()
-		vacStatus = h.checkVAC(steamID)
+		url := fmt.Sprintf("https://api.fearproject.ru/bans/check/%s", steamID)
+		data := h.httpGet(url)
+		if data != nil {
+			if b, ok := data["banned"].(bool); ok {
+				fearBan.Banned = b
+			}
+			if t, ok := data["type"].(string); ok {
+				fearBan.Type = t
+			}
+			if r, ok := data["reason"].(string); ok {
+				fearBan.Reason = r
+			}
+			if u, ok := data["unban_date"].(string); ok {
+				fearBan.UnbanDate = u
+			}
+		}
 	}()
+
 	go func() {
 		defer wg.Done()
-		fearStatus = h.checkFearBan(steamID)
+		steamKey := h.cfg.SteamAPIKey
+		if steamKey == "" {
+			steamKey = "9EA60BC3158081747D77604EB9819F19"
+		}
+		url := fmt.Sprintf("https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=%s&steamids=%s", steamKey, steamID)
+		client := &http.Client{Timeout: 10 * time.Second}
+		req, _ := http.NewRequest("GET", url, nil)
+		req.Header.Set("User-Agent", "FearStaff-Panel/1.0")
+		resp, err := client.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		json.NewDecoder(resp.Body).Decode(&steamBans)
+	}()
+
+	go func() {
+		defer wg.Done()
+		url := fmt.Sprintf("https://yooma.su/api/public/read/punishments?punish_type=0&search=%s&page=1&mobile=1", steamID)
+		client := &http.Client{Timeout: 10 * time.Second}
+		req, _ := http.NewRequest("GET", url, nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0")
+		req.Header.Set("Referer", "https://yooma.su/")
+		resp, err := client.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		json.NewDecoder(resp.Body).Decode(&yooma)
 	}()
 
 	wg.Wait()
 
-	if profile != nil {
-		if n, ok := profile["name"].(string); ok {
-			result.Name = n
+	result.Name = profile.Name
+
+	fearBanned := profile.BanInfo.IsBanned
+	if !fearBanned {
+		fearBanned = fearBan.Banned
+	}
+
+	if fearBanned {
+		result.FearBanned = true
+		result.Status = "banned"
+		result.BanType = "FEAR"
+		if fearBan.Reason != "" {
+			result.FearReason = fearBan.Reason
+			result.BanReason = fearBan.Reason
+		} else if profile.BanInfo.Reason != nil {
+			if r, ok := profile.BanInfo.Reason.(string); ok {
+				result.FearReason = r
+				result.BanReason = r
+			}
 		}
-		if avatar, ok := profile["avatar"].(string); ok {
-			result.Avatar = avatar
-		}
-		if kd, ok := profile["kd"].(float64); ok {
-			result.KD = &kd
-		}
-		if pt, ok := profile["playtime"].(int); ok {
-			result.Playtime = &pt
+		if fearBan.UnbanDate != "" {
+			result.FearUnbanTime = fearBan.UnbanDate
+		} else if profile.BanInfo.UnbanTimestamp != nil {
+			if ts, ok := profile.BanInfo.UnbanTimestamp.(float64); ok && ts > 0 {
+				result.FearUnbanTime = fmt.Sprintf("до %s", time.Unix(int64(ts), 0).UTC().Format("02.01.2006 15:04"))
+			} else if profile.BanInfo.UnbanTimestamp == nil {
+				result.FearUnbanTime = "Навсегда"
+			}
 		}
 	}
 
-	if vacStatus != nil {
-		if banned, ok := vacStatus["banned"].(bool); ok && banned {
+	if len(steamBans.Players) > 0 {
+		p := steamBans.Players[0]
+		if p.VACBanned {
+			result.VACBanned = true
+			result.VACDaysAgo = p.DaysSinceLastBan
+			if !result.FearBanned {
+				result.Status = "banned"
+				result.BanType = "VAC"
+				result.BanDaysAgo = &p.DaysSinceLastBan
+			}
+		}
+		result.GameBans = p.NumberOfGameBans
+		if p.NumberOfGameBans > 0 && !result.FearBanned && !p.VACBanned {
 			result.Status = "banned"
-			result.BanType = "VAC"
-			if days, ok := vacStatus["days_ago"].(int); ok {
-				result.BanDaysAgo = &days
-			}
-			if date, ok := vacStatus["date"].(string); ok {
-				result.BanDate = date
-			}
-			return result
+			result.BanType = "GAME"
 		}
 	}
 
-	if fearStatus != nil {
-		if banned, ok := fearStatus["banned"].(bool); ok && banned {
-			result.Status = "banned"
-			if t, ok := fearStatus["type"].(string); ok {
-				result.BanType = t
+	if yooma.Found {
+		for _, y := range yooma.Punishments {
+			if y.Status == "active" {
+				result.YoomaBanned = true
+				result.YoomaReason = y.Reason
+				if !result.FearBanned && !result.VACBanned {
+					result.Status = "banned"
+					result.BanType = "YOOMA"
+					result.BanReason = y.Reason
+				}
+				break
 			}
-			if reason, ok := fearStatus["reason"].(string); ok {
-				result.BanReason = reason
-			}
-			return result
-		}
-		if status, ok := fearStatus["status"].(string); ok {
-			result.FearStatus = status
 		}
 	}
 
-	if profile != nil {
-		result.Status = "clean"
-		if result.FearStatus == "" {
-			result.FearStatus = "Аккаунт чист"
+	if result.Status == "not_found" {
+		if profile.Name != "" {
+			result.Status = "clean"
 		}
 	}
 
 	return result
-}
-
-func (h *CheckHandler) fetchProfile(steamID string) map[string]interface{} {
-	url := fmt.Sprintf("https://api.fearproject.ru/profile/%s", steamID)
-	data := h.httpGet(url)
-	if data == nil {
-		return nil
-	}
-
-	name := ""
-	if n, ok := data["name"].(string); ok {
-		name = n
-	}
-
-	avatar := ""
-	if a, ok := data["avatar_full"].(string); ok {
-		avatar = a
-	}
-
-	var kd *float64
-	var playtime *int
-	if stats, ok := data["stats"].(map[string]interface{}); ok {
-		if k, ok := stats["kills"].(float64); ok {
-			if d, ok := stats["deaths"].(float64); ok && d > 0 {
-				v := k / d
-				kd = &v
-			}
-		}
-		if pt, ok := stats["playtime"].(float64); ok {
-			v := int(pt)
-			playtime = &v
-		}
-	}
-
-	return map[string]interface{}{
-		"name":     name,
-		"avatar":   avatar,
-		"kd":       kd,
-		"playtime": playtime,
-	}
-}
-
-func (h *CheckHandler) checkVAC(steamID string) map[string]interface{} {
-	url := fmt.Sprintf("https://steamcommunity.com/profiles/%s/vacstatus", steamID)
-	client := &http.Client{Timeout: 8 * time.Second}
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	text := string(body)
-
-	result := map[string]interface{}{
-		"banned": false,
-	}
-
-	if strings.Contains(text, "VAC Banned") || strings.Contains(text, "Game Ban") {
-		result["banned"] = true
-	}
-
-	return result
-}
-
-func (h *CheckHandler) checkFearBan(steamID string) map[string]interface{} {
-	url := fmt.Sprintf("https://api.fearproject.ru/bans/check/%s", steamID)
-	data := h.httpGet(url)
-	if data == nil {
-		return map[string]interface{}{
-			"banned": false,
-			"status": "Аккаунт чист",
-		}
-	}
-
-	if banned, ok := data["banned"].(bool); ok && banned {
-		banType := "GAME"
-		if t, ok := data["type"].(string); ok {
-			banType = strings.ToUpper(t)
-		}
-		reason := ""
-		if r, ok := data["reason"].(string); ok {
-			reason = r
-		}
-		return map[string]interface{}{
-			"banned":  true,
-			"type":    banType,
-			"reason":  reason,
-		}
-	}
-
-	return map[string]interface{}{
-		"banned": false,
-		"status": "Аккаунт чист",
-	}
 }
 
 func (h *CheckHandler) httpGet(url string) map[string]interface{} {
@@ -392,6 +521,14 @@ func (h *CheckHandler) httpGet(url string) map[string]interface{} {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Referer", "https://fearproject.ru/")
+	req.Header.Set("Origin", "https://fearproject.ru")
+	if h.cfg.FearCookie != "" {
+		cleaned := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(h.cfg.FearCookie, "\n", ""), "\r", ""))
+		if cleaned != "" {
+			req.Header.Set("Cookie", cleaned)
+		}
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

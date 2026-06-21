@@ -85,8 +85,10 @@ func (h *AuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		LastLogin:   time.Now().UTC(),
 	}
 
-	if err := h.db.UpsertUser(user); err != nil {
-		fmt.Printf("⚠️ DB upsert error: %v\n", err)
+	if h.db != nil {
+		if err := h.db.UpsertUser(user); err != nil {
+			fmt.Printf("⚠️ DB upsert error: %v\n", err)
+		}
 	}
 
 	jwtToken, err := GenerateJWT(h.cfg, user.DiscordID, user.Username, user.StaffGroup, user.Level, user.Permissions)
@@ -95,7 +97,9 @@ func (h *AuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.db.LogLogin(user.DiscordID, r.RemoteAddr, r.UserAgent())
+	if h.db != nil {
+		h.db.LogLogin(user.DiscordID, r.RemoteAddr, r.UserAgent())
+	}
 
 	frontURL := h.cfg.FrontendURL
 	http.Redirect(w, r, fmt.Sprintf("%s/auth/callback?token=%s", frontURL, jwtToken), http.StatusFound)
@@ -108,8 +112,14 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.GetUserByDiscordID(claims.DiscordID)
-	if err != nil {
+	var user *models.User
+	if h.db != nil {
+		u, err := h.db.GetUserByDiscordID(claims.DiscordID)
+		if err == nil {
+			user = u
+		}
+	}
+	if user == nil {
 		user = &models.User{
 			DiscordID:   claims.DiscordID,
 			Username:    claims.Username,
@@ -128,7 +138,9 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		user.Permissions = permissions
 		user.GuildRoles = guildRoles
 		user.UpdatedAt = time.Now().UTC()
-		_ = h.db.UpsertUser(user)
+		if h.db != nil {
+			_ = h.db.UpsertUser(user)
+		}
 	} else {
 		if user.Level == 0 && user.StaffGroup == "" {
 			user.Level = claims.Level
