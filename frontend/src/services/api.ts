@@ -112,6 +112,33 @@ class ApiService {
     return this.request(`/api/punishments/staff-stats?steamids=${steamids.join(',')}`);
   }
 
+  async getStaffPunishments(params?: { type?: number; limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.type !== undefined) searchParams.set('type', String(params.type));
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+    const qs = searchParams.toString();
+    return this.request(`/api/staff/punishments${qs ? '?' + qs : ''}`);
+  }
+
+  async getPunishmentsByAdminPG(adminSteamId: string, type?: number, limit?: number, offset?: number) {
+    const searchParams = new URLSearchParams();
+    searchParams.set('admin_steamid', adminSteamId);
+    if (type !== undefined) searchParams.set('type', String(type));
+    if (limit) searchParams.set('limit', String(limit));
+    if (offset) searchParams.set('offset', String(offset));
+    return this.request(`/api/staff/punishments/by-admin?${searchParams.toString()}`);
+  }
+
+  async getPunishmentsTrend(days?: number) {
+    const d = days || 30;
+    return this.request(`/api/staff/punishments/trend?days=${d}`);
+  }
+
+  async getPunishmentsMonthCompare() {
+    return this.request('/api/staff/punishments/month-compare');
+  }
+
   async checkBan(steamId: string) {
     return this.request(`/api/bans/check/${steamId}`);
   }
@@ -156,6 +183,49 @@ class ApiService {
 
   async getVDFHistory() {
     return this.request('/api/vdf-history');
+  }
+
+  async requestVDFRecheck(checkId: number, steamids: string[]) {
+    return this.request('/api/vdf-history/recheck', {
+      method: 'POST',
+      body: JSON.stringify({ check_id: checkId, steamids }),
+    });
+  }
+
+  async getVDFRecheckResult(recheckId: number) {
+    return this.request(`/api/vdf-history/recheck/result?id=${recheckId}`);
+  }
+
+  async getLogs(params?: { service?: string; level?: string; search?: string; limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.service) searchParams.set('service', params.service);
+    if (params?.level) searchParams.set('level', params.level);
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+    const qs = searchParams.toString();
+    return this.request(`/api/logs${qs ? '?' + qs : ''}`);
+  }
+
+  async getLogsStats() {
+    return this.request('/api/logs/stats');
+  }
+
+  async getLoginHistory(params?: { limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+    const qs = searchParams.toString();
+    return this.request(`/api/logs/logins${qs ? '?' + qs : ''}`);
+  }
+
+  async getServerActivity(hours?: number) {
+    const h = hours || 24;
+    return this.request(`/api/server-activity?hours=${h}`);
+  }
+
+  async getServerActivitySummary() {
+    return this.request('/api/server-activity/summary');
   }
 
   async getAdminUsers() {

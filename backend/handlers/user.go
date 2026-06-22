@@ -22,7 +22,54 @@ func NewUserHandler(cfg *config.Config, db *database.DB) *UserHandler {
 func (h *UserHandler) GetStaff(w http.ResponseWriter, r *http.Request) {
 	result := make([]map[string]interface{}, 0)
 
+	// Priority 1: admins + profiles tables (synced by bot to PG)
 	if h.db != nil {
+		admins, err := h.db.GetAdminsWithProfiles()
+		if err == nil && len(admins) > 0 {
+			for _, a := range admins {
+				gn, _ := a["group_name"].(string)
+				gdn, _ := a["group_display_name"].(string)
+				rp, ok := h.cfg.RoleMap[gn]
+				level := 0
+				roleName := gdn
+				if ok {
+					level = rp.Level
+					roleName = rp.RoleName
+				}
+				name, _ := a["name"].(string)
+				if name == "" {
+					name, _ = a["steamid"].(string)
+				}
+				entry := map[string]interface{}{
+					"steam_id":          a["steamid"],
+					"name":              name,
+					"avatar":            a["avatar"],
+					"discord_id":        a["discord_id"],
+					"discord_name":      a["discord_nickname"],
+					"role":              roleName,
+					"group_name":        gn,
+					"level":             level,
+					"updated_at":        a["updated_at"],
+				}
+				if v, ok := a["kills"]; ok {
+					entry["kills"] = v
+				}
+				if v, ok := a["deaths"]; ok {
+					entry["deaths"] = v
+				}
+				if v, ok := a["playtime"]; ok {
+					entry["playtime"] = v
+				}
+				if v, ok := a["ban_is_banned"]; ok {
+					entry["ban_is_banned"] = v
+				}
+				result = append(result, entry)
+			}
+		}
+	}
+
+	// Priority 2: users table (logged-in Discord users)
+	if len(result) == 0 && h.db != nil {
 		users, err := h.db.GetAllUsers()
 		if err == nil {
 			for _, u := range users {
@@ -50,6 +97,7 @@ func (h *UserHandler) GetStaff(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Priority 3: staff_list table (synced by bot)
 	if len(result) == 0 && h.db != nil {
 		staffList, err := h.db.GetStaffListFromDB()
 		if err == nil && len(staffList) > 0 {
@@ -70,6 +118,7 @@ func (h *UserHandler) GetStaff(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Priority 4: JSON file fallback
 	if len(result) == 0 {
 		staff, err := h.db.GetStaffFromFile()
 		if err == nil {

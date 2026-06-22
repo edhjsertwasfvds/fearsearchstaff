@@ -345,3 +345,68 @@ func (h *VDFHistoryHandler) buildHistoryFromDB(rows []map[string]interface{}) []
 
 	return history
 }
+
+func (h *VDFHistoryHandler) RequestRecheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if h.db == nil {
+		http.Error(w, `{"error":"database not available"}`, http.StatusInternalServerError)
+		return
+	}
+
+	var req struct {
+		CheckID  int      `json:"check_id"`
+		SteamIDs []string `json:"steamids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.CheckID <= 0 || len(req.SteamIDs) == 0 {
+		http.Error(w, `{"error":"check_id and steamids required"}`, http.StatusBadRequest)
+		return
+	}
+
+	id, err := h.db.CreateVDFRecheck(req.CheckID, req.SteamIDs)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"recheck_id": id,
+		"status":     "pending",
+		"message":    "Recheck request created. The bot will process it shortly.",
+	})
+}
+
+func (h *VDFHistoryHandler) GetRecheckResult(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		http.Error(w, `{"error":"database not available"}`, http.StatusInternalServerError)
+		return
+	}
+
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.db.GetVDFRecheckResult(id)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}

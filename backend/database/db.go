@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"fearstaff-api/models"
@@ -705,6 +706,152 @@ func (db *DB) GetVDFChecks() ([]map[string]interface{}, error) {
 	return checks, nil
 }
 
+// ── Logs ────────────────────────────────────────────────────────────────────
+
+func (db *DB) GetLogs(service, level, search string, limit, offset int) ([]map[string]interface{}, int, error) {
+	if db.pool == nil {
+		return nil, 0, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+
+	where := "1=1"
+	args := []interface{}{}
+	argIdx := 1
+
+	if service != "" {
+		where += fmt.Sprintf(" AND service = $%d", argIdx)
+		args = append(args, service)
+		argIdx++
+	}
+	if level != "" {
+		where += fmt.Sprintf(" AND level = $%d", argIdx)
+		args = append(args, level)
+		argIdx++
+	}
+	if search != "" {
+		where += fmt.Sprintf(" AND message ILIKE $%d", argIdx)
+		args = append(args, "%"+search+"%")
+		argIdx++
+	}
+
+	var total int
+	countQuery := fmt.Sprintf("SELECT COUNT(*)::int FROM app_logs WHERE %s", where)
+	err := db.pool.QueryRow(ctx, countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, service, level, message, data, created_at::text
+		FROM app_logs WHERE %s
+		ORDER BY id DESC LIMIT $%d OFFSET $%d
+	`, where, argIdx, argIdx+1)
+	args = append(args, limit, offset)
+
+	rows, err := db.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var result []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var svc, lvl, msg, createdAt string
+		var data []byte
+		if err := rows.Scan(&id, &svc, &lvl, &msg, &data, &createdAt); err != nil {
+			continue
+		}
+		entry := map[string]interface{}{
+			"id":         id,
+			"service":    svc,
+			"level":      lvl,
+			"message":    msg,
+			"created_at": createdAt,
+		}
+		if len(data) > 0 {
+			entry["data"] = json.RawMessage(data)
+		}
+		result = append(result, entry)
+	}
+	return result, total, nil
+}
+
+func (db *DB) GetLogsStats() (map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+
+	var totalCount, todayCount, errorCount int
+	_ = db.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM app_logs`).Scan(&totalCount)
+	_ = db.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM app_logs WHERE created_at > NOW() - INTERVAL '1 day'`).Scan(&todayCount)
+	_ = db.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM app_logs WHERE level = 'error' AND created_at > NOW() - INTERVAL '7 days'`).Scan(&errorCount)
+
+	services := make(map[string]int)
+	rows, err := db.pool.Query(ctx, `SELECT service, COUNT(*)::int as cnt FROM app_logs GROUP BY service ORDER BY cnt DESC`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var svc string
+			var cnt int
+			if err := rows.Scan(&svc, &cnt); err == nil {
+				services[svc] = cnt
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"total":     totalCount,
+		"today":     todayCount,
+		"errors_7d": errorCount,
+		"services":  services,
+	}, nil
+}
+
+func (db *DB) GetLoginHistory(limit, offset int) ([]map[string]interface{}, int, error) {
+	if db.pool == nil {
+		return nil, 0, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+
+	var total int
+	_ = db.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM login_history`).Scan(&total)
+
+	rows, err := db.pool.Query(ctx, `
+		SELECT lh.discord_id, lh.ip_address, lh.user_agent, lh.logged_in_at::text,
+		       COALESCE(u.username, '') as username,
+		       COALESCE(u.display_name, '') as display_name,
+		       COALESCE(u.avatar, '') as avatar
+		FROM login_history lh
+		LEFT JOIN users u ON u.discord_id = lh.discord_id
+		ORDER BY lh.id DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var result []map[string]interface{}
+	for rows.Next() {
+		var discordID, ip, userAgent, loggedAt, username, displayName, avatar string
+		if err := rows.Scan(&discordID, &ip, &userAgent, &loggedAt, &username, &displayName, &avatar); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"discord_id":   discordID,
+			"ip_address":   ip,
+			"user_agent":   userAgent,
+			"logged_in_at": loggedAt,
+			"username":     username,
+			"display_name": displayName,
+			"avatar":       avatar,
+		})
+	}
+	return result, total, nil
+}
+
 func (db *DB) saveVDFCheckKV(checkID int, filename, attachmentURL, messageURL string, results []byte, steamids []string, bannedCount int) error {
 	data, err := db.GetKVStore("vdf_checks.json")
 	if err != nil {
@@ -927,6 +1074,91 @@ func (db *DB) GetVDFHistoryBySteamID(steamID string, limit int) ([]map[string]in
 	return result, nil
 }
 
+// ── VDF Rechecks ────────────────────────────────────────────────────────────
+
+func (db *DB) CreateVDFRecheck(checkID int, steamIDs []string) (int, error) {
+	if db.pool == nil {
+		return 0, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	var id int
+	err := db.pool.QueryRow(ctx, `
+		INSERT INTO vdf_rechecks (check_id, steamids, status)
+		VALUES ($1, $2, 'pending') RETURNING id
+	`, checkID, steamIDs).Scan(&id)
+	return id, err
+}
+
+func (db *DB) GetPendingVDFRechecks() ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT id, check_id, steamids, status, requested_at::text
+		FROM vdf_rechecks WHERE status = 'pending'
+		ORDER BY requested_at ASC LIMIT 10
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []map[string]interface{}
+	for rows.Next() {
+		var id, checkID int
+		var steamIDs []string
+		var status, requestedAt string
+		if err := rows.Scan(&id, &checkID, &steamIDs, &status, &requestedAt); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"id":            id,
+			"check_id":      checkID,
+			"steamids":      steamIDs,
+			"status":        status,
+			"requested_at":  requestedAt,
+		})
+	}
+	return result, nil
+}
+
+func (db *DB) GetVDFRecheckResult(recheckID int) (map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	var (
+		id, checkID                    int
+		steamIDs                       []string
+		status                         string
+		results                        []byte
+		errorMsg                       *string
+		requestedAt, startedAt, completedAt string
+	)
+	err := db.pool.QueryRow(ctx, `
+		SELECT id, check_id, steamids, status, results, error,
+		       COALESCE(requested_at::text, ''), COALESCE(started_at::text, ''), COALESCE(completed_at::text, '')
+		FROM vdf_rechecks WHERE id = $1
+	`, recheckID).Scan(&id, &checkID, &steamIDs, &status, &results, &errorMsg, &requestedAt, &startedAt, &completedAt)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]interface{}{
+		"id":            id,
+		"check_id":      checkID,
+		"steamids":      steamIDs,
+		"status":        status,
+		"results":       json.RawMessage(results),
+		"requested_at":  requestedAt,
+		"started_at":    startedAt,
+		"completed_at":  completedAt,
+	}
+	if errorMsg != nil {
+		result["error"] = *errorMsg
+	}
+	return result, nil
+}
+
 func (db *DB) GetConfigAccounts(configHash string) ([]string, error) {
 	if db.pool == nil {
 		return nil, fmt.Errorf("no database")
@@ -960,4 +1192,359 @@ func (db *DB) UpdateVDFHistoryBan(steamID string, fearBanned bool, fearReason, f
 		WHERE steamid = $1
 	`, steamID, fearBanned, fearReason, fearUnbanTime)
 	return err
+}
+
+// ── Shared tables: admins, profiles, punishments (written by bot) ───────────
+
+func (db *DB) GetPunishmentsByAdmin(adminSteamID string, ptype int, limit, offset int) ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	var rows pgx.Rows
+	var err error
+	if ptype > 0 {
+		rows, err = db.pool.Query(ctx, `
+			SELECT id, type, steamid, name, admin, admin_steamid, reason, status, duration, created, expires, updated_at
+			FROM punishments WHERE admin_steamid = $1 AND type = $2
+			ORDER BY created DESC LIMIT $3 OFFSET $4
+		`, adminSteamID, ptype, limit, offset)
+	} else {
+		rows, err = db.pool.Query(ctx, `
+			SELECT id, type, steamid, name, admin, admin_steamid, reason, status, duration, created, expires, updated_at
+			FROM punishments WHERE admin_steamid = $1
+			ORDER BY created DESC LIMIT $2 OFFSET $3
+		`, adminSteamID, limit, offset)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPunishmentRows(rows)
+}
+
+func (db *DB) GetStaffPunishmentStats(since int64) (map[string]map[string]int, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT admin_steamid, type, COUNT(*)::int as count
+		FROM punishments WHERE created >= $1 AND admin_steamid != ''
+		GROUP BY admin_steamid, type
+	`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	stats := make(map[string]map[string]int)
+	for rows.Next() {
+		var adminSteam string
+		var ptype, count int
+		if err := rows.Scan(&adminSteam, &ptype, &count); err != nil {
+			continue
+		}
+		if stats[adminSteam] == nil {
+			stats[adminSteam] = make(map[string]int)
+		}
+		switch ptype {
+		case 1:
+			stats[adminSteam]["bans"] = count
+		case 2:
+			stats[adminSteam]["mutes"] = count
+		}
+		stats[adminSteam]["total"] += count
+	}
+	return stats, nil
+}
+
+func (db *DB) GetPunishmentsTrend(days int) ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT
+			to_timestamp(created)::date as day,
+			COUNT(*) FILTER (WHERE type = 1) as bans,
+			COUNT(*) FILTER (WHERE type = 2) as mutes,
+			COUNT(*) as total
+		FROM punishments
+		WHERE created >= EXTRACT(EPOCH FROM NOW() - ($1 || ' days')::INTERVAL)
+		GROUP BY day ORDER BY day ASC
+	`, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []map[string]interface{}
+	for rows.Next() {
+		var day interface{}
+		var bans, mutes, total int
+		if err := rows.Scan(&day, &bans, &mutes, &total); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"day":   fmt.Sprintf("%v", day),
+			"bans":  bans,
+			"mutes": mutes,
+			"total": total,
+		})
+	}
+	return result, nil
+}
+
+func (db *DB) GetPunishmentsMonthCompare() (map[string]map[string]int, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	result := map[string]map[string]int{
+		"current":  {"bans": 0, "mutes": 0, "total": 0},
+		"previous": {"bans": 0, "mutes": 0, "total": 0},
+	}
+	var currBans, currMutes, currTotal int
+	err := db.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE type = 1),
+			COUNT(*) FILTER (WHERE type = 2),
+			COUNT(*)
+		FROM punishments
+		WHERE to_char(to_timestamp(created), 'YYYY-MM') = to_char(NOW(), 'YYYY-MM')
+	`).Scan(&currBans, &currMutes, &currTotal)
+	if err == nil {
+		result["current"] = map[string]int{"bans": currBans, "mutes": currMutes, "total": currTotal}
+	}
+	var prevBans, prevMutes, prevTotal int
+	err = db.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE type = 1),
+			COUNT(*) FILTER (WHERE type = 2),
+			COUNT(*)
+		FROM punishments
+		WHERE to_char(to_timestamp(created), 'YYYY-MM') = to_char(NOW() - INTERVAL '1 month', 'YYYY-MM')
+	`).Scan(&prevBans, &prevMutes, &prevTotal)
+	if err == nil {
+		result["previous"] = map[string]int{"bans": prevBans, "mutes": prevMutes, "total": prevTotal}
+	}
+	return result, nil
+}
+
+func (db *DB) GetAdminsWithProfiles() ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT a.admin_id, a.steamid, a.group_display_name, a.group_name,
+		       a.immunity, a.is_frozen, a.avatar_full,
+		       COALESCE(p.name, a.raw_json->>'name') AS name,
+		       COALESCE(p.avatar_full, a.avatar_full) AS avatar,
+		       p.rank, p.kills, p.deaths, p.playtime,
+		       p.discord_nickname, p.discord_id,
+		       p.ban_is_banned, p.vip_is_vip,
+		       GREATEST(a.updated_at, COALESCE(p.updated_at, a.updated_at)) AS updated_at
+		FROM admins a LEFT JOIN profiles p ON p.steamid = a.steamid
+		ORDER BY a.admin_id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []map[string]interface{}
+	for rows.Next() {
+		var (
+			adminID                                     int
+			steamid, groupDisplayName, groupName        string
+			immunity                                    int
+			isFrozen                                    bool
+			avatarFull, name, avatar                    string
+			rank                                        *int
+			kills, deaths, playtime                     *int
+			discordNickname, discordID                  *string
+			banIsBanned, vipIsVip                       *bool
+			updatedAt                                   interface{}
+		)
+		if err := rows.Scan(&adminID, &steamid, &groupDisplayName, &groupName,
+			&immunity, &isFrozen, &avatarFull,
+			&name, &avatar, &rank, &kills, &deaths, &playtime,
+			&discordNickname, &discordID, &banIsBanned, &vipIsVip, &updatedAt); err != nil {
+			continue
+		}
+		entry := map[string]interface{}{
+			"admin_id":          adminID,
+			"steamid":           steamid,
+			"group_display_name": groupDisplayName,
+			"group_name":        groupName,
+			"immunity":          immunity,
+			"is_frozen":         isFrozen,
+			"avatar_full":       avatarFull,
+			"name":              name,
+			"avatar":            avatar,
+			"updated_at":        fmt.Sprintf("%v", updatedAt),
+		}
+		if rank != nil {
+			entry["rank"] = *rank
+		}
+		if kills != nil {
+			entry["kills"] = *kills
+		}
+		if deaths != nil {
+			entry["deaths"] = *deaths
+		}
+		if playtime != nil {
+			entry["playtime"] = *playtime
+		}
+		if discordNickname != nil {
+			entry["discord_nickname"] = *discordNickname
+		}
+		if discordID != nil {
+			entry["discord_id"] = *discordID
+		}
+		if banIsBanned != nil {
+			entry["ban_is_banned"] = *banIsBanned
+		}
+		if vipIsVip != nil {
+			entry["vip_is_vip"] = *vipIsVip
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+
+func (db *DB) GetPunishmentsList(ptype int, limit, offset int) ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	var rows pgx.Rows
+	var err error
+	if ptype > 0 {
+		rows, err = db.pool.Query(ctx, `
+			SELECT id, type, steamid, name, admin, admin_steamid, reason, status, duration, created, expires, updated_at
+			FROM punishments WHERE type = $1
+			ORDER BY created DESC LIMIT $2 OFFSET $3
+		`, ptype, limit, offset)
+	} else {
+		rows, err = db.pool.Query(ctx, `
+			SELECT id, type, steamid, name, admin, admin_steamid, reason, status, duration, created, expires, updated_at
+			FROM punishments
+			ORDER BY created DESC LIMIT $1 OFFSET $2
+		`, limit, offset)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPunishmentRows(rows)
+}
+
+func scanPunishmentRows(rows pgx.Rows) ([]map[string]interface{}, error) {
+	var result []map[string]interface{}
+	for rows.Next() {
+		var (
+			id, duration, created, expires            int64
+			ptype, status                             int
+			steamid, name, admin, adminSteam, reason string
+			updatedAt                                 interface{}
+		)
+		if err := rows.Scan(&id, &ptype, &steamid, &name, &admin, &adminSteam,
+			&reason, &status, &duration, &created, &expires, &updatedAt); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"id":              id,
+			"type":            ptype,
+			"steamid":         steamid,
+			"name":            name,
+			"admin":           admin,
+			"admin_steamid":   adminSteam,
+			"reason":          reason,
+			"status":          status,
+			"duration":        duration,
+			"created":         created,
+			"expires":         expires,
+			"updated_at":      fmt.Sprintf("%v", updatedAt),
+		})
+	}
+	return result, nil
+}
+
+// ── Server Activity ─────────────────────────────────────────────────────────
+
+func (db *DB) GetServerActivity(hours int) ([]map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+	rows, err := db.pool.Query(ctx, `
+		SELECT timestamp, hour, total_players, total_admins, server_data
+		FROM panel_server_activity
+		WHERE timestamp > EXTRACT(EPOCH FROM NOW() - ($1 || ' hours')::INTERVAL)
+		ORDER BY timestamp ASC
+	`, hours)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []map[string]interface{}
+	for rows.Next() {
+		var ts, hour, totalPlayers, totalAdmins int
+		var serverData string
+		if err := rows.Scan(&ts, &hour, &totalPlayers, &totalAdmins, &serverData); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"timestamp":     ts,
+			"hour":          hour,
+			"total_players": totalPlayers,
+			"total_admins":  totalAdmins,
+			"server_data":   serverData,
+		})
+	}
+	return result, nil
+}
+
+func (db *DB) GetServerActivitySummary() (map[string]interface{}, error) {
+	if db.pool == nil {
+		return nil, fmt.Errorf("no database")
+	}
+	ctx := context.Background()
+
+	var maxPlayers, avgPlayers, totalSnapshots int
+	_ = db.pool.QueryRow(ctx, `
+		SELECT COALESCE(MAX(total_players), 0), COALESCE(AVG(total_players)::int, 0), COUNT(*)::int
+		FROM panel_server_activity WHERE timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '24 hours')
+	`).Scan(&maxPlayers, &avgPlayers, &totalSnapshots)
+
+	var lastPlayers int
+	_ = db.pool.QueryRow(ctx, `
+		SELECT total_players FROM panel_server_activity ORDER BY id DESC LIMIT 1
+	`).Scan(&lastPlayers)
+
+	hourly := make(map[string]int)
+	rows, err := db.pool.Query(ctx, `
+		SELECT hour, COALESCE(AVG(total_players)::int, 0) as avg_p
+		FROM panel_server_activity
+		WHERE timestamp > EXTRACT(EPOCH FROM NOW() - INTERVAL '24 hours')
+		GROUP BY hour ORDER BY hour
+	`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var h, avg int
+			if err := rows.Scan(&h, &avg); err == nil {
+				hourly[fmt.Sprintf("%02d", h)] = avg
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"max_24h":       maxPlayers,
+		"avg_24h":       avgPlayers,
+		"current":       lastPlayers,
+		"snapshots_24h": totalSnapshots,
+		"hourly":        hourly,
+	}, nil
 }

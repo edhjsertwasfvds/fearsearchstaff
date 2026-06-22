@@ -9,6 +9,7 @@ import (
 	"fearstaff-api/config"
 	"fearstaff-api/database"
 	"fearstaff-api/handlers"
+	"fearstaff-api/ws"
 )
 
 func main() {
@@ -22,6 +23,9 @@ func main() {
 		defer db.Close()
 	}
 
+	// Start WebSocket hub
+	go ws.DefaultHub.Run()
+
 	auth := handlers.NewAuthHandler(cfg, db)
 	users := handlers.NewUserHandler(cfg, db)
 	checker := handlers.NewCheckHandler(cfg, db)
@@ -30,8 +34,21 @@ func main() {
 	whitelist := handlers.NewWhitelistHandler(cfg, db)
 	evaders := handlers.NewEvadersHandler(cfg, db)
 	vdfHistory := handlers.NewVDFHistoryHandler(cfg, db, fearAPI)
+	staffStats := handlers.NewStaffStatsHandler(cfg, db)
+	logs := handlers.NewLogsHandler(cfg, db)
+	serverActivity := handlers.NewServerActivityHandler(cfg, db)
+	botSnapshot := handlers.NewBotSnapshotHandler(cfg, db)
 
 	mux := http.NewServeMux()
+
+	// WebSocket (no auth — connects directly)
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		ws.HandleWebSocket(ws.DefaultHub, w, r)
+	})
+
+	// Bot snapshot (secret-based auth, no JWT)
+	mux.HandleFunc("/api/bot/snapshot", botSnapshot.ReceiveSnapshot)
+	mux.HandleFunc("/api/bot/status", botSnapshot.GetStatus)
 
 	mux.HandleFunc("/api/auth/login", auth.LoginURL)
 	mux.HandleFunc("/api/auth/callback", auth.Callback)
@@ -58,7 +75,11 @@ func main() {
 	mux.Handle("/api/punishments/search", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.SearchPunishments)))
 	mux.Handle("/api/punishments/all", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetAllPunishments)))
 	mux.Handle("/api/punishments/admin", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetPunishmentsByAdmin)))
-	mux.Handle("/api/punishments/staff-stats", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetStaffStats)))
+	mux.Handle("/api/punishments/staff-stats", handlers.AuthMiddleware(cfg, http.HandlerFunc(staffStats.GetStaffStats)))
+	mux.Handle("/api/staff/punishments", handlers.AuthMiddleware(cfg, http.HandlerFunc(staffStats.GetPunishmentsList)))
+	mux.Handle("/api/staff/punishments/by-admin", handlers.AuthMiddleware(cfg, http.HandlerFunc(staffStats.GetPunishmentsByAdmin)))
+	mux.Handle("/api/staff/punishments/trend", handlers.AuthMiddleware(cfg, http.HandlerFunc(staffStats.GetPunishmentsTrend)))
+	mux.Handle("/api/staff/punishments/month-compare", handlers.AuthMiddleware(cfg, http.HandlerFunc(staffStats.GetPunishmentsMonthCompare)))
 	mux.Handle("/api/bans/check/", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.CheckBan)))
 	mux.Handle("/api/admins", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetAdmins)))
 	mux.Handle("/api/resolve-names", handlers.AuthMiddleware(cfg, http.HandlerFunc(fearAPI.GetResolveNames)))
@@ -74,6 +95,15 @@ func main() {
 	mux.Handle("/api/check/vdf", handlers.AuthMiddleware(cfg, http.HandlerFunc(checker.CheckVDF)))
 	mux.Handle("/api/evaders", handlers.AuthMiddleware(cfg, http.HandlerFunc(evaders.GetEvaders)))
 	mux.Handle("/api/vdf-history", handlers.AuthMiddleware(cfg, http.HandlerFunc(vdfHistory.GetHistory)))
+	mux.Handle("/api/vdf-history/recheck", handlers.AuthMiddleware(cfg, http.HandlerFunc(vdfHistory.RequestRecheck)))
+	mux.Handle("/api/vdf-history/recheck/result", handlers.AuthMiddleware(cfg, http.HandlerFunc(vdfHistory.GetRecheckResult)))
+
+	mux.Handle("/api/logs", handlers.AuthMiddleware(cfg, http.HandlerFunc(logs.GetLogs)))
+	mux.Handle("/api/logs/stats", handlers.AuthMiddleware(cfg, http.HandlerFunc(logs.GetLogsStats)))
+	mux.Handle("/api/logs/logins", handlers.AuthMiddleware(cfg, http.HandlerFunc(logs.GetLoginHistory)))
+
+	mux.Handle("/api/server-activity", handlers.AuthMiddleware(cfg, http.HandlerFunc(serverActivity.GetActivity)))
+	mux.Handle("/api/server-activity/summary", handlers.AuthMiddleware(cfg, http.HandlerFunc(serverActivity.GetSummary)))
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

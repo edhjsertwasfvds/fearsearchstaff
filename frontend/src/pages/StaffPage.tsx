@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Search, Filter, ChevronDown, ExternalLink, Shield } from 'lucide-react';
+import { Users, Search, Filter, ChevronDown, ExternalLink, Shield, Ban, VolumeX, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { api } from '../services/api';
 import type { StaffMember } from '../types';
 
@@ -42,18 +42,40 @@ const roleNames: Record<string, string> = {
 
 const groups = ['ALL', 'OWNER', 'GLADMIN', 'STADMIN', 'ADMIN', 'STMODER', 'MODER', 'MLMODER', 'CURATOR'];
 
+interface StaffStatsMap {
+  [steamid: string]: {
+    total_bans: number;
+    total_mutes: number;
+  };
+}
+
 export default function StaffPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterGroup, setFilterGroup] = useState('ALL');
   const [showFilter, setShowFilter] = useState(false);
+  const [statsMap, setStatsMap] = useState<StaffStatsMap>({});
+  const [monthCompare, setMonthCompare] = useState<{ current: { bans: number; mutes: number; total: number }; previous: { bans: number; mutes: number; total: number } } | null>(null);
 
   useEffect(() => {
     api.getStaff()
-      .then((res) => setStaff(res.data || []))
+      .then((res) => {
+        const data = res.data || [];
+        setStaff(data);
+        const steamids = data.map((m: StaffMember) => m.steam_id).filter(Boolean);
+        if (steamids.length > 0) {
+          api.getStaffStats(steamids)
+            .then((stats: any) => setStatsMap(stats))
+            .catch(() => {});
+        }
+      })
       .catch(() => setStaff([]))
       .finally(() => setLoading(false));
+
+    api.getPunishmentsMonthCompare()
+      .then((data) => setMonthCompare(data))
+      .catch(() => {});
   }, []);
 
   const filtered = staff.filter((m) => {
@@ -72,6 +94,15 @@ export default function StaffPage() {
     return acc;
   }, {} as Record<string, StaffMember[]>);
 
+  const totalStats = useMemo(() => {
+    let totalBans = 0, totalMutes = 0;
+    Object.values(statsMap).forEach((s) => {
+      totalBans += s.total_bans || 0;
+      totalMutes += s.total_mutes || 0;
+    });
+    return { bans: totalBans, mutes: totalMutes, total: totalBans + totalMutes };
+  }, [statsMap]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -82,12 +113,7 @@ export default function StaffPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-      >
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white flex items-center gap-3">
             <Users className="w-8 h-8 text-accent-blue" />
@@ -99,52 +125,84 @@ export default function StaffPage() {
         </div>
       </motion.div>
 
-      {/* Search & Filter */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="flex gap-4"
+      {/* Summary Stats */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+        className="grid grid-cols-2 md:grid-cols-4 gap-4"
       >
+        <div className="glass-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/20 flex items-center justify-center">
+              <Users className="w-5 h-5 text-blue-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Staff</p>
+              <p className="text-xl font-bold text-white">{staff.length}</p>
+            </div>
+          </div>
+        </div>
+        <div className="glass-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500/20 to-red-600/20 flex items-center justify-center">
+              <Ban className="w-5 h-5 text-red-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Bans</p>
+              <p className="text-xl font-bold text-white">{totalStats.bans}</p>
+            </div>
+          </div>
+        </div>
+        <div className="glass-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 flex items-center justify-center">
+              <VolumeX className="w-5 h-5 text-yellow-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Mutes</p>
+              <p className="text-xl font-bold text-white">{totalStats.mutes}</p>
+            </div>
+          </div>
+        </div>
+        <div className="glass-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/20 flex items-center justify-center">
+              {monthCompare && (monthCompare.current.total >= monthCompare.previous.total)
+                ? <ArrowUpRight className="w-5 h-5 text-green-400" />
+                : <ArrowDownRight className="w-5 h-5 text-red-400" />
+              }
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">This Month</p>
+              <p className="text-xl font-bold text-white">{monthCompare?.current?.total || 0}</p>
+              {monthCompare && (
+                <p className={`text-xs ${monthCompare.current.total >= monthCompare.previous.total ? 'text-green-400' : 'text-red-400'}`}>
+                  {monthCompare.current.total >= monthCompare.previous.total ? '+' : ''}
+                  {monthCompare.current.total - monthCompare.previous.total} vs last month
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="flex gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-          <input
-            type="text"
-            placeholder="Search by name, Discord, or SteamID..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="input-field pl-12"
-          />
+          <input type="text" placeholder="Search by name, Discord, or SteamID..." value={search} onChange={(e) => setSearch(e.target.value)} className="input-field pl-12" />
         </div>
         <div className="relative">
-          <button
-            onClick={() => setShowFilter(!showFilter)}
-            className="flex items-center gap-2 px-4 py-3 glass-card hover:border-accent-blue/30 transition-all"
-          >
+          <button onClick={() => setShowFilter(!showFilter)} className="flex items-center gap-2 px-4 py-3 glass-card hover:border-accent-blue/30 transition-all">
             <Filter className="w-5 h-5 text-gray-400" />
-            <span className="text-sm text-gray-300">
-              {filterGroup === 'ALL' ? 'All Roles' : roleNames[filterGroup]}
-            </span>
+            <span className="text-sm text-gray-300">{filterGroup === 'ALL' ? 'All Roles' : roleNames[filterGroup]}</span>
             <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showFilter ? 'rotate-180' : ''}`} />
           </button>
-
           <AnimatePresence>
             {showFilter && (
-              <motion.div
-                initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              <motion.div initial={{ opacity: 0, y: -10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -10, scale: 0.95 }}
                 className="absolute right-0 top-full mt-2 w-56 glass-card p-2 z-20"
               >
                 {groups.map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => { setFilterGroup(g); setShowFilter(false); }}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${
-                      filterGroup === g
-                        ? 'bg-accent-blue/10 text-accent-blue'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
+                  <button key={g} onClick={() => { setFilterGroup(g); setShowFilter(false); }}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${filterGroup === g ? 'bg-accent-blue/10 text-accent-blue' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                   >
                     {g === 'ALL' ? 'All Roles' : (
                       <span className="flex items-center gap-2">
@@ -160,21 +218,15 @@ export default function StaffPage() {
         </div>
       </motion.div>
 
-      {/* Staff List */}
       {filterGroup !== 'ALL' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((member, i) => (
-            <StaffCard key={member.steam_id} member={member} index={i} />
+            <StaffCard key={member.steam_id} member={member} index={i} stats={statsMap[member.steam_id]} />
           ))}
         </div>
       ) : (
         Object.entries(groupedStaff).map(([group, members]) => (
-          <motion.div
-            key={group}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-4"
-          >
+          <motion.div key={group} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
             <div className="flex items-center gap-3">
               <div className={`w-3 h-3 rounded-full bg-gradient-to-r ${roleColors[group] || 'from-gray-500 to-gray-600'}`} />
               <h2 className="text-xl font-bold text-white">{roleNames[group] || group}</h2>
@@ -182,7 +234,7 @@ export default function StaffPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {members.map((member, i) => (
-                <StaffCard key={member.steam_id} member={member} index={i} />
+                <StaffCard key={member.steam_id} member={member} index={i} stats={statsMap[member.steam_id]} />
               ))}
             </div>
           </motion.div>
@@ -190,11 +242,7 @@ export default function StaffPage() {
       )}
 
       {filtered.length === 0 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center py-12"
-        >
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-12">
           <Shield className="w-16 h-16 text-gray-600 mx-auto mb-4" />
           <p className="text-gray-400">No staff members found</p>
         </motion.div>
@@ -203,8 +251,10 @@ export default function StaffPage() {
   );
 }
 
-function StaffCard({ member, index }: { member: StaffMember; index: number }) {
+function StaffCard({ member, index, stats }: { member: StaffMember; index: number; stats?: { total_bans: number; total_mutes: number } }) {
   const [expanded, setExpanded] = useState(false);
+  const bans = stats?.total_bans || 0;
+  const mutes = stats?.total_mutes || 0;
 
   return (
     <motion.div
@@ -217,9 +267,7 @@ function StaffCard({ member, index }: { member: StaffMember; index: number }) {
     >
       <div className="flex items-center gap-4">
         <div className={`w-14 h-14 bg-gradient-to-br ${roleColors[member.group_name] || 'from-gray-500 to-gray-600'} rounded-2xl flex items-center justify-center shadow-lg`}>
-          <span className="text-white font-bold text-xl">
-            {member.name?.charAt(0)?.toUpperCase() || '?'}
-          </span>
+          <span className="text-white font-bold text-xl">{member.name?.charAt(0)?.toUpperCase() || '?'}</span>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -229,6 +277,22 @@ function StaffCard({ member, index }: { member: StaffMember; index: number }) {
             </span>
           </div>
           <p className="text-sm text-gray-400 truncate">@{member.discord_name}</p>
+          {(bans > 0 || mutes > 0) && (
+            <div className="flex items-center gap-3 mt-1">
+              {bans > 0 && (
+                <span className="flex items-center gap-1 text-xs text-red-400">
+                  <Ban className="w-3 h-3" />
+                  {bans}
+                </span>
+              )}
+              {mutes > 0 && (
+                <span className="flex items-center gap-1 text-xs text-yellow-400">
+                  <VolumeX className="w-3 h-3" />
+                  {mutes}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="text-right">
           <p className="text-lg font-bold text-white">LVL {member.level}</p>
@@ -237,13 +301,7 @@ function StaffCard({ member, index }: { member: StaffMember; index: number }) {
 
       <AnimatePresence>
         {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
             <div className="pt-4 mt-4 border-t border-white/5 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">SteamID</span>
@@ -257,28 +315,26 @@ function StaffCard({ member, index }: { member: StaffMember; index: number }) {
                 <span className="text-gray-500">Last Updated</span>
                 <span className="text-gray-300">{member.updated_at ? new Date(member.updated_at).toLocaleDateString('ru-RU') : '—'}</span>
               </div>
+              {(bans > 0 || mutes > 0) && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Punishments</span>
+                  <span className="text-gray-300">
+                    <span className="text-red-400">{bans} bans</span>
+                    <span className="text-gray-600 mx-1">/</span>
+                    <span className="text-yellow-400">{mutes} mutes</span>
+                  </span>
+                </div>
+              )}
               <div className="flex gap-2 mt-3">
                 {member.steam_id && (
-                  <a
-                    href={`https://steamcommunity.com/profiles/${member.steam_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-dark-600 hover:bg-dark-500 rounded-lg text-xs text-gray-300 transition-all"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    Steam
+                  <a href={`https://steamcommunity.com/profiles/${member.steam_id}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-dark-600 hover:bg-dark-500 rounded-lg text-xs text-gray-300 transition-all">
+                    <ExternalLink className="w-3 h-3" /> Steam
                   </a>
                 )}
-                <a
-                  href={`https://fearproject.ru/profile/${member.steam_id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-dark-600 hover:bg-dark-500 rounded-lg text-xs text-gray-300 transition-all"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  FearProject
+                <a href={`https://fearproject.ru/profile/${member.steam_id}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-dark-600 hover:bg-dark-500 rounded-lg text-xs text-gray-300 transition-all">
+                  <ExternalLink className="w-3 h-3" /> FearProject
                 </a>
               </div>
             </div>

@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Search, ChevronDown, ChevronUp, RefreshCw, Users, Flag
+  Search, ChevronDown, ChevronUp, RefreshCw, Users, Wifi, WifiOff
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useWebSocket } from '../hooks/useWebSocket';
 import type { FearAPIServer, FearAPIPlayer } from '../types';
 import PlayerCardModal from './PlayerCardModal';
 
@@ -19,6 +20,14 @@ interface PlayerRow extends FearAPIPlayer {
   staffGroup?: string;
 }
 
+function getWsUrl(): string {
+  const explicit = import.meta.env.VITE_WS_URL;
+  if (explicit) return explicit;
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = import.meta.env.VITE_API_URL || window.location.host;
+  return `${proto}//${host}/ws`;
+}
+
 export default function PlayersPage() {
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +36,78 @@ export default function PlayersPage() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerRow | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [source, setSource] = useState<'ws' | 'api'>('api');
+  const wsRef = useRef<Record<string, any>>({});
+
+  const { connected, lastMessage } = useWebSocket(getWsUrl());
+
+  // Process WS messages — update player list instantly
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== 'all_players') return;
+    wsRef.current = lastMessage.players || {};
+    setSource('ws');
+    setLastRefresh(new Date());
+
+    // Enrich WS data with Steam summaries in background
+    enrichFromSteam(Object.keys(wsRef.current));
+  }, [lastMessage]);
+
+  const enrichFromSteam = useCallback(async (steamIds: string[]) => {
+    if (steamIds.length === 0) return;
+    const batch = steamIds.slice(0, 100);
+    const fetches = batch.map(async (sid) => {
+      try {
+        const [summaryRes, banRes, yoomaRes] = await Promise.allSettled([
+          api.getSteamSummary(sid),
+          api.getSteamBans(sid),
+          api.getYoomaBans(sid),
+        ]);
+        const player = summaryRes.status === 'fulfilled' ? summaryRes.value?.response?.players?.[0] : null;
+        const ban = banRes.status === 'fulfilled' ? banRes.value?.players?.[0] : null;
+        const yoomaData = yoomaRes.status === 'fulfilled' ? yoomaRes.value : null;
+        const flags: string[] = [];
+        if (ban?.VACBanned) flags.push('VAC');
+        if (ban?.NumberOfGameBans > 0) flags.push('GAME BAN');
+        if (yoomaData?.ok || (yoomaData?.punishments && yoomaData.punishments.length > 0)) flags.push('YOOMA');
+        if (player) {
+          const ageDays = player.timecreated ? Math.floor((Date.now() / 1000 - player.timecreated) / 86400) : null;
+          if (ageDays !== null && ageDays < 365) flags.push(`NEW (${ageDays}д)`);
+        }
+        return {
+          steam_id: sid,
+          timecreated: player?.timecreated || 0,
+          avatar: player?.avatarmedium || player?.avatarfull || '',
+          flags,
+        };
+      } catch {
+        return { steam_id: sid, timecreated: 0, flags: [] as string[] };
+      }
+    });
+
+    const summaries = await Promise.all(fetches);
+    const metaMap = new Map<string, { timecreated: number; flags: string[]; avatar: string }>();
+    summaries.forEach(s => metaMap.set(s.steam_id, { timecreated: s.timecreated, flags: s.flags, avatar: s.avatar || '' }));
+
+    // Rebuild players from WS data + Steam metadata + staff
+    const staffMap = new Map<string, { role: string; group: string }>();
+    // Staff data is fetched once via fetchPlayers, stored in a ref would be ideal but not needed here
+
+    setPlayers(prev => {
+      const enriched = prev.map(p => {
+        const meta = metaMap.get(p.steam_id);
+        if (meta) {
+          return {
+            ...p,
+            account_created: meta.timecreated || p.account_created,
+            flags: meta.flags.length > 0 ? meta.flags : p.flags,
+            avatar: meta.avatar || p.avatar,
+          };
+        }
+        return p;
+      });
+      return enriched;
+    });
+  }, []);
 
   const fetchPlayers = useCallback(async () => {
     try {
@@ -48,58 +129,13 @@ export default function PlayersPage() {
         }
       }
 
-      // Fetch Steam summaries for account creation dates and ban flags
       const steamIds = allPlayers.map(p => p.steam_id).filter(Boolean);
       if (steamIds.length > 0) {
         try {
-          const batch = steamIds.slice(0, 100);
-          const fetches = batch.map(async (sid) => {
-            try {
-              const [summaryRes, banRes, yoomaRes] = await Promise.allSettled([
-                api.getSteamSummary(sid),
-                api.getSteamBans(sid),
-                api.getYoomaBans(sid),
-              ]);
-              const player = summaryRes.status === 'fulfilled' ? summaryRes.value?.response?.players?.[0] : null;
-              const ban = banRes.status === 'fulfilled' ? banRes.value?.players?.[0] : null;
-              const yoomaData = yoomaRes.status === 'fulfilled' ? yoomaRes.value : null;
-              const flags: string[] = [];
-              if (ban?.VACBanned) flags.push('VAC');
-              if (ban?.NumberOfGameBans > 0) flags.push('GAME BAN');
-              if (yoomaData?.ok || (yoomaData?.punishments && yoomaData.punishments.length > 0)) flags.push('YOOMA');
-              if (player) {
-                const ageDays = player.timecreated ? Math.floor((Date.now() / 1000 - player.timecreated) / 86400) : null;
-                if (ageDays !== null && ageDays < 365) flags.push(`NEW (${ageDays}д)`);
-              }
-              return {
-                steam_id: sid,
-                timecreated: player?.timecreated || 0,
-                avatar: player?.avatarmedium || player?.avatarfull || '',
-                flags,
-              };
-            } catch {
-              return { steam_id: sid, timecreated: 0, flags: [] as string[] };
-            }
-          });
-
-          const summaries = await Promise.all(fetches);
-          const metaMap = new Map<string, { timecreated: number; flags: string[]; avatar: string }>();
-          summaries.forEach(s => metaMap.set(s.steam_id, { timecreated: s.timecreated, flags: s.flags, avatar: s.avatar || '' }));
-
-          for (const p of allPlayers) {
-            const meta = metaMap.get(p.steam_id);
-            if (meta) {
-              p.account_created = meta.timecreated;
-              p.flags = meta.flags;
-              if (!p.avatar && meta.avatar) {
-                p.avatar = meta.avatar;
-              }
-            }
-          }
+          await enrichFromSteam(steamIds);
         } catch {}
       }
 
-      // Fetch staff roles
       try {
         const staffRes = await api.getStaff();
         const staffList = (staffRes?.data || (Array.isArray(staffRes) ? staffRes : [])) as any[];
@@ -119,18 +155,22 @@ export default function PlayersPage() {
 
       setPlayers(allPlayers);
       setLastRefresh(new Date());
+      setSource('api');
     } catch {
       setPlayers([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [enrichFromSteam]);
 
   useEffect(() => {
     fetchPlayers();
-    const interval = setInterval(fetchPlayers, 30000);
-    return () => clearInterval(interval);
-  }, [fetchPlayers]);
+    // Only poll API if WS is not connected
+    if (!connected) {
+      const interval = setInterval(fetchPlayers, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [fetchPlayers, connected]);
 
   const filtered = useMemo(() => {
     let result = players;
@@ -196,6 +236,13 @@ export default function PlayersPage() {
           <h1 className="text-2xl font-bold text-white">Игроки</h1>
           <p className="text-sm text-gray-500 mt-1">
             Найдено: {filtered.length} • Обновлено: {lastRefresh.toLocaleTimeString('ru-RU')}
+            <span className="ml-2 inline-flex items-center gap-1">
+              {connected ? (
+                <><Wifi className="w-3 h-3 text-green-400" /> <span className="text-green-400">Live</span></>
+              ) : (
+                <><WifiOff className="w-3 h-3 text-yellow-400" /> <span className="text-yellow-400">API</span></>
+              )}
+            </span>
           </p>
         </div>
         <button
@@ -207,7 +254,7 @@ export default function PlayersPage() {
         </button>
       </motion.div>
 
-      {/* Sort Tabs + Search — matches screenshot 1 exactly */}
+      {/* Sort Tabs + Search */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -247,7 +294,7 @@ export default function PlayersPage() {
         </div>
       </motion.div>
 
-      {/* Table — matches screenshot 1: #, ИГРОК, K/D, УБИЙСТВА, ДЕЙСТВИЯ */}
+      {/* Table */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Download, ExternalLink, Loader2, Calendar, AlertCircle, ChevronDown, ChevronUp, ShieldX, Check } from 'lucide-react';
+import { FileText, Download, ExternalLink, Loader2, Calendar, AlertCircle, ChevronDown, ChevronUp, ShieldX, Check, RefreshCw } from 'lucide-react';
 import { api } from '../services/api';
 
 interface VDFHistoryItem {
@@ -36,6 +36,8 @@ export default function VDFHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [recheckingId, setRecheckingId] = useState<number | null>(null);
+  const [recheckStatus, setRecheckStatus] = useState<Record<number, string>>({});
 
   useEffect(() => {
     const load = () => {
@@ -76,6 +78,40 @@ export default function VDFHistoryPage() {
 
   const isAccountBanned = (r: VDFHistoryItem) => {
     return r.fear_banned || r.vac_banned || r.game_bans > 0 || r.yooma_banned;
+  };
+
+  const handleRecheck = async (check: VDFCheck) => {
+    if (recheckingId === check.id) return;
+    setRecheckingId(check.id);
+    setRecheckStatus(prev => ({ ...prev, [check.id]: 'pending' }));
+    try {
+      const res = await api.requestVDFRecheck(check.id, check.steamids);
+      const recheckId = res.recheck_id;
+      setRecheckStatus(prev => ({ ...prev, [check.id]: 'processing' }));
+      const poll = setInterval(async () => {
+        try {
+          const result = await api.getVDFRecheckResult(recheckId);
+          if (result.status === 'done') {
+            setRecheckStatus(prev => ({ ...prev, [check.id]: 'done' }));
+            setRecheckingId(null);
+            clearInterval(poll);
+            api.getVDFHistory().then((res) => setChecks(res.data || []));
+          } else if (result.status === 'error') {
+            setRecheckStatus(prev => ({ ...prev, [check.id]: 'error: ' + (result.error || 'unknown') }));
+            setRecheckingId(null);
+            clearInterval(poll);
+          }
+        } catch {
+          setRecheckStatus(prev => ({ ...prev, [check.id]: 'error polling' }));
+          setRecheckingId(null);
+          clearInterval(poll);
+        }
+      }, 5000);
+      setTimeout(() => { clearInterval(poll); setRecheckingId(null); }, 120000);
+    } catch (e: any) {
+      setRecheckStatus(prev => ({ ...prev, [check.id]: 'error: ' + (e.message || 'failed') }));
+      setRecheckingId(null);
+    }
   };
 
   const getBanSources = (r: VDFHistoryItem) => {
@@ -209,9 +245,39 @@ export default function VDFHistoryPage() {
                       className="overflow-hidden"
                     >
                       <div className="px-5 pb-4 border-t border-white/5">
-                        <p className="text-xs text-gray-500 uppercase tracking-wider mt-3 mb-2 font-semibold">
-                          Аккаунты ({check.results.length}):
-                        </p>
+                        <div className="flex items-center justify-between mt-3 mb-2">
+                          <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                            Аккаунты ({check.results.length}):
+                          </p>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleRecheck(check); }}
+                            disabled={recheckingId === check.id}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all ${
+                              recheckingId === check.id
+                                ? 'bg-yellow-500/10 text-yellow-400 cursor-wait'
+                                : recheckStatus[check.id] === 'done'
+                                ? 'bg-green-500/10 text-green-400'
+                                : 'bg-[#1e2333] hover:bg-[#262c3f] text-gray-300'
+                            }`}
+                          >
+                            {recheckingId === check.id ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                {recheckStatus[check.id] || 'Проверка...'}
+                              </>
+                            ) : recheckStatus[check.id] === 'done' ? (
+                              <>
+                                <Check className="w-3 h-3" />
+                                Готово
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="w-3 h-3" />
+                                Перепроверить
+                              </>
+                            )}
+                          </button>
+                        </div>
                         {check.results.length > 0 ? (
                           <div className="space-y-1.5">
                             {check.results.map((r, ri) => {

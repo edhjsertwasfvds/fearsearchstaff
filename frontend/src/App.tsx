@@ -18,6 +18,7 @@ import DashboardPage from './pages/DashboardPage';
 import StaffPage from './pages/StaffPage';
 import ProfilePage from './pages/ProfilePage';
 import FAQPage from './pages/FAQPage';
+import LogsPage from './pages/LogsPage';
 
 function ProtectedRoute({ children, minLevel = 1 }: { children: React.ReactNode; minLevel?: number }) {
   const { user, loading, hasLevel } = useAuth();
@@ -217,6 +218,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <FAQPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/logs"
+        element={
+          <ProtectedRoute minLevel={5}>
+            <Layout>
+              <LogsPage />
             </Layout>
           </ProtectedRoute>
         }
