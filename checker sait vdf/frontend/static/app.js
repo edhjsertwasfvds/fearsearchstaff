@@ -125,6 +125,8 @@ async function processFiles(files) {
     } catch (err) {
         console.error(err);
         hideLoader();
+        uploadPage.style.display = 'block';
+        resultsModal.style.display = 'none';
         showError('Ошибка: ' + err.message);
     }
 }
