@@ -143,12 +143,12 @@
                 <div>
                     <label for="filterType" class="block text-sm font-semibold mb-2 text-gray-300">Тип действия</label>
                     <div class="relative">
-                    <select id="filterType" data-custom-select class="sr-only">
-                        <option value="">Все действия</option>
-                        <option value="add_to_whitelist">Добавление в whitelist</option>
-                        <option value="remove_from_whitelist">Удаление из whitelist</option>
-                        <option value="add_comment">Добавление комментария</option>
-                    </select>
+                        <select id="filterType" onchange="applyFilters()" class="w-full bg-[#0b1224] border border-white/[0.1] rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-[#5865F2]">
+                            <option value="">Все действия</option>
+                            <option value="add_to_whitelist">Добавление в whitelist</option>
+                            <option value="remove_from_whitelist">Удаление из whitelist</option>
+                            <option value="add_comment">Добавление комментария</option>
+                        </select>
                     </div>
                 </div>
                 <div>
@@ -314,6 +314,7 @@
                     throw new Error(data.error || 'Ошибка');
                 }
                 allLogs = data.logs || [];
+                populateLogTypeFilter(allLogs);
                 filteredLogs = allLogs;
                 updateStatistics();
                 renderLogs();
@@ -340,7 +341,15 @@
             const actionNames = {
                 'add_to_whitelist': '✅ Добавление в whitelist',
                 'remove_from_whitelist': '❌ Удаление из whitelist',
-                'add_comment': '💬 Комментарий'
+                'add_comment': '💬 Комментарий',
+                'login': '🔑 Вход',
+                'login_failed': '⚠️ Неудачный вход',
+                'logout': '🚪 Выход'
+            };
+            const formatActionName = (type) => {
+                if (actionNames[type]) return actionNames[type];
+                const t = String(type || '').replace(/[_-]/g, ' ');
+                return t ? t[0].toUpperCase() + t.slice(1) : '—';
             };
 
             if (logsToShow.length === 0) {
@@ -355,7 +364,7 @@
 
             document.getElementById('logsTable').innerHTML = logsToShow.map(log => {
                 const timeStr = new Date(log.timestamp).toLocaleString('ru-RU');
-                const actionName = actionNames[log.action_type] || log.action_type;
+                const actionName = formatActionName(log.action_type);
                 return `
                     <tr class="border-t border-white/[0.05] hover:bg-white/[0.02] transition-colors">
                         <td class="py-4 px-6 text-sm text-gray-400 whitespace-nowrap">${timeStr}</td>
@@ -420,6 +429,27 @@
             currentPage = 1;
             updateStatistics();
             renderLogs();
+        }
+
+        function populateLogTypeFilter(logs) {
+            const select = document.getElementById('filterType');
+            if (!select) return;
+            const currentValue = select.value;
+            const uniqueTypes = Array.from(new Set((logs || []).map(l => l.action_type).filter(Boolean))).sort();
+            const knownLabels = {
+                'add_to_whitelist': 'Добавление в whitelist',
+                'remove_from_whitelist': 'Удаление из whitelist',
+                'add_comment': 'Добавление комментария',
+                'login': 'Вход',
+                'login_failed': 'Неудачный вход',
+                'logout': 'Выход'
+            };
+            let html = '<option value="">Все действия</option>';
+            for (const type of uniqueTypes) {
+                const label = knownLabels[type] || type;
+                html += `<option value="${escapeHtml(type)}" ${type === currentValue ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            }
+            select.innerHTML = html;
         }
 
         setInterval(loadLogs, 30000);

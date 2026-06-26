@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/images/iconhtml.png" type="image/png">
+    <title>История VDF-проверок - Fear Project</title>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #09090b; }
+        .grid-bg {
+            background-image: linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 32px 32px;
+            mask-image: radial-gradient(circle at 0 0, black 40%, transparent 80%);
+            -webkit-mask-image: radial-gradient(circle at 0 0, black 40%, transparent 80%);
+        }
+        body { scrollbar-width: thin; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+    </style>
+</head>
+<body class="bg-[#09090b] text-white min-h-screen w-full relative overflow-x-hidden selection:bg-[#5865F2] selection:text-white">
+    <div class="fixed inset-0 pointer-events-none z-0">
+        <div class="absolute inset-0 grid-bg"></div>
+        <div class="absolute -top-[200px] -left-[200px] w-[600px] h-[600px] bg-[#5865F2] rounded-full blur-[120px] opacity-[0.07]"></div>
+    </div>
+
+    <div class="relative z-10 max-w-7xl mx-auto px-4 py-6">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-2xl font-bold flex items-center gap-2">
+                    <i class="ph ph-files text-[#5865F2]"></i>
+                    История VDF-проверок
+                </h1>
+                <p class="text-gray-500 text-sm mt-1">Обновляется автоматически каждые 5 секунд</p>
+            </div>
+            <a href="/" class="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-medium transition-colors flex items-center gap-2">
+                <i class="ph ph-arrow-left"></i> Назад
+            </a>
+        </div>
+
+        <div id="status" class="mb-4 text-sm text-gray-400"></div>
+
+        <div id="checksList" class="space-y-3">
+            <div class="p-8 text-center text-gray-500">
+                <i class="ph ph-spinner animate-spin text-2xl mb-2 block"></i>
+                Загрузка истории...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const listEl = document.getElementById('checksList');
+        const statusEl = document.getElementById('status');
+        let expandedId = null;
+
+        function apiAuthHeaders() {
+            let token = '';
+            try {
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                token = u.sessionToken || '';
+            } catch (_) {}
+            return { 'Authorization': 'Bearer ' + token };
+        }
+
+        function formatDate(iso) {
+            if (!iso) return '—';
+            try {
+                const d = new Date(iso);
+                return d.toLocaleString('ru-RU');
+            } catch (_) { return iso; }
+        }
+
+        function escapeHtml(str) {
+            return String(str || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+        }
+
+        async function loadChecks() {
+            try {
+                const res = await fetch('/api/vdf-history?limit=100', { headers: apiAuthHeaders() });
+                if (res.status === 401) {
+                    listEl.innerHTML = '<div class="p-8 text-center text-rose-400">Не авторизован. Войдите через основной сайт.</div>';
+                    statusEl.textContent = '';
+                    return;
+                }
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const checks = Array.isArray(data.checks) ? data.checks : [];
+                renderChecks(checks);
+                statusEl.textContent = `Последнее обновление: ${new Date().toLocaleTimeString('ru-RU')} — ${checks.length} проверок`;
+            } catch (err) {
+                statusEl.textContent = 'Ошибка загрузки: ' + err.message;
+            }
+        }
+
+        async function loadDetails(checkId) {
+            if (expandedId === checkId) {
+                expandedId = null;
+                loadChecks();
+                return;
+            }
+            expandedId = checkId;
+            const row = document.getElementById('check-row-' + checkId);
+            if (!row) return;
+            const old = row.nextElementSibling;
+            if (old && old.classList.contains('details-row')) old.remove();
+
+            try {
+                const res = await fetch('/api/vdf-history/' + checkId, { headers: apiAuthHeaders() });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const details = Array.isArray(data.details) ? data.details : [];
+                const detailsHtml = `
+                    <tr class="details-row bg-white/[0.02]">
+                        <td colspan="5" class="p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="text-sm font-semibold text-gray-300">Аккаунты (${details.length})</div>
+                                <a href="/api/vdf-history/${checkId}/download" class="px-3 py-1.5 rounded-lg bg-[#5865F2]/20 hover:bg-[#5865F2]/30 text-[#a5b4fc] text-xs font-semibold border border-[#5865F2]/30 transition-colors flex items-center gap-1">
+                                    <i class="ph ph-download-simple"></i> Скачать .vdf
+                                </a>
+                            </div>
+                            <div class="overflow-x-auto rounded-lg border border-white/10">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-white/5 text-gray-400">
+                                        <tr>
+                                            <th class="px-3 py-2">Игрок</th>
+                                            <th class="px-3 py-2">SteamID</th>
+                                            <th class="px-3 py-2">Fear</th>
+                                            <th class="px-3 py-2">VAC</th>
+                                            <th class="px-3 py-2">Yooma</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${details.length === 0 ? '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-500">Нет данных</td></tr>' : details.map(d => `
+                                            <tr class="border-t border-white/5">
+                                                <td class="px-3 py-2">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-white font-medium">${escapeHtml(d.nickname || '—')}</span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 py-2 font-mono text-gray-400 text-xs">${escapeHtml(d.steamid)}</td>
+                                                <td class="px-3 py-2">${d.fear_banned ? `<span class="text-rose-400 text-xs">${escapeHtml(d.fear_reason || 'Бан')}</span>` : '<span class="text-emerald-400 text-xs">Чисто</span>'}</td>
+                                                <td class="px-3 py-2">${d.vac_banned ? `<span class="text-rose-400 text-xs">${d.vac_days_ago || 0} дн. назад</span>` : '<span class="text-gray-500 text-xs">—</span>'}</td>
+                                                <td class="px-3 py-2">${d.yooma_banned ? `<span class="text-rose-400 text-xs">${escapeHtml(d.yooma_reason || 'Бан')}</span>` : '<span class="text-gray-500 text-xs">—</span>'}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </td>
+                    </tr>`;
+                row.insertAdjacentHTML('afterend', detailsHtml);
+            } catch (err) {
+                row.insertAdjacentHTML('afterend', `<tr class="details-row"><td colspan="5" class="p-4 text-rose-400 text-sm">Ошибка загрузки деталей: ${escapeHtml(err.message)}</td></tr>`);
+            }
+        }
+
+        function renderChecks(checks) {
+            if (checks.length === 0) {
+                listEl.innerHTML = '<div class="p-8 text-center text-gray-500">История VDF-проверок пуста</div>';
+                return;
+            }
+            listEl.innerHTML = `
+                <div class="overflow-x-auto rounded-xl border border-white/10 bg-white/[0.03]">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-white/5 text-gray-400">
+                            <tr>
+                                <th class="px-4 py-3 font-semibold">#</th>
+                                <th class="px-4 py-3 font-semibold">Дата</th>
+                                <th class="px-4 py-3 font-semibold">Файл</th>
+                                <th class="px-4 py-3 font-semibold">Аккаунтов</th>
+                                <th class="px-4 py-3 font-semibold">С банами</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${checks.map(c => `
+                                <tr id="check-row-${c.check_id}" class="border-t border-white/5 hover:bg-white/[0.04] cursor-pointer transition-colors" onclick="loadDetails(${c.check_id})">
+                                    <td class="px-4 py-3 font-mono text-[#5865F2]">#${c.check_id}</td>
+                                    <td class="px-4 py-3 text-gray-300">${formatDate(c.created_at)}</td>
+                                    <td class="px-4 py-3 text-gray-400">${escapeHtml(c.filename || '—')}</td>
+                                    <td class="px-4 py-3 text-white font-semibold">${c.count || 0}</td>
+                                    <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium ${(c.banned_count || 0) > 0 ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">${c.banned_count || 0}</span></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
+        }
+
+        loadChecks();
+        setInterval(loadChecks, 5000);
+    </script>
+</body>
+</html>

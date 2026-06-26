@@ -1044,6 +1044,66 @@ async function getActivityByServer(days = 7) {
     return result;
 }
 
+// --- VDF checks history (shared tables created by bot/checker) ---
+async function getVdfHistoryChecks(limit = 100) {
+    try {
+        const { rows } = await poolQuery(`
+            SELECT check_id, filename,
+                   MIN(created_at) AS created_at,
+                   COUNT(*) AS count,
+                   COUNT(*) FILTER (WHERE fear_banned OR vac_banned OR yooma_banned) AS banned_count
+            FROM vdf_history
+            GROUP BY check_id, filename
+            ORDER BY check_id DESC
+            LIMIT $1
+        `, [limit]);
+        return rows.map(r => ({
+            ...r,
+            created_at: r.created_at ? (r.created_at.toISOString ? r.created_at.toISOString() : String(r.created_at)) : null
+        }));
+    } catch (e) {
+        console.error('[panelPg] getVdfHistoryChecks error:', e && e.message);
+        return [];
+    }
+}
+
+async function getVdfHistoryDetails(check_id) {
+    try {
+        const { rows } = await poolQuery(`
+            SELECT id, check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+                   vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
+                   admin_group, config_hash, filename, attachment_url, message_url, on_fear, created_at
+            FROM vdf_history
+            WHERE check_id = $1
+            ORDER BY id ASC
+        `, [check_id]);
+        return rows.map(r => ({
+            ...r,
+            created_at: r.created_at ? (r.created_at.toISOString ? r.created_at.toISOString() : String(r.created_at)) : null
+        }));
+    } catch (e) {
+        console.error('[panelPg] getVdfHistoryDetails error:', e && e.message);
+        return [];
+    }
+}
+
+async function getVdfContentByCheckId(check_id) {
+    try {
+        const { rows } = await poolQuery(`
+            SELECT ch.content, ch.filename
+            FROM config_hashes ch
+            JOIN vdf_history vh ON vh.config_hash = ch.config_hash
+            WHERE vh.check_id = $1
+            LIMIT 1
+        `, [check_id]);
+        if (!rows || rows.length === 0) return null;
+        return { content: rows[0].content || '', filename: rows[0].filename || `check_${check_id}.vdf` };
+    } catch (e) {
+        console.error('[panelPg] getVdfContentByCheckId error:', e && e.message);
+        return null;
+    }
+}
+
 module.exports = {
     initialize,
     getDbPath,
@@ -1113,5 +1173,8 @@ module.exports = {
     getStaffPunishmentsDaily,
     getPunishmentsTrend,
     getPunishmentsMonthComparison,
-    getTicketsMonthComparison
+    getTicketsMonthComparison,
+    getVdfHistoryChecks,
+    getVdfHistoryDetails,
+    getVdfContentByCheckId
 };

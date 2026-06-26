@@ -1,8 +1,11 @@
 const https = require('https');
 
-const punishmentsCache = new Map(); // steamId -> { data, ts }
+const API_BASE = 'https://api.fearproject.ru';
+
+const punishmentsCache = new Map(); // key -> { data, ts }
 const PUNISHMENTS_CACHE_TTL_MS = 3 * 60 * 1000;
 const PUNISHMENTS_CACHE_STALE_MS = 15 * 60 * 1000;
+const PUNISHMENTS_REQ_TIMEOUT_MS = 20000;
 
 function nowMs() {
     return Date.now();
@@ -24,63 +27,137 @@ function normalizePunishmentCreated(p) {
     return { ...p, created: created != null ? created : 0 };
 }
 
-function fetchPunishmentsForSteamId(steamId) {
-    if (!/^\d{5,}$/.test(steamId)) return Promise.resolve({ punishments: [] });
-    const baseUrl = 'https://davidonchik.online/admin/' + encodeURIComponent(steamId);
-    const fetchJson = (url) => new Promise((resolve) => {
-        const r = https.get(url, (apiRes) => {
-            let data = '';
-            apiRes.on('data', c => data += c);
-            apiRes.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
-        });
-        r.on('error', () => resolve(null));
-        r.setTimeout(15000, () => { r.destroy(); resolve(null); });
-    });
-    const withTypeFallback = (arr, fallbackType) => {
-        if (!Array.isArray(arr)) return [];
-        return arr.map((p) => {
-            const t = Number(p?.type);
-            if (t === 1 || t === 2) return p;
-            return { ...p, type: fallbackType };
-        });
-    };
-    return Promise.all([
-        fetchJson(baseUrl + '?type=1&limit=10000'),
-        fetchJson(baseUrl + '?type=2&limit=10000')
-    ]).then(([r1, r2]) => {
-        const list1Raw = (r1 && r1.status === 'ok' && Array.isArray(r1.punishments)) ? r1.punishments : [];
-        const list2Raw = (r2 && r2.status === 'ok' && Array.isArray(r2.punishments)) ? r2.punishments : [];
-        const list1 = withTypeFallback(list1Raw, 1);
-        const list2 = withTypeFallback(list2Raw, 2);
-        const punishments = [...list1, ...list2].map(normalizePunishmentCreated);
-        return { punishments };
+function httpsGetJson(url, timeoutMs = 15000, retries = 2) {
+    return new Promise((resolve) => {
+        let attempts = 0;
+        const tryFetch = () => {
+            attempts++;
+            const req = https.get(url, (res) => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => {
+                    try { resolve(JSON.parse(data)); } catch { resolve(null); }
+                });
+            });
+            req.on('error', () => {
+                if (attempts <= retries) setTimeout(tryFetch, 500 * attempts);
+                else resolve(null);
+            });
+            req.setTimeout(timeoutMs, () => {
+                req.destroy();
+                if (attempts <= retries) setTimeout(tryFetch, 500 * attempts);
+                else resolve(null);
+            });
+        };
+        tryFetch();
     });
 }
 
-function getPunishmentsFromCache(steamId) {
-    const item = punishmentsCache.get(String(steamId || ''));
+function isRemoved(p) {
+    if (p.unpunish_admin != null && String(p.unpunish_admin).trim() !== '') return true;
+    if (p.unpunish_admin_steamid != null) {
+        const s = String(p.unpunish_admin_steamid).trim();
+        if (s !== '' && s !== '0') return true;
+    }
+    return Number(p.status) === 2;
+}
+
+function isActive(p) {
+    if (isRemoved(p)) return false;
+    const now = Math.floor(Date.now() / 1000);
+    const expires = Number(p.expires) || 0;
+    const duration = Number(p.duration) || 0;
+    if (Number(p.status) === 1) return true;
+    if (expires === 0 && duration === 0) return true; // permanent
+    return expires > now;
+}
+
+function categorizePunishment(p) {
+    return {
+        ...p,
+        _removed: isRemoved(p),
+        _active: isActive(p),
+        _expired: !isRemoved(p) && !isActive(p)
+    };
+}
+
+function cacheKey(steamId, mode) {
+    return `${mode || 'admin'}:${steamId}`;
+}
+
+async function fetchPunishmentsPage(q, type, page, limit) {
+    const url = `${API_BASE}/punishments/search?q=${encodeURIComponent(q)}&type=${type}&page=${page}&limit=${limit}`;
+    const res = await httpsGetJson(url, PUNISHMENTS_REQ_TIMEOUT_MS, 2);
+    if (!res || !Array.isArray(res.punishments)) return { total: 0, punishments: [] };
+    return {
+        total: parseInt(res.total != null ? String(res.total) : '0', 10) || res.punishments.length,
+        punishments: res.punishments.map(p => ({ ...p, _queryType: Number(type) })),
+        page: res.page || page,
+        limit: res.limit || limit
+    };
+}
+
+async function fetchAllPunishments(q, type) {
+    const limit = 100;
+    let page = 1;
+    const all = [];
+    let total = null;
+    while (true) {
+        const { total: t, punishments } = await fetchPunishmentsPage(q, type, page, limit);
+        if (total === null) total = t;
+        all.push(...punishments);
+        if (punishments.length < limit || all.length >= total) break;
+        page++;
+        if (page > 100) break; // safety guard
+    }
+    return all;
+}
+
+function fetchPunishmentsForSteamId(steamId, mode = 'admin') {
+    if (!/^\d{5,}$/.test(steamId)) return Promise.resolve({ punishments: [] });
+    return Promise.all([
+        fetchAllPunishments(steamId, 1),
+        fetchAllPunishments(steamId, 2)
+    ]).then(([bans, mutes]) => {
+        const all = [...bans, ...mutes];
+        const target = String(steamId);
+        const filtered = all.filter(p => {
+            if (mode === 'player') return String(p.steamid || '') === target;
+            return String(p.admin_steamid || '') === target;
+        });
+        const normalized = filtered.map(p => {
+            const type = Number(p._queryType);
+            return normalizePunishmentCreated({ ...p, type: (type === 1 || type === 2) ? type : (Number(p.type) || 0) });
+        }).map(categorizePunishment);
+        return { punishments: normalized };
+    });
+}
+
+function getPunishmentsFromCache(steamId, mode) {
+    const item = punishmentsCache.get(cacheKey(steamId, mode));
     if (!item) return null;
     const age = nowMs() - item.ts;
     if (age <= PUNISHMENTS_CACHE_STALE_MS) return item.data;
     return null;
 }
 
-function getPunishmentsCacheEntry(steamId) {
-    return punishmentsCache.get(String(steamId || '')) || null;
+function getPunishmentsCacheEntry(steamId, mode) {
+    return punishmentsCache.get(cacheKey(steamId, mode)) || null;
 }
 
-function setPunishmentsToCache(steamId, punishments) {
-    punishmentsCache.set(String(steamId || ''), { data: Array.isArray(punishments) ? punishments : [], ts: nowMs() });
+function setPunishmentsToCache(steamId, mode, punishments) {
+    punishmentsCache.set(cacheKey(steamId, mode), { data: Array.isArray(punishments) ? punishments : [], ts: nowMs() });
 }
 
 module.exports = {
     punishmentsCache,
     PUNISHMENTS_CACHE_TTL_MS,
     PUNISHMENTS_CACHE_STALE_MS,
+    PUNISHMENTS_REQ_TIMEOUT_MS,
     normalizePunishmentCreated,
+    categorizePunishment,
     fetchPunishmentsForSteamId,
     getPunishmentsFromCache,
     getPunishmentsCacheEntry,
     setPunishmentsToCache
 };
-

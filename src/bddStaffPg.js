@@ -144,9 +144,32 @@ async function getStaffPunishmentStats(adminSteamids) {
     return stats;
 }
 
+async function getDiscordBySteamIds(steamids) {
+    const pool = getPool();
+    if (!pool) return {};
+    if (!Array.isArray(steamids) || steamids.length === 0) return {};
+    const { rows } = await pool.query(
+        `
+        SELECT steamid, discord_id, discord_nickname
+        FROM profiles
+        WHERE steamid = ANY($1)
+        `,
+        [steamids]
+    );
+    const map = {};
+    for (const row of rows) {
+        map[row.steamid] = {
+            discord_id: row.discord_id || '',
+            discord_nickname: row.discord_nickname || ''
+        };
+    }
+    return map;
+}
+
 module.exports = {
     isConfigured,
     searchBddStaff,
     getStaffPunishments,
-    getStaffPunishmentStats
+    getStaffPunishmentStats,
+    getDiscordBySteamIds
 };

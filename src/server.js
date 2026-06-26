@@ -1429,12 +1429,14 @@ const server = http.createServer(async (req, res) => {
                 const user = await db.verifyUser(username, password);
                 if (!user) {
                     console.log(`[Auth] Неудачная попытка входа: ${username} от ${clientIp}`);
+                    try { db.logAction(0, username, 'login_failed', '', '', 'Неверный логин или пароль', clientIp); } catch (_) {}
                     res.writeHead(401, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Неверный логин или пароль' }));
                     return;
                 }
                 const session = await auth.createSession(user);
                 console.log(`[Auth] Пользователь авторизован: ${user.username} (id=${user.id}), level=${user.level}`);
+                try { db.logAction(user.id, user.username, 'login', '', '', `level=${user.level}`, clientIp); } catch (_) {}
                 const maxAge = Math.max(0, Math.floor((session.expiresAt - Date.now()) / 1000));
                 const cookieSecure = IS_PROD ? 'Secure; ' : '';
                 const cookie = `sessionToken=${encodeURIComponent(session.token)}; Path=/; SameSite=Lax; ${cookieSecure}Max-Age=${maxAge}`;
@@ -1458,7 +1460,23 @@ const server = http.createServer(async (req, res) => {
         const session = await requireSession(req, res, USER_LEVEL_ADMIN);
         if (!session) return;
         const users = await db.getAllUsers();
-        sendJson(res, 200, { users });
+        let sessions = [];
+        try { sessions = await db.getActiveSessionsFromDb(); } catch (_) { sessions = []; }
+        const counts = {};
+        const lastActivity = {};
+        for (const s of sessions) {
+            const uid = s.user_id;
+            if (!uid) continue;
+            counts[uid] = (counts[uid] || 0) + 1;
+            const la = Number(s.last_activity) || Number(s.lastActivity) || Number(s.created_at) || Number(s.createdAt) || 0;
+            if (la > (lastActivity[uid] || 0)) lastActivity[uid] = la;
+        }
+        const enriched = users.map(u => ({
+            ...u,
+            activeSessions: counts[u.id] || 0,
+            lastActivity: lastActivity[u.id] || null
+        }));
+        sendJson(res, 200, { users: enriched });
         return;
     }
 
@@ -1926,8 +1944,11 @@ const server = http.createServer(async (req, res) => {
         req.on('end', async () => {
             try {
                 const { sessionToken } = JSON.parse(body);
+                const s = sessionToken ? await auth.getSession(sessionToken) : null;
                 await auth.deleteSession(sessionToken);
-                
+                if (s && s.userId) {
+                    try { db.logAction(s.userId, s.username || '', 'logout', '', '', '', clientIp); } catch (_) {}
+                }
                 const cookieSecure = IS_PROD ? 'Secure; ' : '';
                 res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `sessionToken=; Path=/; SameSite=Lax; ${cookieSecure}Max-Age=0` });
                 res.end(JSON.stringify({ success: true, message: 'Logged out' }));
@@ -3629,6 +3650,8 @@ const server = http.createServer(async (req, res) => {
         }
         const parsed = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
         const querySteamId = (parsed.searchParams.get('steamId') || '').trim();
+        const mode = (parsed.searchParams.get('mode') || 'admin').toLowerCase();
+        const effectiveMode = mode === 'player' ? 'player' : 'admin';
         let adminSteamId = /^\d{5,}$/.test(querySteamId) ? querySteamId : PUNISHMENTS_ADMIN_STEAM_ID;
         if (session.level < USER_LEVEL_ADMIN) {
             const user = await db.getUserById(session.userId);
@@ -3662,28 +3685,28 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         (async () => {
-            const cached = getPunishmentsFromCache(adminSteamId);
-            const cachedItem = getPunishmentsCacheEntry(adminSteamId);
+            const cached = getPunishmentsFromCache(adminSteamId, effectiveMode);
+            const cachedItem = getPunishmentsCacheEntry(adminSteamId, effectiveMode);
             const cachedFresh = cached && cachedItem && (nowMs() - cachedItem.ts) <= PUNISHMENTS_CACHE_TTL_MS;
             if (cachedFresh) {
-                sendJson(res, 200, { count: cached.length, punishments: cached, stale: false, source: 'cache' });
+                sendJson(res, 200, { count: cached.length, punishments: cached, stale: false, source: 'cache', mode: effectiveMode });
                 return;
             }
             try {
                 const response = await Promise.race([
-                    fetchPunishmentsForSteamId(adminSteamId),
+                    fetchPunishmentsForSteamId(adminSteamId, effectiveMode),
                     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), PUNISHMENTS_REQ_TIMEOUT_MS))
                 ]);
                 const punishments = Array.isArray(response?.punishments) ? response.punishments : [];
-                setPunishmentsToCache(adminSteamId, punishments);
-                sendJson(res, 200, { count: punishments.length, punishments, stale: false, source: 'upstream' });
+                setPunishmentsToCache(adminSteamId, effectiveMode, punishments);
+                sendJson(res, 200, { count: punishments.length, punishments, stale: false, source: 'upstream', mode: effectiveMode });
             } catch (_) {
-                const stale = getPunishmentsFromCache(adminSteamId);
+                const stale = getPunishmentsFromCache(adminSteamId, effectiveMode);
                 if (stale) {
-                    sendJson(res, 200, { count: stale.length, punishments: stale, stale: true, source: 'stale-cache' });
+                    sendJson(res, 200, { count: stale.length, punishments: stale, stale: true, source: 'stale-cache', mode: effectiveMode });
                     return;
                 }
-                sendJson(res, 200, { count: 0, punishments: [], stale: false });
+                sendJson(res, 200, { count: 0, punishments: [], stale: false, mode: effectiveMode });
             }
         })();
         return;
@@ -3710,6 +3733,108 @@ const server = http.createServer(async (req, res) => {
         }).on('error', () => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end('[]');
+        });
+        return;
+    }
+
+    // --- Discord по SteamID (из BDD) ---
+    if (parsedUrl.pathname === '/api/discord' && req.method === 'GET') {
+        const session = await getSessionFromReq(req);
+        if (!session) {
+            sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
+            return;
+        }
+        const sid = String(parsedUrl.searchParams.get('steamid') || '').trim();
+        if (!sid) {
+            sendError(res, 400, 'BAD_STEAMID', 'Нужен steamid');
+            return;
+        }
+        if (!bddStaffPg.isConfigured()) {
+            sendJson(res, 200, { steamid: sid, discord_id: '', discord_nickname: '' });
+            return;
+        }
+        try {
+            const map = await bddStaffPg.getDiscordBySteamIds([sid]);
+            const d = map[sid] || {};
+            sendJson(res, 200, { steamid: sid, discord_id: d.discord_id || '', discord_nickname: d.discord_nickname || '' });
+        } catch (err) {
+            sendError(res, 500, 'DB_ERROR', err.message || 'DB error');
+        }
+        return;
+    }
+
+    // --- VDF checks history ---
+    if (parsedUrl.pathname === '/api/vdf-history' && req.method === 'GET') {
+        const session = await getSessionFromReq(req);
+        if (!session) {
+            sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
+            return;
+        }
+        try {
+            const limit = Math.min(200, parseInt(parsedUrl.searchParams.get('limit') || '100', 10));
+            const checks = await db.getVdfHistoryChecks(limit);
+            sendJson(res, 200, { checks });
+        } catch (err) {
+            sendError(res, 500, 'DB_ERROR', err.message || 'DB error');
+        }
+        return;
+    }
+    if (parsedUrl.pathname.startsWith('/api/vdf-history/') && req.method === 'GET') {
+        const session = await getSessionFromReq(req);
+        if (!session) {
+            sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
+            return;
+        }
+        const parts = parsedUrl.pathname.split('/').filter(Boolean);
+        const checkId = parts[2] ? parseInt(parts[2], 10) : NaN;
+        if (!Number.isFinite(checkId)) {
+            sendError(res, 400, 'BAD_ID', 'Нужен check_id');
+            return;
+        }
+        try {
+            if (parts[3] === 'download') {
+                const file = await db.getVdfContentByCheckId(checkId);
+                if (!file || !file.content) {
+                    sendError(res, 404, 'NOT_FOUND', 'VDF не найден');
+                    return;
+                }
+                res.writeHead(200, {
+                    'Content-Type': 'application/octet-stream',
+                    'Content-Disposition': `attachment; filename=${encodeURIComponent(file.filename || `check_${checkId}.vdf`)}`
+                });
+                res.end(file.content);
+                return;
+            }
+            const details = await db.getVdfHistoryDetails(checkId);
+            sendJson(res, 200, { check_id: checkId, details });
+        } catch (err) {
+            sendError(res, 500, 'DB_ERROR', err.message || 'DB error');
+        }
+        return;
+    }
+
+    // --- Дропы (leaderboard) ---
+    if (parsedUrl.pathname === '/api/drops' && req.method === 'GET') {
+        const limit = Math.min(100, parseInt(parsedUrl.searchParams.get('limit') || '50', 10));
+        const page = Math.max(1, parseInt(parsedUrl.searchParams.get('page') || '1', 10));
+        const apiUrl = `https://api.fearproject.ru/leaderboard/drops?page=${page}&limit=${limit}`;
+        https.get(apiUrl, {
+            headers: {
+                'Accept': '*/*',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+                'Origin': 'https://fearproject.ru',
+                'Referer': 'https://fearproject.ru/',
+                ...(FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {})
+            }
+        }, (apiRes) => {
+            let data = '';
+            apiRes.on('data', c => data += c);
+            apiRes.on('end', () => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(data);
+            });
+        }).on('error', () => {
+            sendJson(res, 200, { players: [], total: 0 });
         });
         return;
     }
@@ -3877,6 +4002,7 @@ const server = http.createServer(async (req, res) => {
     if (urlPath === '/auth' || urlPath === '/auth/') fileRelPath = '/auth.html';
     else if (urlPath === '/settings' || urlPath === '/settings/') fileRelPath = '/settings.html';
     else if (urlPath === '/logs' || urlPath === '/logs/') fileRelPath = '/logs.html';
+    else if (urlPath === '/vdf-history' || urlPath === '/vdf-history/') fileRelPath = '/vdf-history.html';
     else if (urlPath === '/whitelist' || urlPath === '/whitelist/') fileRelPath = '/whitelist.html';
     else if (urlPath === '/faq' || urlPath === '/faq/') fileRelPath = '/faq.html';
     else if (urlPath === '/dashboard' || urlPath === '/dashboard/') fileRelPath = '/index.html';
@@ -3884,7 +4010,7 @@ const server = http.createServer(async (req, res) => {
 
     // Guard: если пользователь не авторизован, не отдаём защищённые HTML страницы.
     // Делается на сервере, чтобы работало даже если JS не загрузился.
-    const isHtmlPage = fileRelPath === '/index.html' || fileRelPath === '/settings.html' || fileRelPath === '/logs.html' || fileRelPath === '/whitelist.html';
+    const isHtmlPage = fileRelPath === '/index.html' || fileRelPath === '/settings.html' || fileRelPath === '/logs.html' || fileRelPath === '/whitelist.html' || fileRelPath === '/vdf-history.html';
     if (isHtmlPage) {
         const tokenFromCookie = getSessionTokenFromCookie(req.headers.cookie || '');
         const session = tokenFromCookie ? await auth.getSession(tokenFromCookie) : null;

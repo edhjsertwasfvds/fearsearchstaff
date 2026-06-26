@@ -379,10 +379,6 @@
                     <i class="ph ph-gear text-lg"></i>
                     <span class="text-sm font-medium">Настройки</span>
                 </a>
-                <a href="/logs" class="block w-full px-4 py-3 text-left text-gray-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-3 mb-1">
-                    <i class="ph ph-list-bullets text-lg"></i>
-                    <span class="text-sm font-medium">Логи действий</span>
-                </a>
                 <button type="button" onclick="openLocalSettingsModal()" class="block w-full px-4 py-3 text-left text-gray-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-3 mb-1">
                     <i class="ph ph-sliders text-lg"></i>
                     <span class="text-sm font-medium">Локальные настройки</span>
@@ -457,6 +453,30 @@
                 </div>
                 <div class="h-8 px-3.5 rounded-full bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20 shrink-0">
                     <i class="ph ph-arrow-right text-cyan-400 text-sm"></i>
+                </div>
+            </div>
+
+            <div class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer" data-category="Дропы" onclick="openSidePanel('Дропы', 'yellow')">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-yellow-500/10 flex items-center justify-center shrink-0">
+                        <i class="ph ph-gift text-yellow-400 text-xl"></i>
+                    </div>
+                    <span class="text-[15px] font-semibold text-gray-100">Дропы</span>
+                </div>
+                <div class="h-8 px-3.5 rounded-full bg-yellow-500/10 flex items-center justify-center border border-yellow-500/20 shrink-0">
+                    <i class="ph ph-arrow-right text-yellow-400 text-sm"></i>
+                </div>
+            </div>
+
+            <div class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer" onclick="location.href='/vdf-history'">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
+                        <i class="ph ph-files text-blue-400 text-xl"></i>
+                    </div>
+                    <span class="text-[15px] font-semibold text-gray-100">История VDF</span>
+                </div>
+                <div class="h-8 px-3.5 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0">
+                    <i class="ph ph-arrow-square-out text-blue-400 text-sm"></i>
                 </div>
             </div>
 

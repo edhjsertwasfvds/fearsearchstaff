@@ -7,7 +7,8 @@ const state = {
     vac:   { loading: false, players: [] },
     yooma: { loading: false, players: [] },
     suspicious: { loading: false, players: [] },
-    allPlayers: { loading: false, players: [] },
+    allPlayers: { loading: false, players: [], requestPending: 0 },
+    drops: { loading: false, players: [], total: 0 },
     faceitLevels: {},
     openCategory: null,
     /** Вкладка внутри «Проверка»: player | admins */
@@ -22,7 +23,7 @@ const state = {
     trackedMenuOpen: false,
     trackedPlayers: [],
     trackedPlayersLoading: false,
-    punishments: { count: 0, list: [], loading: false, lastSteamId: '', selectedMonth: null, view: 'list', staffList: null, staffStatsRows: null, staffStatsLoading: false, staffStatsData: {}, staffStatsProgress: null, staffTicketsYm: null, staffTicketsBySid: {}, staffTicketsLoading: false, staffRolesBySid: {}, staffRolesLoading: false, staffCheckRanksBySid: {}, staffCheckRanksLoading: false, staffPayConfig: {}, secureLoaded: false, staffTableMode: 'new', statsPeriodMode: 'month', selectedWeekStart: null, customWeekStart: null, customWeekEnd: null, lastLoadedAt: 0, lastSource: '' },
+    punishments: { count: 0, list: [], loading: false, lastSteamId: '', mode: 'admin', selectedMonth: null, view: 'list', staffList: null, staffStatsRows: null, staffStatsLoading: false, staffStatsData: {}, staffStatsProgress: null, staffTicketsYm: null, staffTicketsBySid: {}, staffTicketsLoading: false, staffRolesBySid: {}, staffRolesLoading: false, staffCheckRanksBySid: {}, staffCheckRanksLoading: false, staffPayConfig: {}, secureLoaded: false, staffTableMode: 'new', statsPeriodMode: 'month', selectedWeekStart: null, customWeekStart: null, customWeekEnd: null, lastLoadedAt: 0, lastSource: '', playerSidFilter: '', adminFilter: '', typeFilter: '' },
     changesTab: 'roles',
     rolesEditor: { authMode: 'cookie', accessToken: '', steamid: '', name: '', adminId: '', roleName: 'Модератор', log: [] }
 };
@@ -641,9 +642,14 @@ function requestAll() {
     ws.send(JSON.stringify({ type: 'get_faceit_levels' }));
 }
 
-function requestPlayersDataNow() {
+function requestPlayersDataNow(force = false) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    const pendingAge = now - (state.allPlayers.requestPending || 0);
+    // Обычные вызовы не спамим, если запрос уже отправлен; retry-вызовы идут с force=true
+    if (!force && pendingAge < 30000) return;
     const level = getUserLevel();
+    state.allPlayers.requestPending = now;
     ws.send(JSON.stringify({ type: 'get_suspicious_bans', userLevel: level }));
     ws.send(JSON.stringify({ type: 'get_all_players' }));
 }
@@ -653,20 +659,21 @@ function schedulePlayersLoadRetry() {
         clearTimeout(playersLoadRetryTimer);
         playersLoadRetryTimer = null;
     }
-    playersLoadRetryLeft = 5;
+    playersLoadRetryLeft = 3;
     const tick = () => {
         if (!isPlayersCategoryOpen()) return;
         const stillLoading = state.allPlayers.loading && state.allPlayers.players.length === 0;
         if (!stillLoading) return;
-        requestPlayersDataNow();
+        requestPlayersDataNow(true);
         playersLoadRetryLeft -= 1;
         if (playersLoadRetryLeft > 0) {
-            playersLoadRetryTimer = setTimeout(tick, 900);
+            playersLoadRetryTimer = setTimeout(tick, 1500);
         } else {
             playersLoadRetryTimer = null;
+            state.allPlayers.requestPending = 0;
         }
     };
-    playersLoadRetryTimer = setTimeout(tick, 500);
+    playersLoadRetryTimer = setTimeout(tick, 800);
 }
 
 let _punishmentsPrefetchStarted = false;
@@ -757,7 +764,7 @@ function applyMessage(data) {
             break;
         case 'all_players':
             if (!data.loading) {
-                state.allPlayers = { loading: false, players: Array.isArray(data.players) ? data.players : [] };
+                state.allPlayers = { loading: false, players: Array.isArray(data.players) ? data.players : [], requestPending: 0 };
                 syncTrackedPlayersPresence(state.allPlayers.players);
                 if (playersLoadRetryTimer) {
                     clearTimeout(playersLoadRetryTimer);
@@ -1111,7 +1118,13 @@ function renderPanel() {
     if (cat === 'Игроки' || cat === 'Опасные') {
         const { loading, players } = state.allPlayers;
         if (loading && players.length === 0) {
-            content.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Загрузка игроков...</p>';
+            content.innerHTML = `<div class="text-gray-400 text-sm text-center py-8">
+                <div class="flex items-center justify-center gap-2 mb-2">
+                    <div class="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span>Запрос к серверу отправлен, ожидаем данные...</span>
+                </div>
+                <div class="text-gray-600 text-xs">Если данные не приходят, проверьте статус сервера</div>
+            </div>`;
         } else {
             const merged = mergeAllPlayersWithBans(players);
             content.innerHTML = buildAllPlayersTable(merged);
@@ -1147,9 +1160,20 @@ function renderPanel() {
         const ownSteamMode = getUserLevel() < 3;
         const ownSteamId = String(state.userSteamId || '');
         const punishmentsError = String(state.punishments.error || '').trim();
+        const mode = state.punishments.mode === 'player' ? 'player' : 'admin';
+        const typeFilterValue = String(state.punishments.typeFilter || '');
         const punishmentsInputHtml = `
-            <div class="flex gap-2 mb-4">
-                <input type="text" id="punishmentsSteamIdInput" placeholder="${ownSteamMode ? 'Ваш SteamID или SteamID обычного админа' : 'SteamID админа'}" autocomplete="off" class="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-emerald-500 transition-colors font-mono" value="${escapeHtml(state.punishments.lastSteamId || ownSteamId || '')}" onkeydown="if(event.key==='Enter') loadPunishmentsBySteamId()">
+            <div class="flex flex-wrap gap-2 mb-4">
+                <input type="text" id="punishmentsSteamIdInput" placeholder="${mode === 'player' ? 'SteamID игрока' : (ownSteamMode ? 'Ваш SteamID или SteamID админа' : 'SteamID админа')}" autocomplete="off" class="flex-1 min-w-[180px] bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-emerald-500 transition-colors font-mono" value="${escapeHtml(state.punishments.lastSteamId || ownSteamId || '')}" onkeydown="if(event.key==='Enter') loadPunishmentsBySteamId()">
+                <select id="punishmentsModeSelect" onchange="setPunishmentsMode(this.value)" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 min-w-[140px]">
+                    <option value="admin" ${mode === 'admin' ? 'selected' : ''}>По админу</option>
+                    <option value="player" ${mode === 'player' ? 'selected' : ''}>По игроку</option>
+                </select>
+                <select id="punishmentsTypeSelect" onchange="setPunishmentsTypeFilter(this.value)" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500 min-w-[120px]">
+                    <option value="" ${typeFilterValue === '' ? 'selected' : ''}>Все типы</option>
+                    <option value="1" ${typeFilterValue === '1' ? 'selected' : ''}>Бан</option>
+                    <option value="2" ${typeFilterValue === '2' ? 'selected' : ''}>Мут</option>
+                </select>
                 <button type="button" onclick="loadPunishmentsBySteamId()" class="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg transition-colors">${ownSteamMode ? 'Обновить' : 'Загрузить'}</button>
             </div>`;
 
@@ -1290,12 +1314,13 @@ function renderPanel() {
         const filteredList = monthScopedList.filter(isVisibleStatus);
         const unbannedList = monthScopedList.filter(isUnbannedStatus);
         /** Список наказаний: активные + истёкшие + разбанен (одна таблица, без отдельного счётчика «снято»). */
+        const typeFilter = String(state.punishments.typeFilter || '').trim();
         const displayList = monthScopedList.filter((p) => {
-            const s = Number(p?.status);
-            return s === 1 || s === 2 || s === 4;
+            if (typeFilter && String(p.type) !== typeFilter) return false;
+            return true;
         });
-        const visibleReasons = buildReasonStats(filteredList);
-        const unbannedReasons = buildReasonStats(unbannedList);
+        const visibleReasons = [];
+        const unbannedReasons = [];
         const canViewStaffStats = getUserLevel() >= 3;
         if (view === 'stats' && !canViewStaffStats) {
             state.punishments.view = 'list';
@@ -1553,78 +1578,20 @@ function renderPanel() {
                     </table>
                 </div>`;
         } else {
-            const listBans = displayList.filter(p => p.type === 1).length;
-            const listMutes = displayList.filter(p => p.type === 2).length;
-            content.innerHTML = punishmentsInputHtml + monthSelectHtml + `
-                <div class="flex gap-3 mb-4 flex-wrap">
-                    <div class="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
-                        <span class="text-rose-400 font-bold">${listBans}</span>
-                        <span class="text-gray-500 text-xs">банов</span>
-                    </div>
-                    <div class="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                        <span class="text-amber-400 font-bold">${listMutes}</span>
-                        <span class="text-gray-500 text-xs">мутов</span>
-                    </div>
-                    <div class="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-                        <span class="text-white font-bold">${displayList.length}</span>
-                        <span class="text-gray-500 text-xs">всего за период</span>
-                    </div>
-                </div>
-                <div class="mb-4">
-                    <div class="text-gray-400 text-xs mb-1">Причины (активно/истек):</div>
-                    <div class="flex flex-wrap gap-2">
-                        ${(visibleReasons.length ? visibleReasons : [['—', 0]]).slice(0, 10).map(([reason, count]) => `
-                            <span class="px-2 py-1 rounded bg-white/5 border border-white/10 text-xs text-gray-300">${escapeHtml(reason)}: <span class="text-white">${count}</span></span>
-                        `).join('')}
-                    </div>
-                </div>
-                <div class="mb-4">
-                    <div class="text-gray-400 text-xs mb-1">Причины (разбанен):</div>
-                    <div class="flex flex-wrap gap-2">
-                        ${(unbannedReasons.length ? unbannedReasons : [['—', 0]]).slice(0, 10).map(([reason, count]) => `
-                            <span class="px-2 py-1 rounded bg-blue-500/10 border border-blue-500/20 text-xs text-gray-300">${escapeHtml(reason)}: <span class="text-blue-300">${count}</span></span>
-                        `).join('')}
-                    </div>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-sm">
-                        <thead>
-                            <tr class="text-gray-400 border-b border-white/10">
-                                <th class="py-3 px-2 font-semibold">Игрок</th>
-                                <th class="py-3 px-2 font-semibold">SteamID</th>
-                                <th class="py-3 px-2 font-semibold">Причина</th>
-                                <th class="py-3 px-2 font-semibold">Админ</th>
-                                <th class="py-3 px-2 font-semibold">Тип</th>
-                                <th class="py-3 px-2 font-semibold">Статус</th>
-                                <th class="py-3 px-2 font-semibold">Длительность</th>
-                                <th class="py-3 px-2 font-semibold">Создано</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${displayList.length === 0
-                                ? `<tr><td colspan="8" class="py-6 text-center ${punishmentsError ? 'text-rose-400' : 'text-gray-500'}">${loading ? 'Загрузка наказаний...' : (punishmentsError ? escapeHtml(punishmentsError) : (ownSteamMode ? 'Введите ваш SteamID или SteamID админа и нажмите «Обновить»' : 'Введите SteamID админа и нажмите «Загрузить»'))}</td></tr>`
-                                : displayList.map(p => {
-                                const st = statusLabel(p.status);
-                                return `
-                                <tr class="border-b border-white/5 hover:bg-white/[0.03] row-new">
-                                    <td class="py-3 px-2">
-                                        <div class="flex items-center gap-2">
-                                            <img src="${(p.avatar || DEFAULT_AVATAR).replace(/^http:\/\//i, 'https://')}" class="w-8 h-8 rounded-full shrink-0" onerror="this.src='${DEFAULT_AVATAR}'">
-                                            <span class="text-white font-medium truncate max-w-[140px]">${escapeHtml(p.name || '—')}</span>
-                                        </div>
-                                    </td>
-                                    <td class="py-3 px-2 font-mono text-gray-400 text-xs">${escapeHtml(String(p.steamid || ''))}</td>
-                                    <td class="py-3 px-2 text-gray-300 max-w-[180px] truncate" title="${escapeHtml(p.reason || '')}">${escapeHtml(p.reason || '—')}</td>
-                                    <td class="py-3 px-2 text-gray-400">${escapeHtml(p.admin || '—')}</td>
-                                    <td class="py-3 px-2"><span class="px-2 py-0.5 rounded text-xs font-medium ${p.type === 1 ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'}">${typeLabel(p.type)}</span></td>
-                                    <td class="py-3 px-2"><span class="px-2 py-0.5 rounded text-xs font-medium ${st.class}">${st.text}</span></td>
-                                    <td class="py-3 px-2 text-gray-400">${formatDuration(p.duration)}</td>
-                                    <td class="py-3 px-2 text-gray-500 text-xs">${formatTs(getCreatedTs(p))}</td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>`;
+            content.innerHTML = buildPunishmentsListView(mode, monthScopedList, punishmentsInputHtml, monthSelectHtml, punishmentsError, loading, ownSteamMode);
+        }
+        staggerRows(content);
+        return;
+    }
+
+    if (cat === 'Дропы') {
+        const { loading, players, total } = state.drops;
+        if (loading && players.length === 0) {
+            content.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Загрузка дропов...</p>';
+        } else if (players.length > 0) {
+            content.innerHTML = buildDropsTable(players, total);
+        } else {
+            content.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">Нет данных по дропам</p>';
         }
         staggerRows(content);
         return;
@@ -2382,7 +2349,8 @@ async function loadPunishmentsBySteamId() {
     state.punishments.view = 'list';
     scheduleRenderPanel();
     try {
-        const res = await fetch('/api/punishments?steamId=' + encodeURIComponent(steamId), { headers: apiAuthHeaders() });
+        const mode = state.punishments.mode === 'player' ? 'player' : 'admin';
+        const res = await fetch('/api/punishments?steamId=' + encodeURIComponent(steamId) + '&mode=' + encodeURIComponent(mode), { headers: apiAuthHeaders() });
         if (res.status === 403) {
             const err = await res.json().catch(() => ({}));
             state.punishments = {
@@ -2408,6 +2376,208 @@ async function loadPunishmentsBySteamId() {
     }
     renderCounts();
     scheduleRenderPanel();
+}
+
+function setPunishmentsPlayerSidFilter(value) {
+    state.punishments.playerSidFilter = String(value || '').trim();
+    scheduleRenderPanel();
+}
+function setPunishmentsAdminFilter(value) {
+    state.punishments.adminFilter = String(value || '').trim();
+    scheduleRenderPanel();
+}
+function setPunishmentsTypeFilter(value) {
+    state.punishments.typeFilter = String(value || '').trim();
+    scheduleRenderPanel();
+}
+function setPunishmentsMode(mode) {
+    state.punishments.mode = (mode === 'player' ? 'player' : 'admin');
+    scheduleRenderPanel();
+}
+function resetPunishmentsFilters() {
+    state.punishments.playerSidFilter = '';
+    state.punishments.adminFilter = '';
+    state.punishments.typeFilter = '';
+    scheduleRenderPanel();
+}
+
+function buildPunishmentsListView(mode, monthScopedList, inputHtml, monthSelectHtml, errorText, loading, ownSteamMode) {
+    const typeFilter = String(state.punishments.typeFilter || '');
+    const scoped = monthScopedList.filter(p => !typeFilter || String(p.type) === typeFilter);
+    const activeBans = scoped.filter(p => p.type === 1 && p._active);
+    const expiredBans = scoped.filter(p => p.type === 1 && p._expired);
+    const activeMutes = scoped.filter(p => p.type === 2 && p._active);
+    const expiredMutes = scoped.filter(p => p.type === 2 && p._expired);
+    const removed = scoped.filter(p => p._removed);
+    const totalWithoutRemoved = scoped.filter(p => !p._removed).length;
+
+    const formatTs = (ts) => {
+        if (ts == null || ts === '') return '—';
+        const n = parseInt(ts, 10);
+        if (!Number.isFinite(n) || n <= 0) return '—';
+        return new Date(n * 1000).toLocaleString('ru');
+    };
+    const formatDuration = (dur) => {
+        if (dur == null || dur === '') return '—';
+        const n = parseInt(dur, 10);
+        if (!Number.isFinite(n) || n <= 0) return 'Навсегда';
+        if (n < 3600) return n / 60 + ' мин';
+        if (n < 86400) return n / 3600 + ' ч';
+        return Math.floor(n / 86400) + ' дн';
+    };
+    const typeLabel = (t) => (t === 1 ? 'Бан' : t === 2 ? 'Мут' : t);
+    const statusBadge = (p) => {
+        if (p._removed) return { text: 'Снято', class: 'bg-blue-500/20 text-blue-400' };
+        if (p._active) return { text: 'Активно', class: 'bg-rose-500/20 text-rose-400' };
+        return { text: 'Истек срок', class: 'bg-gray-500/20 text-gray-400' };
+    };
+    const getCreatedTs = (p) => getPunishmentCreatedTs(p);
+
+    const buildTable = (arr, title) => {
+        if (!arr.length) return '';
+        return `
+        <div class="mb-5">
+            <div class="text-gray-300 text-sm font-semibold mb-2">${escapeHtml(title)} <span class="text-gray-500 text-xs">(${arr.length})</span></div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead>
+                        <tr class="text-gray-400 border-b border-white/10">
+                            <th class="py-2 px-2 font-semibold">Игрок</th>
+                            <th class="py-2 px-2 font-semibold">SteamID</th>
+                            <th class="py-2 px-2 font-semibold">Причина</th>
+                            <th class="py-2 px-2 font-semibold">Админ</th>
+                            <th class="py-2 px-2 font-semibold">Тип</th>
+                            <th class="py-2 px-2 font-semibold">Статус</th>
+                            <th class="py-2 px-2 font-semibold">Длительность</th>
+                            <th class="py-2 px-2 font-semibold">Создано</th>
+                            <th class="py-2 px-2 font-semibold">Истекает</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${arr.map(p => {
+                            const st = statusBadge(p);
+                            return `
+                            <tr class="border-b border-white/5 hover:bg-white/[0.03] row-new">
+                                <td class="py-2 px-2">
+                                    <div class="flex items-center gap-2">
+                                        <img src="${(p.avatar || DEFAULT_AVATAR).replace(/^http:\/\//i, 'https://')}" class="w-7 h-7 rounded-full shrink-0" onerror="this.src='${DEFAULT_AVATAR}'">
+                                        <span class="text-white font-medium truncate max-w-[120px]">${escapeHtml(p.name || '—')}</span>
+                                    </div>
+                                </td>
+                                <td class="py-2 px-2 font-mono text-gray-400 text-xs">${escapeHtml(String(p.steamid || ''))}</td>
+                                <td class="py-2 px-2 text-gray-300 max-w-[160px] truncate" title="${escapeHtml(p.reason || '')}">${escapeHtml(p.reason || '—')}</td>
+                                <td class="py-2 px-2 text-gray-400">${escapeHtml(p.admin || '—')}</td>
+                                <td class="py-2 px-2"><span class="px-2 py-0.5 rounded text-xs font-medium ${p.type === 1 ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'}">${typeLabel(p.type)}</span></td>
+                                <td class="py-2 px-2"><span class="px-2 py-0.5 rounded text-xs font-medium ${st.class}">${st.text}</span></td>
+                                <td class="py-2 px-2 text-gray-400">${formatDuration(p.duration)}</td>
+                                <td class="py-2 px-2 text-gray-500 text-xs">${formatTs(getCreatedTs(p))}</td>
+                                <td class="py-2 px-2 text-gray-500 text-xs">${formatTs(p.expires)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    };
+
+    const summaryCards = `
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-5">
+            <div class="bg-rose-500/10 border border-rose-500/20 rounded-lg px-2 py-3 text-center">
+                <div class="text-rose-400 font-bold text-lg">${activeBans.length}</div>
+                <div class="text-gray-500 text-[10px]">Активные баны</div>
+            </div>
+            <div class="bg-rose-500/5 border border-rose-500/10 rounded-lg px-2 py-3 text-center">
+                <div class="text-rose-300 font-bold text-lg">${expiredBans.length}</div>
+                <div class="text-gray-500 text-[10px]">Истекшие баны</div>
+            </div>
+            <div class="bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-3 text-center">
+                <div class="text-amber-400 font-bold text-lg">${activeMutes.length}</div>
+                <div class="text-gray-500 text-[10px]">Активные муты</div>
+            </div>
+            <div class="bg-amber-500/5 border border-amber-500/10 rounded-lg px-2 py-3 text-center">
+                <div class="text-amber-300 font-bold text-lg">${expiredMutes.length}</div>
+                <div class="text-gray-500 text-[10px]">Истекшие муты</div>
+            </div>
+            <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2 py-3 text-center">
+                <div class="text-emerald-400 font-bold text-lg">${totalWithoutRemoved}</div>
+                <div class="text-gray-500 text-[10px]">Всего без снятых</div>
+            </div>
+            <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg px-2 py-3 text-center">
+                <div class="text-blue-400 font-bold text-lg">${removed.length}</div>
+                <div class="text-gray-500 text-[10px]">Снятые</div>
+            </div>
+        </div>`;
+
+    const tables = [
+        buildTable(activeBans, 'Активные баны'),
+        buildTable(expiredBans, 'Истекшие баны'),
+        buildTable(activeMutes, 'Активные муты'),
+        buildTable(expiredMutes, 'Истекшие муты'),
+        buildTable(removed, 'Снятые')
+    ].join('');
+
+    const emptyState = (!tables.trim() && !loading)
+        ? `<p class="text-gray-500 text-sm text-center py-8">${errorText ? escapeHtml(errorText) : (ownSteamMode ? 'Введите ваш SteamID или SteamID админа и нажмите «Обновить»' : 'Введите SteamID и нажмите «Загрузить»')}</p>`
+        : '';
+
+    return inputHtml + monthSelectHtml + summaryCards + tables + emptyState;
+}
+
+async function loadDrops() {
+    if (state.drops.loading) return;
+    state.drops.loading = true;
+    scheduleRenderPanel();
+    try {
+        const res = await fetch('/api/drops?limit=50', { headers: apiAuthHeaders() });
+        const data = await res.json().catch(() => ({ players: [], total: 0 }));
+        state.drops = { loading: false, players: Array.isArray(data.players) ? data.players : [], total: data.total || 0 };
+    } catch (_) {
+        state.drops.loading = false;
+    }
+    renderCounts();
+    scheduleRenderPanel();
+}
+
+function buildDropsTable(players, total) {
+    const sorted = [...players].sort((a, b) => (a.position || 0) - (b.position || 0));
+    return `
+        <div class="flex gap-3 mb-4 flex-wrap">
+            <div class="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                <span class="text-yellow-400 font-bold">${total || players.length}</span>
+                <span class="text-gray-500 text-xs">игроков в топе</span>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead>
+                    <tr class="text-gray-400 border-b border-white/10">
+                        <th class="py-3 px-2 font-semibold">#</th>
+                        <th class="py-3 px-2 font-semibold">Игрок</th>
+                        <th class="py-3 px-2 font-semibold">Сумма</th>
+                        <th class="py-3 px-2 font-semibold">Скинов</th>
+                        <th class="py-3 px-2 font-semibold">Лучшие скины</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${sorted.length === 0
+                        ? `<tr><td colspan="5" class="py-6 text-center text-gray-500">Нет данных</td></tr>`
+                        : sorted.map(p => {
+                            const sid = String(p.steamid || '');
+                            const skins = (p.skins || []).slice(0, 3).map(s => s.name || '').join(', ') + ((p.skins || []).length > 3 ? ` +${p.skins.length - 3}` : '');
+                            return `<tr class="border-b border-white/5 hover:bg-white/[0.03] row-new">
+                                <td class="py-3 px-2 text-gray-500 font-mono">${p.position || '?'}</td>
+                                <td class="py-3 px-2">
+                                    <div class="text-white font-medium truncate max-w-[160px]">${escapeHtml(p.name || '—')}</div>
+                                    <div class="text-gray-600 font-mono text-[10px]">${escapeHtml(sid)}</div>
+                                </td>
+                                <td class="py-3 px-2 text-yellow-400 font-semibold">${p.total || 0}₽</td>
+                                <td class="py-3 px-2 text-gray-300">${p.count || 0}</td>
+                                <td class="text-gray-400 text-xs max-w-[200px] truncate" title="${escapeHtml(skins)}">${escapeHtml(skins) || '—'}</td>
+                            </tr>`;
+                        }).join('')}
+                </tbody>
+            </table>
+        </div>`;
 }
 
 function buildVacTable(players) {
@@ -3206,6 +3376,7 @@ function openSidePanel(category) {
     }
     if (category === 'Наказания') loadPunishmentsStaffList();
     if (category === 'Наказания') prefetchPunishmentsSummary();
+    if (category === 'Дропы') loadDrops();
     if (category === 'Игроки' || category === 'Опасные') {
         startFearReportsIfNeeded();
         requestPlayersDataNow();
@@ -4086,6 +4257,7 @@ async function runPlayerCheck() {
                         <a href="https://steamcommunity.com/profiles/${steamId}" target="_blank" rel="noopener noreferrer" class="px-2 py-0.5 bg-[#171a21] hover:bg-[#1b2838] text-white text-[10px] font-semibold rounded transition-colors">Steam</a>
                     </div>
                     <div class="flex items-center gap-2 mt-1">${d.statusHtml}${d.countrySpan || ''}</div>
+                    <div class="discord-info-line text-indigo-300 text-xs mt-1"></div>
                 </div>
             </div>
             ${d.statsCards.length > 0 ? `<div class="grid grid-cols-3 gap-2 mb-5 text-xs">${d.statsCards.join('')}</div>` : ''}
@@ -4093,6 +4265,7 @@ async function runPlayerCheck() {
                 <h4 class="text-gray-400 text-xs font-semibold mb-2">Баны</h4>
                 <div class="space-y-1.5">${d.bansHtml}</div>
             </div>`;
+        loadAndRenderDiscord(steamId, result);
     } catch (err) {
         result.innerHTML = `<p class="text-rose-400">Ошибка загрузки${err?.message ? ': ' + err.message : ''}</p>`;
     }
@@ -4621,6 +4794,7 @@ function renderModalFromMergedPlayer(p, content, steamId) {
                 </div>
                 <p class="text-gray-500 text-xs font-mono">${steamId}</p>
                 <div class="flex gap-3 mt-1 text-xs items-center">${statusHtml}</div>
+                <div class="discord-info-line text-indigo-300 text-xs mt-1"></div>
             </div>
             <button type="button" onclick="closePlayerModal()" class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center shrink-0"><i class="ph ph-x text-gray-400"></i></button>
         </div>
@@ -4630,6 +4804,20 @@ function renderModalFromMergedPlayer(p, content, steamId) {
             <div class="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
             <span class="text-gray-500 text-sm">Загрузка полных данных...</span>
         </div>`;
+    loadAndRenderDiscord(steamId, content);
+}
+
+async function loadAndRenderDiscord(steamId, container) {
+    try {
+        const res = await fetch('/api/discord?steamid=' + encodeURIComponent(steamId), { headers: apiAuthHeaders() });
+        if (!res.ok) return;
+        const d = await res.json().catch(() => ({}));
+        if (!d.discord_id) return;
+        const el = container.querySelector('.discord-info-line');
+        if (el) {
+            el.innerHTML = `Discord: <span class="text-indigo-300">${escapeHtml(d.discord_nickname || '—')}</span> <span class="text-gray-500 font-mono">${escapeHtml(d.discord_id)}</span>`;
+        }
+    } catch (_) {}
 }
 
 function renderModalPartial(localData, content, steamId) {
@@ -4754,6 +4942,7 @@ async function openPlayerModal(steamId) {
                         ${d.statusHtml}
                         ${d.countrySpan}
                     </div>
+                    <div class="discord-info-line text-indigo-300 text-xs mt-1"></div>
                 </div>
                 <button type="button" onclick="closePlayerModal()" class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center shrink-0">
                     <i class="ph ph-x text-gray-400"></i>
@@ -4778,6 +4967,7 @@ async function openPlayerModal(steamId) {
                 <a href="https://fearproject.ru/profile/${steamId}" target="_blank" rel="noopener noreferrer" class="flex-1 text-center px-3 py-2 bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold rounded-lg">FEAR</a>
             </div>
         `;
+        loadAndRenderDiscord(steamId, content);
     } catch (err) {
         if (modal.dataset.steamId === steamId) {
             content.innerHTML = `<p class="text-rose-400 text-center py-8">Ошибка загрузки${err?.message ? ': ' + err.message : ''}</p>`;

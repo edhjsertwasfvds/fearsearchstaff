@@ -3,6 +3,7 @@ const https = require('https');
 
 const config = require('../config');
 const punishments = require('./punishments');
+const bddStaffPg = require('../bddStaffPg');
 
 // Кэш стаффа и его статистики наказаний.
 // - список стаффа обновляем раз в 24 часа
@@ -42,7 +43,9 @@ async function refreshStaffList() {
         avatar_full: a?.avatar_full || '',
         group_display_name: a?.group_display_name || '',
         group_name: a?.group_name || '',
-        group_id: a?.group_id ?? null
+        group_id: a?.group_id ?? null,
+        discord_id: a?.discord_id || '',
+        discord_nickname: a?.discord_nickname || ''
     });
 
     const filterAdmin = (a) => {
@@ -120,6 +123,22 @@ async function refreshStaffList() {
         }
     }
 
+    if (bddStaffPg.isConfigured() && staffList.length > 0) {
+        try {
+            const discordMap = await bddStaffPg.getDiscordBySteamIds(staffList.map(s => s.steamid));
+            staffList = staffList.map(s => {
+                const d = discordMap[s.steamid] || {};
+                return {
+                    ...s,
+                    discord_id: d.discord_id || s.discord_id || '',
+                    discord_nickname: d.discord_nickname || s.discord_nickname || ''
+                };
+            });
+        } catch (e) {
+            console.warn('[Staff] Discord merge error:', e.message);
+        }
+    }
+
     staffPunishmentsCache.staffList = staffList;
     staffPunishmentsCache.staffListLastUpdated = Date.now();
     staffPunishmentsCache.staffListLoading = false;
@@ -158,7 +177,7 @@ async function refreshStaffPunishmentsCache() {
                     const { punishments: list } = await punishments.fetchPunishmentsForSteamId(sid);
                     const normalizedList = Array.isArray(list) ? list : [];
                     dataBySteamId[sid] = normalizedList;
-                    punishments.setPunishmentsToCache(sid, normalizedList);
+                    punishments.setPunishmentsToCache(sid, 'admin', normalizedList);
                 } catch (_) {
                     dataBySteamId[sid] = [];
                 }

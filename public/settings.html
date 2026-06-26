@@ -161,7 +161,6 @@
         <div class="flex flex-wrap items-center gap-2 mb-6">
             <button type="button" id="tabServerBtn" onclick="setSettingsTab('server')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-500/30 text-indigo-300">Сервер</button>
             <button type="button" id="tabAnalyticsBtn" onclick="setSettingsTab('analytics')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-white/5 text-gray-400 hover:bg-white/10">Аналитика</button>
-            <button type="button" id="tabSiteBtn" onclick="setSettingsTab('site')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-white/5 text-gray-400 hover:bg-white/10">Сайт</button>
             <button type="button" id="tabTechBtn" onclick="setSettingsTab('tech')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-white/5 text-gray-400 hover:bg-white/10">Тех</button>
         </div>
 
@@ -259,89 +258,6 @@
                         <div class="h-64"><canvas id="punishmentsTrendChart"></canvas></div>
                     </div>
                 </div>
-            </section>
-
-            <section id="usersSection" data-settings-tab="site" class="glass-panel p-6 rounded-2xl hidden">
-                <div class="flex items-center gap-3 mb-4">
-                    <div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
-                        <i class="ph ph-shield-check text-amber-400 text-xl"></i>
-                    </div>
-                    <h2 class="text-xl font-bold text-white">Уровни доступа</h2>
-                </div>
-                <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
-                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
-                        <span class="level-badge bg-gray-500/20 text-gray-400">1</span>
-                        <span class="text-gray-500 text-xs">Мл. модер</span>
-                    </div>
-                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
-                        <span class="level-badge bg-gray-500/20 text-gray-400">2</span>
-                        <span class="text-gray-500 text-xs">Модер</span>
-                    </div>
-                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
-                        <span class="level-badge bg-indigo-500/20 text-indigo-400">3</span>
-                        <span class="text-gray-500 text-xs">СТМ / СТА</span>
-                    </div>
-                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
-                        <span class="level-badge bg-amber-500/20 text-amber-400">4</span>
-                        <span class="text-gray-500 text-xs">ГА</span>
-                    </div>
-                    <div class="flex items-center gap-2 p-2 rounded-lg bg-white/[0.03]">
-                        <span class="level-badge bg-rose-500/20 text-rose-400">5</span>
-                        <span class="text-gray-500 text-xs">Суперадмин</span>
-                    </div>
-                </div>
-                <div class="mb-4">
-                    <div class="flex gap-2 flex-wrap">
-                        <input type="text" id="newUsername" placeholder="Логин" class="flex-1 min-w-[100px] bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm">
-                        <input type="password" id="newPassword" placeholder="Пароль" class="flex-1 min-w-[100px] bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm">
-                        <select id="newUserLevel" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 appearance-none cursor-pointer min-w-[72px] text-center">
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                            <option value="5">5</option>
-                        </select>
-                        <button onclick="addUser()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 rounded-lg font-semibold transition-colors text-sm">Добавить</button>
-                    </div>
-                </div>
-                <div id="resetUsersBlock" data-requires-level5="true" class="mt-4 pt-4 border-t border-white/[0.06] hidden space-y-3">
-                    <div class="flex gap-2 flex-wrap items-center">
-                        <button onclick="restoreFromEnv()" class="px-4 py-2 bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded-lg font-semibold text-sm transition-colors">Восстановить из .env</button>
-                        <span class="text-gray-500 text-xs">Добавит пользователей из DEFAULT_USERS в .env (если их нет)</span>
-                    </div>
-                    <div class="flex gap-2 flex-wrap items-center">
-                        <button onclick="resetAllUsers()" class="px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 rounded-lg font-semibold text-sm transition-colors">Сбросить всех пользователей</button>
-                        <span class="text-gray-500 text-xs">Опасная операция. Потребуется ввести подтверждение.</span>
-                    </div>
-                </div>
-                <div id="usersList" class="space-y-2 mt-4"></div>
-            </section>
-
-            <section id="inviteCodesSection" data-settings-tab="site" data-requires-level5="true" class="glass-panel p-6 rounded-2xl hidden">
-                <div class="flex items-center gap-3 mb-4">
-                    <div class="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center">
-                        <i class="ph ph-ticket text-green-400 text-xl"></i>
-                    </div>
-                    <h2 class="text-xl font-bold text-white">Пригласительные коды</h2>
-                </div>
-                <p class="text-gray-400 text-sm mb-4">Создайте одноразовый код для регистрации с определённым уровнем доступа</p>
-                <div class="flex gap-2 flex-wrap mb-4">
-                    <select id="inviteLevel" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 min-w-[140px]">
-                        <option value="1">1 — Мл. модер</option>
-                        <option value="2">2 — Модер</option>
-                        <option value="3">3 — СТМ / СТА</option>
-                        <option value="4">4 — ГА</option>
-                        <option value="5">5 — Суперадмин</option>
-                    </select>
-                    <button onclick="generateInvite()" class="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg font-semibold text-sm transition-colors">Сгенерировать код</button>
-                </div>
-                <div id="generatedCode" class="hidden mb-4 p-3 bg-green-500/10 rounded-lg border border-green-500/20">
-                    <span class="text-gray-400 text-sm">Код для уровня <strong id="generatedCodeLevel" class="text-green-400"></strong>: </span>
-                    <code id="inviteCodeDisplay" class="text-green-400 font-mono font-bold"></code>
-                    <button onclick="copyInviteCode()" class="ml-2 px-2 py-1 bg-white/5 rounded text-xs hover:bg-white/10">Копировать</button>
-                    <p class="text-gray-500 text-xs mt-1">Ссылка: <a id="inviteLink" href="#" class="text-indigo-400 hover:underline break-all" target="_blank"></a></p>
-                </div>
-                <div id="inviteCodesList" class="space-y-2 text-sm"></div>
             </section>
 
             <section id="updateNoticeSection" data-settings-tab="tech" data-requires-level5="true" class="glass-panel p-6 rounded-2xl hidden">
@@ -552,14 +468,13 @@
         }
 
         function setSettingsTab(tab) {
-            currentSettingsTab = (tab === 'site' || tab === 'tech' || tab === 'analytics') ? tab : 'server';
+            currentSettingsTab = (tab === 'tech' || tab === 'analytics') ? tab : 'server';
             document.querySelectorAll('[data-settings-tab]').forEach((el) => {
                 el.classList.toggle('hidden', el.getAttribute('data-settings-tab') !== currentSettingsTab);
             });
             const btnMap = {
                 server: document.getElementById('tabServerBtn'),
                 analytics: document.getElementById('tabAnalyticsBtn'),
-                site: document.getElementById('tabSiteBtn'),
                 tech: document.getElementById('tabTechBtn')
             };
             Object.entries(btnMap).forEach(([k, el]) => {
@@ -590,8 +505,6 @@
 
             document.getElementById('userName').textContent = user.displayName || user.username;
             if (currentUserLevel >= 5) {
-                document.querySelectorAll('[data-requires-level5="true"]').forEach((el) => el.classList.remove('hidden'));
-                loadInviteCodes();
                 loadUpdateNotice();
             }
             setSettingsTab('server');
@@ -601,7 +514,6 @@
             applyPanelVisibility('staff');
             loadActivityChart();
             loadStaff();
-            loadUsers();
             loadMaintenanceStatus();
             loadStaffNorms();
             loadStaffAnalytics();
@@ -812,7 +724,11 @@
                             <div>
                                 <span class="text-white text-sm font-semibold">${esc(u.displayName || u.username)}</span>
                                 ${isMe ? '<span class="text-amber-400 text-[10px] ml-1">(вы)</span>' : ''}
-                                <div class="text-gray-500 text-xs">${levelNames[u.level] || 'Уровень ' + u.level}</div>
+                                <div class="text-gray-500 text-xs flex items-center gap-2 flex-wrap">
+                                    ${levelNames[u.level] || 'Уровень ' + u.level}
+                                    ${u.activeSessions > 0 ? `<span class="text-emerald-400">• ${u.activeSessions} ${u.activeSessions === 1 ? 'устройство' : (u.activeSessions < 5 ? 'устройства' : 'устройств')}</span>` : ''}
+                                </div>
+                                ${u.lastActivity ? `<div class="text-gray-500 text-[10px]">Последняя активность: ${new Date(u.lastActivity).toLocaleString('ru-RU')}</div>` : ''}
                                 ${canBindSteamId ? `<div class="text-gray-500 text-[10px] font-mono">SteamID: ${esc(u.steamId || 'не привязан')}</div>` : ''}
                             </div>
                         </div>
@@ -1040,9 +956,10 @@
                         <div class="flex items-center gap-3 p-2 bg-white/[0.03] rounded-lg">
                             <img src="${avatar}" class="w-9 h-9 rounded-full" onerror="this.src='${defaultAvatar}'">
                             <div class="min-w-0">
-                                <div class="text-white text-sm font-semibold truncate">${esc(s.name || '—')}</div>
+                                <div class="text-white text-sm font-semibold truncate" title="Группа: ${esc(s.group_display_name || '—')} (${esc(s.group_name || '—')})">${esc(s.name || '—')}${s.group_name ? ` <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-white/10 text-gray-300">${esc(s.group_name)}</span>` : ''}</div>
                                 <div class="text-gray-500 text-xs font-mono">${esc(s.steamid || '')}</div>
                                 <div class="text-gray-400 text-xs">${esc(s.group_display_name || '')}</div>
+                                ${s.discord_id ? `<div class="text-indigo-400 text-xs" title="DiscordID: ${esc(s.discord_id)}">Discord: ${esc(s.discord_nickname || '—')} <span class="text-gray-500 font-mono">${esc(s.discord_id)}</span></div>` : ''}
                                 ${roleSelectHtml}
                                 ${rankSelectHtml}
                                 ${hideOnSiteHtml}
