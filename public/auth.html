@@ -280,7 +280,8 @@
         const discordAuthData = params.get('discord_auth');
         if (discordAuthData) {
             try {
-                const data = JSON.parse(atob(discordAuthData));
+                const normalized = discordAuthData.replace(/-/g, '+').replace(/_/g, '/');
+                const data = JSON.parse(atob(normalized));
                 if (data && data.sessionToken) {
                     localStorage.setItem('user', JSON.stringify(data));
                     window.location.replace('/');
