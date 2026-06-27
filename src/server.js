@@ -1396,7 +1396,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') {
         const reqMethod = String(req.headers['access-control-request-method'] || '').toUpperCase();
         if (reqMethod && !allowMethods.split(',').map(s => s.trim()).includes(reqMethod)) {
-            sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
+            // Возвращаем 200 с перечислением разрешённых методов, чтобы браузер не блокировал на этапе preflight
+            res.writeHead(200, {
+                'Access-Control-Allow-Origin': allowedOrigin || reqOrigin || '*',
+                'Access-Control-Allow-Methods': allowMethods,
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key'
+            });
+            res.end();
             return;
         }
         res.writeHead(200);
