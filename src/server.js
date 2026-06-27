@@ -1512,6 +1512,13 @@ const server = http.createServer(async (req, res) => {
             const msg = String(err.message || '').toLowerCase();
             if (msg.includes('token error')) {
                 errorCode = 'discord_token';
+                if (msg.includes('invalid_client')) {
+                    errorCode = 'discord_client_secret';
+                } else if (msg.includes('invalid_grant') || msg.includes('invalid_request')) {
+                    errorCode = 'discord_token_grant';
+                } else if (msg.includes('redirect_uri') || msg.includes('invalid_redirect')) {
+                    errorCode = 'discord_uri_mismatch';
+                }
             } else if (msg.includes('user error')) {
                 errorCode = 'discord_user';
             } else if (msg.includes('database') || msg.includes('db') || msg.includes('sql')) {
@@ -4239,6 +4246,7 @@ process.on('SIGTERM', () => {
     console.log('База данных:', db.getDbPath(), `backend=${db.backend || '?'}`);
     const fearTokenStatus = config.FEAR_ACCESS_TOKEN ? 'present' : 'missing';
     console.log(`[Startup] FEAR_ACCESS_TOKEN=${fearTokenStatus}, DISCORD_BOT_TOKEN=${config.DISCORD_BOT_TOKEN ? 'present' : 'missing'}, STEAM_API_KEY=${config.STEAM_API_KEY ? 'present' : 'missing'}`);
+    console.log(`[Startup] Discord OAuth configured=${discordAuth.isDiscordAuthConfigured()}, redirect_uri=${config.DISCORD_REDIRECT_URI || 'not set'}`);
 
     // Startup diagnostics: users / VDF history / whitelist
     try {
