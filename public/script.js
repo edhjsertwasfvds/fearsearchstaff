@@ -589,6 +589,12 @@ function bindFrontendRealtimeSyncHandlers() {
 // ——— WebSocket ———
 
 function connectWebSocket() {
+    const isPublicLanding = ['/', '/index.html', '/index.html/', '/dashboard', '/dashboard/', '/home', '/home/'].includes(window.location.pathname);
+    const user = getCurrentUser();
+    if (isPublicLanding && !user?.sessionToken) {
+        // Лендинг без авторизации: не подключаем WebSocket, не загружаем админ-данные.
+        return;
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
     ws = new WebSocket(wsUrl);
@@ -4532,6 +4538,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     };
     const preloadTimer = setTimeout(revealUi, 2000);
     const path = window.location.pathname;
+    const isPublicLanding = path === '/' || path === '/index.html' || path === '/index.html/' || path === '/dashboard' || path === '/dashboard/' || path === '/home' || path === '/home/';
     if (path === '/auth' || path === '/auth/') {
         clearTimeout(preloadTimer);
         revealUi();
@@ -4544,6 +4551,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (!stored || stored === 'null' || stored === 'undefined') {
         clearTimeout(preloadTimer);
         revealUi();
+        if (isPublicLanding) {
+            // Лендинг доступен без авторизации: показываем кнопку входа.
+            const loginButton = document.getElementById('loginButton');
+            const adminPanel = document.getElementById('adminPanel');
+            if (loginButton) loginButton.style.display = 'block';
+            if (adminPanel) adminPanel.classList.add('hidden');
+            return;
+        }
         window.location.href = '/auth';
         return;
     }
@@ -4582,6 +4597,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                 clearTimeout(preloadTimer);
                 revealUi();
                 localStorage.removeItem('user');
+                if (isPublicLanding) {
+                    const loginButton = document.getElementById('loginButton');
+                    const adminPanel = document.getElementById('adminPanel');
+                    if (loginButton) loginButton.style.display = 'block';
+                    if (adminPanel) adminPanel.classList.add('hidden');
+                    return;
+                }
                 window.location.href = '/auth';
                 return;
             }
@@ -4617,6 +4639,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         clearTimeout(preloadTimer);
         revealUi();
         localStorage.removeItem('user');
+        if (isPublicLanding) {
+            const loginButton = document.getElementById('loginButton');
+            const adminPanel = document.getElementById('adminPanel');
+            if (loginButton) loginButton.style.display = 'block';
+            if (adminPanel) adminPanel.classList.add('hidden');
+            return;
+        }
         window.location.href = '/auth';
     }
 });

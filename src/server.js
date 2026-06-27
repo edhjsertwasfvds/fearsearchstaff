@@ -1459,6 +1459,8 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         try {
+            const loginInfo = discordAuth.isDiscordAuthConfigured() ? (discordAuth.getDiscordLoginUrl('/') || {}) : {};
+            console.log(`[Auth] Discord callback: host=${req.headers.host || 'unknown'}, redirect_uri=${loginInfo.url || 'n/a'}`);
             const tokenData = await discordAuth.exchangeCode(code);
             const discordUser = await discordAuth.getDiscordUser(tokenData.access_token);
             const discordId = String(discordUser.id);
@@ -1505,8 +1507,19 @@ const server = http.createServer(async (req, res) => {
             res.end();
             return;
         } catch (err) {
-            console.error('[Auth] Discord callback error:', err.message);
-            res.writeHead(302, { Location: '/auth.html?error=discord_callback' });
+            console.error('[Auth] Discord callback error:', err && err.stack ? err.stack : err.message);
+            let errorCode = 'discord_callback';
+            const msg = String(err.message || '').toLowerCase();
+            if (msg.includes('token error')) {
+                errorCode = 'discord_token';
+            } else if (msg.includes('user error')) {
+                errorCode = 'discord_user';
+            } else if (msg.includes('database') || msg.includes('db') || msg.includes('sql')) {
+                errorCode = 'discord_db';
+            } else if (msg.includes('session')) {
+                errorCode = 'discord_session';
+            }
+            res.writeHead(302, { Location: `/auth.html?error=${errorCode}` });
             res.end();
             return;
         }
@@ -4122,7 +4135,8 @@ const server = http.createServer(async (req, res) => {
 
     // Guard: если пользователь не авторизован, не отдаём защищённые HTML страницы.
     // Делается на сервере, чтобы работало даже если JS не загрузился.
-    const isHtmlPage = fileRelPath === '/index.html' || fileRelPath === '/settings.html' || fileRelPath === '/logs.html' || fileRelPath === '/whitelist.html' || fileRelPath === '/vdf-history.html';
+    // Главная страница /index.html публичная (лендинг с кнопкой входа).
+    const isHtmlPage = fileRelPath === '/settings.html' || fileRelPath === '/logs.html' || fileRelPath === '/whitelist.html' || fileRelPath === '/vdf-history.html';
     if (isHtmlPage) {
         const tokenFromCookie = getSessionTokenFromCookie(req.headers.cookie || '');
         const session = tokenFromCookie ? await auth.getSession(tokenFromCookie) : null;
@@ -4150,21 +4164,8 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Защита JS ассетов: отдаём .js только авторизованным пользователям.
-    // Для `<script>` нельзя проставить Authorization header, поэтому используем cookie `sessionToken`.
-    if (ext === '.js') {
-        const authHeader = req.headers['authorization'] || '';
-        const bearer = String(authHeader).startsWith('Bearer ') ? String(authHeader).slice(7) : '';
-        const tokenFromCookie = getSessionTokenFromCookie(req.headers.cookie || '');
-        const sessionToken = bearer || tokenFromCookie || '';
-        const session = sessionToken ? await auth.getSession(sessionToken) : null;
-        if (!session) {
-            res.writeHead(401, { 'Content-Type': 'text/plain' });
-            res.end('Unauthorized');
-            return;
-        }
-    }
-
+    // JS/CSS/иконки и другие ассеты публично доступны, чтобы лендинг и страница
+    // авторизации работали без сессии. Бизнес-данные всё равно защищены API.
     fs.stat(absPath, (err, st) => {
         if (err || !st || !st.isFile()) {
             res.writeHead(404);

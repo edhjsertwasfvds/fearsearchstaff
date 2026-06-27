@@ -219,7 +219,11 @@
             const errorMap = {
                 'discord_denied': 'Вход через Discord отменён',
                 'invalid_state': 'Ошибка безопасности (state). Попробуйте ещё раз.',
-                'discord_callback': 'Ошибка Discord. Попробуйте позже.'
+                'discord_callback': 'Ошибка обработки Discord-авторизации. Попробуйте позже или обратитесь к администратору.',
+                'discord_token': 'Не удалось получить токен Discord. Проверьте настройки Redirect URI в Discord-приложении.',
+                'discord_user': 'Не удалось получить профиль Discord. Попробуйте позже.',
+                'discord_db': 'Ошибка базы данных при авторизации. Обратитесь к администратору.',
+                'discord_session': 'Ошибка создания сессии. Попробуйте позже.'
             };
             errorMsg.textContent = errorMap[errorFromUrl] || 'Ошибка авторизации';
             errorMsg.style.display = 'block';
