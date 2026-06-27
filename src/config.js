@@ -13,21 +13,48 @@ const FEAR_ACCESS_TOKEN = process.env.FEAR_ACCESS_TOKEN || (() => {
 const FACEIT_API_KEY = process.env.FACEIT_API_KEY || '';
 const CSSTATS_COOKIE = process.env.CSSTATS_COOKIE || '';
 const DXDCS_COOKIE = process.env.DXDCS_COOKIE || '';
-const DISCORD_BOT_TOKEN = String(process.env.DISCORD_BOT_TOKEN || '').trim();
-const DISCORD_CLIENT_ID = String(process.env.DISCORD_CLIENT_ID || '').trim();
-const DISCORD_CLIENT_SECRET = String(process.env.DISCORD_CLIENT_SECRET || '').trim();
-const DISCORD_REDIRECT_URI = String(process.env.DISCORD_REDIRECT_URI || process.env.DISCORD_REDIRECT_URL || '').trim();
-const DISCORD_GUILD_ID = String(process.env.DISCORD_GUILD_ID || '').trim();
+function stripQuotes(s) {
+    s = String(s || '').trim();
+    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+        s = s.slice(1, -1).trim();
+    }
+    return s;
+}
+const DISCORD_BOT_TOKEN = stripQuotes(process.env.DISCORD_BOT_TOKEN);
+const DISCORD_CLIENT_ID = stripQuotes(process.env.DISCORD_CLIENT_ID);
+const DISCORD_CLIENT_SECRET = stripQuotes(process.env.DISCORD_CLIENT_SECRET);
+const DISCORD_REDIRECT_URI = stripQuotes(process.env.DISCORD_REDIRECT_URI || process.env.DISCORD_REDIRECT_URL);
+const DISCORD_GUILD_ID = stripQuotes(process.env.DISCORD_GUILD_ID);
 const DISCORD_DEFAULT_LEVEL = Math.min(5, Math.max(0, Number(process.env.DISCORD_DEFAULT_LEVEL || '0')));
 const DISCORD_ROLE_LEVELS = (() => {
-    const raw = process.env.DISCORD_ROLE_LEVELS || '';
-    if (!raw) return {};
     const map = {};
-    for (const part of raw.split(',')) {
-        const [roleId, levelStr] = part.split(':');
-        if (!roleId || !levelStr) continue;
-        const level = Math.min(5, Math.max(0, Number(levelStr.trim()) || 0));
-        map[roleId.trim()] = level;
+    // Явная карта role_id:level
+    const raw = process.env.DISCORD_ROLE_LEVELS || '';
+    if (raw) {
+        for (const part of raw.split(',')) {
+            const [roleId, levelStr] = part.split(':');
+            if (!roleId || !levelStr) continue;
+            const level = Math.min(5, Math.max(0, Number(levelStr.trim()) || 0));
+            map[roleId.trim()] = level;
+        }
+    }
+    // Или отдельные переменные DISCORD_ROLE_<NAME> — удобно для Railway
+    const roleEnvMapping = {
+        DISCORD_ROLE_OWNER: 5,
+        DISCORD_ROLE_GLADMIN: 5,
+        DISCORD_ROLE_STADMIN: 5,
+        DISCORD_ROLE_ADMIN_PLUS: 4,
+        DISCORD_ROLE_ADMIN: 4,
+        DISCORD_ROLE_STMODER: 3,
+        DISCORD_ROLE_MODER: 3,
+        DISCORD_ROLE_MLMODER: 2,
+        DISCORD_ROLE_CURATOR: 1,
+        DISCORD_ROLE_DOSTUP: 1,
+        DISCORD_ROLE_UNDEFINED: 0
+    };
+    for (const [envName, level] of Object.entries(roleEnvMapping)) {
+        const roleId = stripQuotes(process.env[envName]);
+        if (roleId) map[roleId] = level;
     }
     return map;
 })();
