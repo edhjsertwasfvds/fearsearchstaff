@@ -4271,7 +4271,7 @@ process.on('SIGTERM', () => {
     process.exit(1);
 });
 
-const wssAllowedOrigin = configuredAllowedOrigin || (ALLOWED_ORIGINS.length === 1 ? ALLOWED_ORIGINS[0] : '');
+const wssAllowedOrigin = (process.env.ALLOWED_ORIGIN || '').trim() || (ALLOWED_ORIGINS.length === 1 ? ALLOWED_ORIGINS[0] : '');
 const wss = attachWss({
     server,
     auth,
