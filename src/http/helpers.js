@@ -34,6 +34,8 @@ function getAllowedMethodsForApiPath(pathname) {
     if (pathname === '/api/auth/session') return 'POST, OPTIONS';
     if (pathname === '/api/auth/register-by-invite') return 'POST, OPTIONS';
     if (pathname === '/api/auth/validate-invite') return 'GET, OPTIONS';
+    if (pathname === '/api/auth/discord') return 'GET, OPTIONS';
+    if (pathname === '/api/auth/discord/callback') return 'GET, OPTIONS';
 
     if (pathname === '/api/users') return 'GET, POST, OPTIONS';
     if (/^\/api\/users\/\d+$/.test(pathname)) return 'PUT, DELETE, OPTIONS';

@@ -8,6 +8,12 @@ const {
     CSSTATS_COOKIE,
     DXDCS_COOKIE,
     PUNISHMENTS_ADMIN_STEAM_ID,
+    DISCORD_CLIENT_ID,
+    DISCORD_CLIENT_SECRET,
+    DISCORD_REDIRECT_URI,
+    DISCORD_GUILD_ID,
+    DISCORD_DEFAULT_LEVEL,
+    DISCORD_ROLE_LEVELS,
     MODERATOR_API_TOKEN,
     LAUNCHER_API_KEY,
     LAUNCHER_API_TOKEN,
@@ -128,6 +134,7 @@ const WebSocket = require('ws');
 const db = require('./database');
 const whitelistCache = require('./whitelistCache');
 const auth = require('./auth');
+const discordAuth = require('./discordAuth');
 
 async function getStaffHiddenSiteSteamIdSet() {
     let raw = await db.getSetting('staff_hidden_site_steam_ids', '[]');
@@ -479,7 +486,7 @@ function fetchFearServers(callback) {
             ...(cookieParts.length ? { 'Cookie': cookieParts.join('; ') } : {})
         }
     };
-    https.get(API_URL, opts, (apiRes) => {
+    const req = https.get(API_URL, opts, (apiRes) => {
         let data = '';
         apiRes.on('data', chunk => data += chunk);
         apiRes.on('end', () => {
@@ -490,7 +497,11 @@ function fetchFearServers(callback) {
                 callback(error);
             }
         });
-    }).on('error', callback);
+    });
+    req.setTimeout(8000, () => {
+        req.destroy(new Error('Fear API timeout'));
+    });
+    req.on('error', callback);
 }
 
 const mimeTypes = {
@@ -563,7 +574,7 @@ function checkYoomaBans(steamIds, playerDataMap, progressCallback, finalCallback
                 timeoutId = setTimeout(() => {
                     cleanup();
                     resolve(null);
-                }, 10000); // Уменьшено до 10 секунд
+                }, 6000); // Уменьшено до 6 секунд
                 
                 messageHandler = (data) => {
                     try {
@@ -1395,9 +1406,94 @@ const server = http.createServer(async (req, res) => {
         const supportLabel = String(process.env.AUTH_SUPPORT_LABEL || '').trim();
         sendJson(res, 200, {
             authSupportUrl: supportUrl || null,
-            authSupportLabel: supportLabel || null
+            authSupportLabel: supportLabel || null,
+            discordAuthEnabled: discordAuth.isDiscordAuthConfigured()
         });
         return;
+    }
+
+    // Discord OAuth: редирект на Discord
+    if (req.url === '/api/auth/discord' && req.method === 'GET') {
+        const redirect = discordAuth.getDiscordLoginUrl('/');
+        if (!redirect) {
+            sendError(res, 503, 'NOT_CONFIGURED', 'Discord OAuth не настроен');
+            return;
+        }
+        res.writeHead(302, { Location: redirect.url });
+        res.end();
+        return;
+    }
+
+    // Discord OAuth: callback
+    if (req.url.startsWith('/api/auth/discord/callback') && req.method === 'GET') {
+        const q = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams;
+        const code = q.get('code');
+        const state = q.get('state');
+        const error = q.get('error');
+        if (error) {
+            console.log('[Auth] Discord OAuth error:', error, q.get('error_description'));
+            res.writeHead(302, { Location: '/auth.html?error=discord_denied' });
+            res.end();
+            return;
+        }
+        const redirectPath = discordAuth.validateState(state);
+        if (!code || !redirectPath) {
+            res.writeHead(302, { Location: '/auth.html?error=invalid_state' });
+            res.end();
+            return;
+        }
+        try {
+            const tokenData = await discordAuth.exchangeCode(code);
+            const discordUser = await discordAuth.getDiscordUser(tokenData.access_token);
+            const discordId = String(discordUser.id);
+            const username = discordUser.username || discordId;
+            const displayName = discordUser.global_name || discordUser.username || discordId;
+            const avatar = discordAuth.getDiscordAvatarUrl(discordId, discordUser.avatar) || discordAuth.getDiscordDefaultAvatarUrl(discordId);
+
+            // Определяем уровень: БД -> Discord-роли -> env default
+            const dbLevel = await db.getUserLevel(discordId);
+            let guildRoles = [];
+            try {
+                const member = await discordAuth.getGuildMember(discordId);
+                if (member && Array.isArray(member.roles)) guildRoles = member.roles;
+            } catch (e) {
+                console.warn('[Auth] Не удалось получить роли сервера:', e.message);
+            }
+            const level = discordAuth.resolveUserLevel(discordId, dbLevel, guildRoles);
+
+            const userId = await db.createOrUpdateDiscordUser(discordId, username, displayName, level);
+            const user = await db.getUserById(userId);
+            const session = await auth.createSession(user);
+
+            console.log(`[Auth] Discord авторизация: ${displayName} (id=${discordId}, userId=${userId}, level=${level})`);
+            try { db.logAction(userId, username, 'login', '', '', `discord_id=${discordId}, level=${level}`, clientIp); } catch (_) {}
+
+            const maxAge = Math.max(0, Math.floor((session.expiresAt - Date.now()) / 1000));
+            const cookieSecure = IS_PROD ? 'Secure; ' : '';
+            const cookie = `sessionToken=${encodeURIComponent(session.token)}; Path=/; SameSite=Lax; ${cookieSecure}Max-Age=${maxAge}`;
+            // Кодируем аватар и базовые данные в URL для первичной инициализации фронтенда
+            const encoded = Buffer.from(JSON.stringify({
+                id: userId,
+                username: user.username,
+                displayName: user.displayName,
+                level: user.level,
+                discordId,
+                avatar,
+                sessionToken: session.token,
+                expiresAt: session.expiresAt
+            })).toString('base64url');
+            res.writeHead(302, {
+                'Location': `${redirectPath}?discord_auth=${encoded}`,
+                'Set-Cookie': cookie
+            });
+            res.end();
+            return;
+        } catch (err) {
+            console.error('[Auth] Discord callback error:', err.message);
+            res.writeHead(302, { Location: '/auth.html?error=discord_callback' });
+            res.end();
+            return;
+        }
     }
 
     // Авторизация по логину/паролю
@@ -4124,6 +4220,24 @@ process.on('SIGTERM', () => {
     await db.initDatabase();
     await whitelistCache.refresh(db);
     console.log('База данных:', db.getDbPath(), `backend=${db.backend || '?'}`);
+    const fearTokenStatus = config.FEAR_ACCESS_TOKEN ? 'present' : 'missing';
+    console.log(`[Startup] FEAR_ACCESS_TOKEN=${fearTokenStatus}, DISCORD_BOT_TOKEN=${config.DISCORD_BOT_TOKEN ? 'present' : 'missing'}, STEAM_API_KEY=${config.STEAM_API_KEY ? 'present' : 'missing'}`);
+
+    // Startup diagnostics: users / VDF history / whitelist
+    try {
+        const userCount = await db.getUserCount();
+        const vdfChecks = (typeof db.getVdfHistoryChecks === 'function') ? await db.getVdfHistoryChecks(1) : [];
+        const vdfCount = Array.isArray(vdfChecks) ? vdfChecks.length : 0;
+        console.log(`[Startup] users=${userCount}, vdf_checks=${vdfCount}, whitelist=${whitelistCache.size() || 0}`);
+        if (userCount === 0) {
+            console.warn('[Startup] В базе нет пользователей — проверьте DEFAULT_USERS / ADMIN_USERNAME env');
+        }
+        if (vdfCount === 0) {
+            console.warn('[Startup] VDF history пуста — проверьте, что чекер запущен с тем же DATABASE_URL и сохраняет результаты');
+        }
+    } catch (e) {
+        console.warn('[Startup] diagnostics error:', e.message);
+    }
 
     server.listen(PORT, () => {
         console.log(`Сервер запущен на http://localhost:${PORT}`);
@@ -4174,10 +4288,12 @@ const wss = attachWss({
 // При подключении сразу шлём статистику и все списки (если есть кэш) — меньше гонок и пустых экранов
 function sendCurrentData(ws) {
     if (ws.readyState !== WebSocket.OPEN) return;
-        sendStats(ws);
+    sendStats(ws);
     sendVACBans(ws);
     sendYoomaBans(ws);
     sendSuspiciousBans(ws);
+    sendAllPlayers(ws);
+    sendFaceitLevels(ws);
 }
 
 // Количество «опасных» (DXDCS + VAC + Yooma, только кто сейчас на Fear, не в whitelist)

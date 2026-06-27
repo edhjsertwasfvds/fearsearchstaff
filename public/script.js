@@ -29,6 +29,7 @@ const state = {
 };
 let playersQuickSearch = '';
 const ROLES_EDITOR_ACCESS_TOKEN_KEY = 'rolesEditorAccessToken';
+const stateLastReceived = { stats: 0, vac: 0, yooma: 0, suspicious: 0, allPlayers: 0, faceitLevels: 0 };
 
 let ws = null;
 let reconnectTimer = null;
@@ -598,12 +599,17 @@ function connectWebSocket() {
             reconnectTimer = null;
         }
         reconnectAttempts = 0;
-        requestAll();
+        // Сервер отправляет все данные при подключении (sendCurrentData) — не дублируем запросы.
         startFrontendMinuteRefresh();
         bindFrontendRealtimeSyncHandlers();
         if (isPlayersCategoryOpen()) {
-            requestPlayersDataNow();
-            schedulePlayersLoadRetry();
+            // Если панель игроков открыта, запрашиваем список только если сервер не прислал его за 3 сек.
+            setTimeout(() => {
+                if (!state.allPlayers.players.length && !state.allPlayers.loading) {
+                    requestPlayersDataNow(true);
+                    schedulePlayersLoadRetry();
+                }
+            }, 3000);
         }
     };
     
@@ -634,23 +640,37 @@ function connectWebSocket() {
 function requestAll() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const level = getUserLevel();
-    ws.send(JSON.stringify({ type: 'get_stats' }));
-    ws.send(JSON.stringify({ type: 'get_vac_bans' }));
-    ws.send(JSON.stringify({ type: 'get_yooma_bans', userLevel: level }));
-    ws.send(JSON.stringify({ type: 'get_suspicious_bans', userLevel: level }));
-    ws.send(JSON.stringify({ type: 'get_all_players' }));
-    ws.send(JSON.stringify({ type: 'get_faceit_levels' }));
+    const now = Date.now();
+    const STALE_MS = 30000;
+    if (now - stateLastReceived.stats > STALE_MS) {
+        ws.send(JSON.stringify({ type: 'get_stats' }));
+    }
+    if (now - stateLastReceived.vac > STALE_MS) {
+        ws.send(JSON.stringify({ type: 'get_vac_bans' }));
+    }
+    if (now - stateLastReceived.yooma > STALE_MS) {
+        ws.send(JSON.stringify({ type: 'get_yooma_bans', userLevel: level }));
+    }
+    if (now - stateLastReceived.suspicious > STALE_MS) {
+        ws.send(JSON.stringify({ type: 'get_suspicious_bans', userLevel: level }));
+    }
+    if (now - stateLastReceived.allPlayers > STALE_MS) {
+        state.allPlayers.requestPending = now;
+        ws.send(JSON.stringify({ type: 'get_all_players' }));
+    }
+    if (now - stateLastReceived.faceitLevels > STALE_MS) {
+        ws.send(JSON.stringify({ type: 'get_faceit_levels' }));
+    }
 }
 
 function requestPlayersDataNow(force = false) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const now = Date.now();
     const pendingAge = now - (state.allPlayers.requestPending || 0);
-    // Обычные вызовы не спамим, если запрос уже отправлен; retry-вызовы идут с force=true
+    // Обычные вызовы не спамим, если запрос уже отправлен или данные уже получены недавно.
     if (!force && pendingAge < 30000) return;
-    const level = getUserLevel();
+    if (!force && state.allPlayers.players.length > 0 && stateLastReceived.allPlayers > now - 30000) return;
     state.allPlayers.requestPending = now;
-    ws.send(JSON.stringify({ type: 'get_suspicious_bans', userLevel: level }));
     ws.send(JSON.stringify({ type: 'get_all_players' }));
 }
 
@@ -730,14 +750,17 @@ function schedulePlayersPanelRefresh(withAnimation = false, delay = 80) {
 
 /** Единственная точка обновления состояния из сообщений сервера */
 function applyMessage(data) {
+    const now = Date.now();
     switch (data.type) {
         case 'stats':
             state.stats = data;
+            stateLastReceived.stats = now;
             renderCounts();
             break;
         case 'vac_bans':
             if (!data.loading) {
                 state.vac = { loading: false, players: Array.isArray(data.players) ? data.players : [] };
+                stateLastReceived.vac = now;
             } else {
                 state.vac.loading = true;
             }
@@ -747,6 +770,7 @@ function applyMessage(data) {
         case 'yooma_bans':
             if (!data.loading) {
                 state.yooma = { loading: false, players: Array.isArray(data.players) ? data.players : [] };
+                stateLastReceived.yooma = now;
             } else {
                 state.yooma.loading = true;
             }
@@ -756,6 +780,7 @@ function applyMessage(data) {
         case 'suspicious_bans':
             if (!data.loading) {
                 state.suspicious = { loading: false, players: Array.isArray(data.players) ? data.players : [] };
+                stateLastReceived.suspicious = now;
             } else {
                 state.suspicious.loading = true;
             }
@@ -765,6 +790,7 @@ function applyMessage(data) {
         case 'all_players':
             if (!data.loading) {
                 state.allPlayers = { loading: false, players: Array.isArray(data.players) ? data.players : [], requestPending: 0 };
+                stateLastReceived.allPlayers = now;
                 syncTrackedPlayersPresence(state.allPlayers.players);
                 if (playersLoadRetryTimer) {
                     clearTimeout(playersLoadRetryTimer);
@@ -793,6 +819,7 @@ function applyMessage(data) {
         case 'faceit_levels':
             if (data.levels) {
                 state.faceitLevels = data.levels;
+                stateLastReceived.faceitLevels = now;
                 applyFaceitLevels();
                 if (isPlayersCategoryOpen() && isFaceitHideActive()) schedulePlayersPanelRefresh(false, 120);
             }
@@ -1431,7 +1458,7 @@ function renderPanel() {
             const baseRows = staffList.map(s => ({
                 admin_steamid: String(s.steamid || ''),
                 admin: s.name || '—',
-                admin_avatar: s.avatar_full || '',
+                admin_avatar: s.discord_avatar || s.avatar_full || '',
                 group: s.group_display_name || '',
                 bans: 0,
                 mutes: 0,
@@ -2242,7 +2269,7 @@ function computeStaffStatsRows(staffList, statsDataBySid, selectedMonth) {
             return {
                 admin_steamid: sid,
                 admin: s.name || '—',
-                admin_avatar: s.avatar_full || '',
+                admin_avatar: s.discord_avatar || s.avatar_full || '',
                 group: s.group_display_name || '',
                 bans,
                 mutes,
@@ -3889,7 +3916,7 @@ function buildBddStaffResultsFull(rows) {
             </div>`
             : '<span class="text-gray-500 text-xs">Invalid Steam ID — profile link unavailable</span>';
         return `<article class="rounded-xl border border-white/10 bg-white/[0.02] p-4 mb-3 last:mb-0 flex gap-4 items-start">
-            ${bddStaffAdminAvatar(r.admin_avatar_full)}
+            ${bddStaffAdminAvatar(r.discord_avatar || r.admin_avatar_full)}
             <div class="min-w-0 flex-1 space-y-2">
                 <div class="flex flex-wrap items-center gap-2">
                     <span class="text-white text-sm font-semibold">${escapeHtml(displayName)}</span>

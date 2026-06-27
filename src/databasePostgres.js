@@ -154,7 +154,8 @@ async function initDatabase() {
             level INTEGER NOT NULL DEFAULT 1,
             created_at BIGINT NOT NULL,
             steam_id TEXT,
-            launcher_api_key TEXT UNIQUE
+            launcher_api_key TEXT UNIQUE,
+            discord_id TEXT UNIQUE
         );
         CREATE TABLE IF NOT EXISTS panel_staff_tickets (
             steam_id TEXT NOT NULL,
@@ -205,6 +206,7 @@ async function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_panel_server_activity_ts ON panel_server_activity(timestamp);
         CREATE INDEX IF NOT EXISTS idx_panel_server_activity_hour ON panel_server_activity(hour);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_panel_users_username ON panel_users(username);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_panel_users_discord_id ON panel_users(discord_id);
         CREATE INDEX IF NOT EXISTS idx_panel_staff_tickets_ym ON panel_staff_tickets(ym);
         CREATE INDEX IF NOT EXISTS idx_panel_staff_tickets_sid ON panel_staff_tickets(steam_id);
         CREATE INDEX IF NOT EXISTS idx_panel_staff_check_ranks_sid ON panel_staff_check_ranks(steam_id);
@@ -212,6 +214,8 @@ async function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_panel_fear_pun_created ON panel_fear_punishments(created);
         CREATE INDEX IF NOT EXISTS idx_panel_fear_pun_status ON panel_fear_punishments(status);
     `);
+    // Миграция: добавляем discord_id в старые таблицы panel_users
+    try { await poolQuery('ALTER TABLE panel_users ADD COLUMN discord_id TEXT UNIQUE'); } catch (_) {}
 
     const bootstrapUsers = getBootstrapUsersFromEnv();
     for (const u of bootstrapUsers) {
@@ -668,6 +672,29 @@ async function createUser(username, password, displayName, level = 1) {
     return newId;
 }
 
+async function createOrUpdateDiscordUser(discordId, username, displayName, level) {
+    const existing = await poolQuery('SELECT id FROM panel_users WHERE discord_id = $1', [discordId]);
+    const safeUsername = username || 'discord_' + discordId;
+    const safeDisplayName = displayName || safeUsername;
+    const now = Date.now();
+    if (existing.rows[0]) {
+        await poolQuery(
+            'UPDATE panel_users SET username = $1, display_name = $2, level = $3 WHERE id = $4',
+            [safeUsername, safeDisplayName, level, existing.rows[0].id]
+        );
+        return existing.rows[0].id;
+    }
+    const tempPassword = crypto.randomBytes(16).toString('hex');
+    const hash = bcrypt.hashSync(tempPassword, 10);
+    const { rows } = await poolQuery(
+        'INSERT INTO panel_users (username, password_hash, display_name, level, created_at, steam_id, discord_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+        [safeUsername, hash, safeDisplayName, level, now, null, discordId]
+    );
+    const newId = rows[0].id;
+    await ensureUserLauncherApiKey(newId);
+    return newId;
+}
+
 async function verifyUser(username, password) {
     const { rows } = await poolQuery('SELECT * FROM panel_users WHERE username = $1', [username]);
     const user = rows[0];
@@ -683,7 +710,7 @@ async function verifyUser(username, password) {
 
 async function getUserById(id) {
     const { rows } = await poolQuery(
-        'SELECT id, username, display_name, level, created_at, steam_id FROM panel_users WHERE id = $1',
+        'SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM panel_users WHERE id = $1',
         [id]
     );
     const user = rows[0];
@@ -694,14 +721,34 @@ async function getUserById(id) {
               displayName: user.display_name,
               level: user.level,
               createdAt: user.created_at,
-              steamId: user.steam_id || null
+              steamId: user.steam_id || null,
+              discordId: user.discord_id || null
+          }
+        : null;
+}
+
+async function getUserByDiscordId(discordId) {
+    const { rows } = await poolQuery(
+        'SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM panel_users WHERE discord_id = $1',
+        [discordId]
+    );
+    const user = rows[0];
+    return user
+        ? {
+              id: user.id,
+              username: user.username,
+              displayName: user.display_name,
+              level: user.level,
+              createdAt: user.created_at,
+              steamId: user.steam_id || null,
+              discordId: user.discord_id || null
           }
         : null;
 }
 
 async function getAllUsers() {
     const { rows } = await poolQuery(
-        'SELECT id, username, display_name, level, created_at, steam_id FROM panel_users ORDER BY level DESC, created_at ASC',
+        'SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM panel_users ORDER BY level DESC, created_at ASC',
         []
     );
     return rows.map((u) => ({
@@ -710,7 +757,8 @@ async function getAllUsers() {
         displayName: u.display_name,
         level: u.level,
         createdAt: u.created_at,
-        steamId: u.steam_id || null
+        steamId: u.steam_id || null,
+        discordId: u.discord_id || null
     }));
 }
 
@@ -1134,11 +1182,13 @@ module.exports = {
     createUser,
     verifyUser,
     getUserById,
+    getUserByDiscordId,
     getAllUsers,
     deleteUser,
     updateUserLevel,
     updateUserPassword,
     updateUserSteamId,
+    createOrUpdateDiscordUser,
     getUserCount,
     deleteAllUsers,
     restoreUsersFromEnv,

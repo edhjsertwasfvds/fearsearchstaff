@@ -230,6 +230,12 @@ function initDatabase() {
         db.exec('ALTER TABLE users ADD COLUMN launcher_api_key TEXT');
     } catch (_) {}
     try {
+        db.exec('ALTER TABLE users ADD COLUMN discord_id TEXT');
+    } catch (_) {}
+    try {
+        db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_id ON users(discord_id)');
+    } catch (_) {}
+    try {
         db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_launcher_api_key ON users(launcher_api_key)');
     } catch (_) {}
     db.exec(`CREATE INDEX IF NOT EXISTS idx_action_logs_user ON action_logs(user_discord_id)`);
@@ -290,6 +296,42 @@ function initDatabase() {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_fear_pun_admin ON fear_punishments(admin_steamid)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_fear_pun_created ON fear_punishments(created)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_fear_pun_status ON fear_punishments(status)`);
+    // VDF history tables (mirrored from checker backend for SQLite fallback)
+    db.exec(`CREATE TABLE IF NOT EXISTS config_hashes (
+        config_hash TEXT PRIMARY KEY,
+        filename TEXT,
+        content TEXT,
+        created_at INTEGER NOT NULL
+    )`);
+    db.exec(`CREATE TABLE IF NOT EXISTS config_accounts (
+        config_hash TEXT NOT NULL,
+        steamid TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (config_hash, steamid)
+    )`);
+    db.exec(`CREATE TABLE IF NOT EXISTS vdf_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        check_id INTEGER NOT NULL,
+        steamid TEXT NOT NULL,
+        nickname TEXT,
+        fear_banned INTEGER DEFAULT 0,
+        fear_reason TEXT,
+        fear_unban_time TEXT,
+        vac_banned INTEGER DEFAULT 0,
+        vac_days_ago INTEGER DEFAULT 0,
+        game_bans INTEGER DEFAULT 0,
+        yooma_banned INTEGER DEFAULT 0,
+        yooma_reason TEXT,
+        admin_group TEXT,
+        config_hash TEXT,
+        filename TEXT,
+        attachment_url TEXT,
+        message_url TEXT,
+        on_fear INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL
+    )`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_vdf_history_steamid ON vdf_history(steamid)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_vdf_history_check_id ON vdf_history(check_id)`);
     const bootstrapUsers = getBootstrapUsersFromEnv();
     if (bootstrapUsers.length) {
         for (const u of bootstrapUsers) {
@@ -547,16 +589,36 @@ function createUser(username, password, displayName, level = 1) {
     ensureUserLauncherApiKey(newId);
     return newId;
 }
+function createOrUpdateDiscordUser(discordId, username, displayName, level) {
+    const existing = db.prepare('SELECT id FROM users WHERE discord_id = ?').get(discordId);
+    const safeUsername = username || 'discord_' + discordId;
+    const safeDisplayName = displayName || safeUsername;
+    const now = Date.now();
+    if (existing) {
+        db.prepare('UPDATE users SET username = ?, display_name = ?, level = ? WHERE id = ?').run(safeUsername, safeDisplayName, level, existing.id);
+        return existing.id;
+    }
+    const tempPassword = crypto.randomBytes(16).toString('hex');
+    const hash = bcrypt.hashSync(tempPassword, 10);
+    const result = db.prepare('INSERT INTO users (username, password_hash, display_name, level, created_at, steam_id, discord_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(safeUsername, hash, safeDisplayName, level, now, null, discordId);
+    const newId = result.lastInsertRowid;
+    ensureUserLauncherApiKey(newId);
+    return newId;
+}
 function verifyUser(username, password) {
     const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
     if (!user || !bcrypt.compareSync(password, user.password_hash)) return null;
     return { id: user.id, username: user.username, displayName: user.display_name, level: user.level, steamId: user.steam_id || null };
 }
 function getUserById(id) {
-    const user = db.prepare('SELECT id, username, display_name, level, created_at, steam_id FROM users WHERE id = ?').get(id);
-    return user ? { id: user.id, username: user.username, displayName: user.display_name, level: user.level, createdAt: user.created_at, steamId: user.steam_id || null } : null;
+    const user = db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM users WHERE id = ?').get(id);
+    return user ? { id: user.id, username: user.username, displayName: user.display_name, level: user.level, createdAt: user.created_at, steamId: user.steam_id || null, discordId: user.discord_id || null } : null;
 }
-function getAllUsers() { return db.prepare('SELECT id, username, display_name, level, created_at, steam_id FROM users ORDER BY level DESC, created_at ASC').all().map(u => ({ id: u.id, username: u.username, displayName: u.display_name, level: u.level, createdAt: u.created_at, steamId: u.steam_id || null })); }
+function getUserByDiscordId(discordId) {
+    const user = db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM users WHERE discord_id = ?').get(discordId);
+    return user ? { id: user.id, username: user.username, displayName: user.display_name, level: user.level, createdAt: user.created_at, steamId: user.steam_id || null, discordId: user.discord_id || null } : null;
+}
+function getAllUsers() { return db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM users ORDER BY level DESC, created_at ASC').all().map(u => ({ id: u.id, username: u.username, displayName: u.display_name, level: u.level, createdAt: u.created_at, steamId: u.steam_id || null, discordId: u.discord_id || null })); }
 function deleteUser(id) { return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0; }
 function updateUserLevel(id, level) { return db.prepare('UPDATE users SET level = ? WHERE id = ?').run(level, id).changes > 0; }
 function updateUserPassword(id, newPassword) { const hash = bcrypt.hashSync(newPassword, 10); return db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, id).changes > 0; }
@@ -758,6 +820,49 @@ function getTicketsMonthComparison() {
     return { current: curr?.total || 0, previous: prev?.total || 0 };
 }
 
+// VDF history helpers (SQLite fallback; shared with checker backend)
+function getVdfHistoryChecks(limit = 100) {
+    const rows = db.prepare(`
+        SELECT check_id, filename, MAX(created_at) as created_at,
+               COUNT(*) as total,
+               SUM(CASE WHEN fear_banned OR yooma_banned THEN 1 ELSE 0 END) as banned
+        FROM vdf_history
+        GROUP BY check_id, filename
+        ORDER BY check_id DESC
+        LIMIT ?
+    `).all(limit);
+    return rows.map(r => ({
+        check_id: r.check_id,
+        filename: r.filename || '',
+        created_at: r.created_at,
+        total: r.total || 0,
+        banned: r.banned || 0
+    }));
+}
+
+function getVdfHistoryDetails(check_id) {
+    return db.prepare(`
+        SELECT id, check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+               vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
+               admin_group, filename, on_fear, created_at
+        FROM vdf_history
+        WHERE check_id = ?
+        ORDER BY id
+    `).all(check_id);
+}
+
+function getVdfContentByCheckId(check_id) {
+    const row = db.prepare(`
+        SELECT ch.content, ch.filename
+        FROM config_hashes ch
+        JOIN vdf_history vh ON vh.config_hash = ch.config_hash
+        WHERE vh.check_id = ?
+        LIMIT 1
+    `).get(check_id);
+    if (!row) return null;
+    return { content: row.content || '', filename: row.filename || `check_${check_id}.vdf` };
+}
+
 module.exports = {
     initialize,
     getDbPath, closeDatabase, initDatabase,
@@ -767,7 +872,7 @@ module.exports = {
     saveServerActivity, getServerActivityByHour, getServerActivityHistory, getServerActivityRange,
     setSetting, getSetting, getAllSettings,
     setUserLevel, getUserLevel, removeUserLevel, getAllUserLevels,
-    createUser, verifyUser, getUserById, getAllUsers, deleteUser, updateUserLevel, updateUserPassword, updateUserSteamId, getUserCount, deleteAllUsers, restoreUsersFromEnv,
+    createUser, verifyUser, getUserById, getUserByDiscordId, getAllUsers, deleteUser, updateUserLevel, updateUserPassword, updateUserSteamId, createOrUpdateDiscordUser, getUserCount, deleteAllUsers, restoreUsersFromEnv,
     ensureUserLauncherApiKey, getUserByLauncherApiKey,
     createInviteCode, useInviteCode, validateInviteCode, getInviteCodes, deleteInviteCode,
     saveSession, getSessionFromDb, deleteSessionFromDb, deleteSessionsByUserId, deleteAllSessionsDb, cleanupExpiredSessionsDb, getActiveSessionsFromDb,
@@ -780,5 +885,6 @@ module.exports = {
     getAllStaffCheckRanks,
     getActivityHeatmap, getActivityByServer,
     replaceFearPunishments, getFearPunishmentsStats, getFearPunishmentsByAdmin,
-    getStaffPunishmentsDaily, getPunishmentsTrend, getPunishmentsMonthComparison, getTicketsMonthComparison
+    getStaffPunishmentsDaily, getPunishmentsTrend, getPunishmentsMonthComparison, getTicketsMonthComparison,
+    getVdfHistoryChecks, getVdfHistoryDetails, getVdfContentByCheckId
 };

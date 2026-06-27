@@ -24,6 +24,66 @@ const PUNISHMENTS_DELAY_MS = 40;
 const STAFF_LIST_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const STAFF_STATS_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
+// Кэш Discord-аватарок стаффа: discord_id -> { avatar_url, ts }
+const discordAvatarCache = new Map();
+const DISCORD_AVATAR_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 часов
+
+function discordAvatarUrl(discordId, avatarHash) {
+    if (!discordId || !avatarHash) return '';
+    const ext = avatarHash.startsWith('a_') ? 'gif' : 'png';
+    return `https://cdn.discordapp.com/avatars/${discordId}/${avatarHash}.${ext}?size=128`;
+}
+
+async function fetchDiscordAvatars(discordIds) {
+    const token = config.DISCORD_BOT_TOKEN;
+    if (!token || discordIds.length === 0) return {};
+    const uniqueIds = [...new Set(discordIds.filter(Boolean))];
+    const result = {};
+
+    await Promise.all(uniqueIds.map(async (discordId) => {
+        const cached = discordAvatarCache.get(discordId);
+        if (cached && Date.now() - cached.ts < DISCORD_AVATAR_CACHE_TTL_MS) {
+            result[discordId] = cached.avatar;
+            return;
+        }
+        try {
+            const data = await new Promise((resolve, reject) => {
+                const req = https.get(`https://discord.com/api/users/${discordId}`, {
+                    headers: {
+                        'Authorization': `Bot ${token}`,
+                        'User-Agent': 'FearSearchStaffBot/1.0'
+                    },
+                    timeout: 4000
+                }, (res) => {
+                    let body = '';
+                    res.on('data', c => body += c);
+                    res.on('end', () => {
+                        if (res.statusCode !== 200) {
+                            reject(new Error(`Discord API ${res.statusCode}`));
+                            return;
+                        }
+                        try {
+                            resolve(JSON.parse(body));
+                        } catch (e) {
+                            reject(e);
+                        }
+                    });
+                });
+                req.on('error', reject);
+                req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+            });
+            const avatar = discordAvatarUrl(String(data.id || discordId), data.avatar || '');
+            discordAvatarCache.set(discordId, { avatar, ts: Date.now() });
+            result[discordId] = avatar;
+        } catch (e) {
+            discordAvatarCache.set(discordId, { avatar: '', ts: Date.now() });
+            result[discordId] = '';
+        }
+    }));
+
+    return result;
+}
+
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -139,9 +199,27 @@ async function refreshStaffList() {
         }
     }
 
+    // Подтягиваем Discord-аватарки для стаффа
+    try {
+        const discordIds = staffList.map(s => s.discord_id).filter(Boolean);
+        const avatarMap = await fetchDiscordAvatars(discordIds);
+        staffList = staffList.map(s => ({
+            ...s,
+            discord_avatar: avatarMap[s.discord_id] || ''
+        }));
+    } catch (e) {
+        console.warn('[Staff] Discord avatar fetch error:', e.message);
+    }
+
     staffPunishmentsCache.staffList = staffList;
     staffPunishmentsCache.staffListLastUpdated = Date.now();
     staffPunishmentsCache.staffListLoading = false;
+    // Перезаписываем staff.json с Discord-аватарками для offline-работы фронтенда.
+    if (staffList.length > 0) {
+        try {
+            fs.writeFileSync(STAFF_JSON_PATH, JSON.stringify(staffList, null, 2), 'utf8');
+        } catch (_) {}
+    }
     console.log('[Staff] Обновлен staff list:', staffList.length, 'чел.');
 }
 

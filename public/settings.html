@@ -922,7 +922,7 @@
                 });
 
                 staffList.innerHTML = sortedList.map(s => {
-                    const avatar = (s.avatar_full || defaultAvatar).replace(/^http:\/\//i, 'https://');
+                    const avatar = (s.discord_avatar || s.avatar_full || defaultAvatar).replace(/^http:\/\//i, 'https://');
                     const sid = String(s.steamid || '').trim();
                     const canEditRole = currentUserLevel >= 5 && sid;
                     const roleMap = { CURATOR: 'ГА', GA: 'Куратор', STA: 'СТА', STM: 'СТМ', M: 'М', ML: 'МЛ', AUTO: 'Авто' };

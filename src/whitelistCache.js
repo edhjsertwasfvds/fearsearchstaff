@@ -20,4 +20,8 @@ function entry(steamId) {
     return bySteamId.get(String(steamId)) || null;
 }
 
-module.exports = { refresh, has, entry };
+function size() {
+    return bySteamId.size;
+}
+
+module.exports = { refresh, has, entry, size };
