@@ -1428,6 +1428,17 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // Временная диагностика Discord OAuth (без раскрытия секрета)
+    if (req.url === '/api/debug/discord-oauth' && req.method === 'GET') {
+        sendJson(res, 200, {
+            clientId: config.DISCORD_CLIENT_ID ? config.DISCORD_CLIENT_ID.slice(0, 6) + '...' : null,
+            clientSecretLength: config.DISCORD_CLIENT_SECRET.length,
+            redirectUri: config.DISCORD_REDIRECT_URI,
+            configured: discordAuth.isDiscordAuthConfigured()
+        });
+        return;
+    }
+
     // Discord OAuth: редирект на Discord
     if (req.url === '/api/auth/discord' && req.method === 'GET') {
         const redirect = discordAuth.getDiscordLoginUrl('/dashboard');

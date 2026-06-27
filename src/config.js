@@ -13,11 +13,11 @@ const FEAR_ACCESS_TOKEN = process.env.FEAR_ACCESS_TOKEN || (() => {
 const FACEIT_API_KEY = process.env.FACEIT_API_KEY || '';
 const CSSTATS_COOKIE = process.env.CSSTATS_COOKIE || '';
 const DXDCS_COOKIE = process.env.DXDCS_COOKIE || '';
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || '';
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
-const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || process.env.DISCORD_REDIRECT_URL || '';
-const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID || '';
+const DISCORD_BOT_TOKEN = String(process.env.DISCORD_BOT_TOKEN || '').trim();
+const DISCORD_CLIENT_ID = String(process.env.DISCORD_CLIENT_ID || '').trim();
+const DISCORD_CLIENT_SECRET = String(process.env.DISCORD_CLIENT_SECRET || '').trim();
+const DISCORD_REDIRECT_URI = String(process.env.DISCORD_REDIRECT_URI || process.env.DISCORD_REDIRECT_URL || '').trim();
+const DISCORD_GUILD_ID = String(process.env.DISCORD_GUILD_ID || '').trim();
 const DISCORD_DEFAULT_LEVEL = Math.min(5, Math.max(0, Number(process.env.DISCORD_DEFAULT_LEVEL || '0')));
 const DISCORD_ROLE_LEVELS = (() => {
     const raw = process.env.DISCORD_ROLE_LEVELS || '';
