@@ -214,8 +214,9 @@ async function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_panel_fear_pun_created ON panel_fear_punishments(created);
         CREATE INDEX IF NOT EXISTS idx_panel_fear_pun_status ON panel_fear_punishments(status);
     `);
-    // Миграция: добавляем discord_id в старые таблицы panel_users
+    // Миграция: добавляем discord_id и launcher_api_key в старые таблицы panel_users
     try { await poolQuery('ALTER TABLE panel_users ADD COLUMN discord_id TEXT UNIQUE'); } catch (_) {}
+    try { await poolQuery('ALTER TABLE panel_users ADD COLUMN launcher_api_key TEXT UNIQUE'); } catch (_) {}
 
     const bootstrapUsers = getBootstrapUsersFromEnv();
     for (const u of bootstrapUsers) {

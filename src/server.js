@@ -1,3 +1,4 @@
+const config = require('./config');
 const {
     path,
     PORT,
@@ -31,7 +32,7 @@ const {
     BG_STAGGER_MS,
     PUNISHMENTS_REQ_TIMEOUT_MS,
     MAX_REQUEST_BODY_BYTES
-} = require('./config');
+} = config;
 
 let activeReportsApi;
 try {
