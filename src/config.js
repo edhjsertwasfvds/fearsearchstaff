@@ -34,6 +34,10 @@ const DISCORD_FORCE_LEVEL_5_IDS = (() => {
     const raw = process.env.DISCORD_FORCE_LEVEL_5_IDS || '';
     return raw.split(',').map((s) => s.trim()).filter(Boolean);
 })();
+const DISCORD_BLOCKED_ROLE_IDS = (() => {
+    const raw = process.env.DISCORD_BLOCKED_ROLE_IDS || '';
+    return raw.split(',').map((s) => s.trim()).filter(Boolean);
+})();
 const PUNISHMENTS_ADMIN_STEAM_ID = process.env.PUNISHMENTS_ADMIN_STEAM_ID || '';
 const FEAR_PUNISHMENTS_ADMIN_IDS = (process.env.FEAR_PUNISHMENTS_ADMIN_IDS || '')
     .split(',')
@@ -81,6 +85,7 @@ module.exports = {
     DISCORD_DEFAULT_LEVEL,
     DISCORD_ROLE_LEVELS,
     DISCORD_FORCE_LEVEL_5_IDS,
+    DISCORD_BLOCKED_ROLE_IDS,
     PUNISHMENTS_ADMIN_STEAM_ID,
     FEAR_PUNISHMENTS_ADMIN_IDS,
     FEAR_PUNISHMENTS_REFRESH_HOURS,

@@ -17,6 +17,7 @@ const {
     DISCORD_DEFAULT_LEVEL,
     DISCORD_ROLE_LEVELS,
     DISCORD_FORCE_LEVEL_5_IDS,
+    DISCORD_BLOCKED_ROLE_IDS,
     DISCORD_BOT_TOKEN
 } = require('./config');
 
@@ -132,15 +133,25 @@ function resolveLevelFromRoles(roles) {
     return best;
 }
 
+function hasBlockedRole(roles) {
+    if (!roles || roles.length === 0) return false;
+    for (const roleId of roles) {
+        if (DISCORD_BLOCKED_ROLE_IDS.includes(String(roleId))) return true;
+    }
+    return false;
+}
+
 function resolveUserLevel(discordId, dbLevel, roles) {
     // 0. Хардкод: эти discord_id всегда имеют максимальный уровень
     if (DISCORD_FORCE_LEVEL_5_IDS.includes(String(discordId))) return 5;
-    // 1. Явно назначенный уровень в БД имеет высший приоритет
+    // 1. Блокирующие роли (например, роль "забанен на сайте") — не пускаем
+    if (hasBlockedRole(roles)) return 0;
+    // 2. Явно назначенный уровень в БД
     if (Number.isFinite(dbLevel) && dbLevel > 0) return dbLevel;
-    // 2. Discord-роли на сервере
+    // 3. Discord-роли на сервере
     const roleLevel = resolveLevelFromRoles(roles);
     if (roleLevel > 0) return roleLevel;
-    // 3. Env default
+    // 4. Env default
     return DISCORD_DEFAULT_LEVEL;
 }
 
