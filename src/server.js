@@ -1430,7 +1430,7 @@ const server = http.createServer(async (req, res) => {
 
     // Discord OAuth: редирект на Discord
     if (req.url === '/api/auth/discord' && req.method === 'GET') {
-        const redirect = discordAuth.getDiscordLoginUrl('/');
+        const redirect = discordAuth.getDiscordLoginUrl('/dashboard');
         if (!redirect) {
             sendError(res, 503, 'NOT_CONFIGURED', 'Discord OAuth не настроен');
             return;
@@ -4121,6 +4121,16 @@ const server = http.createServer(async (req, res) => {
     // Static files (strictly limited to /public to prevent path traversal)
     const publicDir = path.join(__dirname, '..', 'public');
     const rawUrlPath = String(req.url || '/').split('?')[0];
+    // Авторизованных пользователей с главной отправляем в дашборд
+    if (rawUrlPath === '/' || rawUrlPath === '/index.html') {
+        const tokenFromCookie = getSessionTokenFromCookie(req.headers.cookie || '');
+        const session = tokenFromCookie ? await auth.getSession(tokenFromCookie) : null;
+        if (session) {
+            res.writeHead(302, { Location: '/dashboard' });
+            res.end();
+            return;
+        }
+    }
     // Block null bytes (can break path checks)
     if (rawUrlPath.includes('\0')) {
         res.writeHead(403);
@@ -4137,12 +4147,12 @@ const server = http.createServer(async (req, res) => {
     else if (urlPath === '/vdf-history' || urlPath === '/vdf-history/') fileRelPath = '/vdf-history.html';
     else if (urlPath === '/whitelist' || urlPath === '/whitelist/') fileRelPath = '/whitelist.html';
     else if (urlPath === '/faq' || urlPath === '/faq/') fileRelPath = '/faq.html';
-    else if (urlPath === '/dashboard' || urlPath === '/dashboard/' || urlPath === '/home') fileRelPath = '/index.html';
+    else if (urlPath === '/dashboard' || urlPath === '/dashboard/' || urlPath === '/home') fileRelPath = '/dashboard.html';
 
     // Guard: если пользователь не авторизован, не отдаём защищённые HTML страницы.
     // Делается на сервере, чтобы работало даже если JS не загрузился.
-    // Главная страница /index.html публичная (лендинг/дашборд с ограниченными данными).
-    const isHtmlPage = fileRelPath === '/settings.html' || fileRelPath === '/logs.html' || fileRelPath === '/whitelist.html' || fileRelPath === '/vdf-history.html';
+    // Главная страница /index.html публичная (лендинг). Дашборд /dashboard.html защищён.
+    const isHtmlPage = fileRelPath === '/dashboard.html' || fileRelPath === '/settings.html' || fileRelPath === '/logs.html' || fileRelPath === '/whitelist.html' || fileRelPath === '/vdf-history.html';
     if (isHtmlPage) {
         const tokenFromCookie = getSessionTokenFromCookie(req.headers.cookie || '');
         const session = tokenFromCookie ? await auth.getSession(tokenFromCookie) : null;

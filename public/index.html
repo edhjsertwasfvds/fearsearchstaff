@@ -3,612 +3,465 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="/images/iconhtml.png" type="image/png">
-    <title>Fear Project - Server Status</title>
-    <link rel="preconnect" href="https://cdn.tailwindcss.com">
-    <link rel="preconnect" href="https://unpkg.com">
+    <link rel="icon" href="/images/fearsearch-logo.webp" type="image/webp">
+    <title>FearSearch — Админ-панель для FearProject</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-    <link rel="preload" as="style" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
-    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Preload critical local SVG assets so icons appear instantly -->
-    <link rel="preload" as="image" href="/images/lvl1.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl2.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl3.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl4.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl5.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl6.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl7.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl8.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl9.svg" type="image/svg+xml">
-    <link rel="preload" as="image" href="/images/lvl10.svg" type="image/svg+xml">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Inter', sans-serif;
-            background-color: #09090b;
-        }
-        body.theme-midnight {
-            background-color: #05070d;
-        }
-        body.theme-indigo {
-            background-color: #0b1020;
-        }
-        body.theme-emerald {
-            background-color: #07120f;
-        }
-        body.theme-crimson {
-            background-color: #160b10;
-        }
-        body.theme-graphite {
-            background-color: #0f1116;
-        }
-        .glass-panel {
-            background: rgba(22, 22, 26, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-        }
-        body.theme-midnight .glass-panel {
-            background: rgba(14, 16, 24, 0.92);
-            border-color: rgba(148, 163, 184, 0.14);
-        }
-        body.theme-indigo .glass-panel {
-            background: rgba(21, 29, 56, 0.88);
-            border-color: rgba(99, 102, 241, 0.2);
-        }
-        body.theme-emerald .glass-panel {
-            background: rgba(14, 30, 25, 0.9);
-            border-color: rgba(16, 185, 129, 0.2);
-        }
-        body.theme-crimson .glass-panel {
-            background: rgba(36, 18, 24, 0.9);
-            border-color: rgba(244, 63, 94, 0.18);
-        }
-        body.theme-graphite .glass-panel {
-            background: rgba(23, 24, 28, 0.9);
-            border-color: rgba(161, 161, 170, 0.16);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #09090b;
+            color: #e4e4e7;
+            min-height: 100vh;
+            overflow-x: hidden;
         }
         .grid-bg {
+            position: fixed;
+            inset: 0;
             background-image:
-                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+                linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
             background-size: 32px 32px;
             mask-image: radial-gradient(circle at 0 0, black 40%, transparent 80%);
             -webkit-mask-image: radial-gradient(circle at 0 0, black 40%, transparent 80%);
-        }
-        .dropdown-item {
-            position: relative;
-            transition: background 0.2s ease;
-        }
-        .dropdown-item:not(:last-child) {
-            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-        }
-        .dropdown-item:hover {
-            background: rgba(255, 255, 255, 0.05);
-        }
-        .dropdown-item.active {
-            background: rgba(88, 101, 242, 0.1);
-        }
-        .dropdown-item.active::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 20%;
-            bottom: 20%;
-            width: 3px;
-            border-radius: 0 3px 3px 0;
-            background: #6366f1;
-            animation: indicator-in 0.2s ease-out;
-        }
-        @keyframes indicator-in {
-            from { opacity: 0; transform: scaleY(0); }
-            to { opacity: 1; transform: scaleY(1); }
-        }
-        .tab-btn.active {
-            color: white;
-            border-bottom-color: #6366f1;
-        }
-        button:not(.dropdown-item), a { transition: opacity 0.12s ease-out; }
-        button:not(.dropdown-item):hover, a:hover { opacity: 0.88; }
-        #sidePanel {
-            min-width: min(1200px, calc(100vw - 700px));
-            opacity: 0;
             pointer-events: none;
-            transition: opacity 0.25s ease;
+            z-index: 0;
         }
-        #sidePanel.show {
-            opacity: 1;
-            pointer-events: auto;
-        }
-        .yooma-logo-wrap {
-            width: 40px;
-            height: 40px;
-            min-width: 40px;
-            min-height: 40px;
+        .glow {
+            position: fixed;
             border-radius: 50%;
-            background: rgba(88, 101, 242, 0.12);
-            border: 1px solid rgba(88, 101, 242, 0.2);
+            filter: blur(140px);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .glow-1 {
+            top: -200px;
+            left: -200px;
+            width: 600px;
+            height: 600px;
+            background: #6366f1;
+            opacity: 0.07;
+        }
+        .glow-2 {
+            top: 20%;
+            left: 10%;
+            width: 300px;
+            height: 300px;
+            background: #818cf8;
+            opacity: 0.05;
+        }
+        .glow-3 {
+            bottom: -100px;
+            right: -100px;
+            width: 500px;
+            height: 500px;
+            background: #7c5cfc;
+            opacity: 0.06;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 32px;
+            position: relative;
+            z-index: 10;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 20px;
+            color: #fff;
+            text-decoration: none;
+        }
+        .logo img {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            object-fit: cover;
+        }
+        .online-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #a1a1aa;
+            font-weight: 500;
+        }
+        .online-badge::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            background: #22c55e;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #22c55e;
+        }
+        .hero {
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: hidden;
-            flex-shrink: 0;
+            gap: 64px;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 32px 100px;
+            min-height: calc(100vh - 200px);
+            position: relative;
+            z-index: 5;
         }
-        .yooma-logo-wrap img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            object-position: center;
-            border-radius: 50%;
+        .hero-text {
+            flex: 1;
+            max-width: 560px;
         }
-        .status-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #10b981;
-            flex-shrink: 0;
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(99, 102, 241, 0.25);
+            border-radius: 999px;
+            font-size: 13px;
+            color: #a5b4fc;
+            font-weight: 500;
+            margin-bottom: 28px;
         }
-        #panelContent {
-            min-height: 280px;
-            scroll-behavior: smooth;
-            -webkit-overflow-scrolling: touch;
+        h1 {
+            font-size: 56px;
+            font-weight: 800;
+            line-height: 1.05;
+            margin-bottom: 24px;
+            letter-spacing: -0.02em;
         }
-        #panelContent table { width: 100%; }
-        #panelContent tr.row-new {
-            animation: row-in 0.25s ease-out both;
+        h1 .accent {
+            background: linear-gradient(135deg, #818cf8 0%, #c084fc 50%, #38bdf8 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
         }
-        @keyframes row-in {
-            from { opacity: 0; }
-            to { opacity: 1; }
+        .description {
+            font-size: 17px;
+            line-height: 1.65;
+            color: #a1a1aa;
+            margin-bottom: 36px;
+            max-width: 480px;
         }
-        .badge-bump {
-            animation: badge-bump 0.35s ease-out;
-        }
-        @keyframes badge-bump {
-            0%   { transform: scale(1); }
-            40%  { transform: scale(1.2); }
-            100% { transform: scale(1); }
-        }
-        .hide-scrollbar {
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-        }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        #monthDropdownList {
-            scrollbar-width: thin;
-            scrollbar-color: #333 transparent;
-        }
-        #monthDropdownList::-webkit-scrollbar { width: 4px; }
-        #monthDropdownList::-webkit-scrollbar-track { background: transparent; }
-        #monthDropdownList::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
-        #monthDropdownList::-webkit-scrollbar-thumb:hover { background: #555; }
-        body {
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-            scroll-behavior: smooth;
-        }
-        body::-webkit-scrollbar { display: none; }
-        #playerModal:not(.hidden) {
-            animation: modal-in 0.2s ease-out;
-        }
-        @keyframes modal-in {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        body.local-no-anim *, body.local-no-anim *::before, body.local-no-anim *::after {
-            animation: none !important;
-            transition: none !important;
-        }
-        body.local-soft-anim * {
-            animation-duration: 0.12s !important;
-            transition-duration: 0.12s !important;
-        }
-        .local-opt-btn {
+        .discord-btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 6px 10px;
-            border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.03);
-            color: #9ca3af;
-            font-size: 12px;
+            gap: 10px;
+            padding: 16px 32px;
+            background: #5865F2;
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
             font-weight: 600;
-            transition: all 0.15s ease;
-            user-select: none;
+            text-decoration: none;
+            transition: all 0.2s ease;
             cursor: pointer;
+            box-shadow: 0 4px 20px rgba(88, 101, 242, 0.25);
         }
-        .local-opt-btn:hover { background: rgba(255, 255, 255, 0.06); color: #d1d5db; }
-        .local-opt-btn.active {
-            background: rgba(99, 102, 241, 0.2);
-            border-color: rgba(99, 102, 241, 0.45);
-            color: #c7d2fe;
-            box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.25);
+        .discord-btn:hover {
+            background: #4752C4;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(88, 101, 242, 0.35);
         }
-        /* Fix browser default white dropdown menus */
-        select, select option {
-            background-color: #0b1224;
-            color: #e5e7eb;
+        .discord-btn svg {
+            width: 24px;
+            height: 24px;
+            flex-shrink: 0;
         }
-        select option:checked {
-            background-color: rgba(99, 102, 241, 0.25);
-            color: #e0e7ff;
+        .discord-btn .arrow {
+            margin-left: 6px;
+            transition: transform 0.2s ease;
         }
-        .ui-select-wrap { position: relative; width: 100%; }
-        .ui-select-trigger {
-            width: 100%;
-            display: inline-flex;
+        .discord-btn:hover .arrow {
+            transform: translateX(4px);
+        }
+        .hint {
+            margin-top: 14px;
+            font-size: 13px;
+            color: #71717a;
+        }
+        .hero-card {
+            flex: 1;
+            max-width: 440px;
+            background: rgba(22, 22, 26, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 28px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+        }
+        .card-header {
+            display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 8px;
+            margin-bottom: 24px;
+        }
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e4e4e7;
+        }
+        .live-badge {
+            padding: 5px 12px;
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+            font-size: 12px;
+            font-weight: 700;
+            border-radius: 999px;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .feature {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            transition: all 0.2s ease;
+        }
+        .feature:hover {
             background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        .feature-icon {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(99, 102, 241, 0.12);
             border-radius: 10px;
-            padding: 8px 12px;
-            color: #f3f4f6;
+            color: #818cf8;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+        .feature-text {
             font-size: 14px;
-            line-height: 1.2;
+            font-weight: 600;
+            color: #e4e4e7;
+            margin-bottom: 2px;
         }
-        .ui-select-trigger:hover { background: rgba(255, 255, 255, 0.08); }
-        .ui-select-trigger.open, .ui-select-trigger:focus-visible {
-            outline: none;
-            border-color: rgba(99, 102, 241, 0.55);
+        .feature-sub {
+            font-size: 12px;
+            color: #71717a;
         }
-        .ui-select-menu {
-            position: absolute;
-            z-index: 90;
-            left: 0;
-            right: auto;
-            top: calc(100% + 6px);
-            min-width: 100%;
-            max-height: 260px;
-            overflow-y: auto;
-            padding: 6px;
-            border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            background: rgba(19, 21, 27, 0.98);
-            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
-            scrollbar-width: none;
-            -ms-overflow-style: none;
+        .progress {
+            margin-top: 24px;
         }
-        .ui-select-menu::-webkit-scrollbar { display: none; }
-        .ui-select-item {
-            width: 100%;
-            border: 0;
-            background: transparent;
-            color: #d1d5db;
-            text-align: left;
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
             font-size: 13px;
-            line-height: 1.2;
-            padding: 9px 10px;
-            border-radius: 8px;
-            transition: background-color .12s ease, color .12s ease;
+            color: #a1a1aa;
+            margin-bottom: 8px;
         }
-        .ui-select-item:hover { background: rgba(255, 255, 255, .08); color: #fff; }
-        .ui-select-item.active { background: rgba(99, 102, 241, .2); color: #c7d2fe; }
-        .month-select-wrap { width: auto !important; }
-        .month-select-trigger {
-            width: auto;
-            min-width: 180px;
-            padding: 6px 10px;
+        .progress-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            width: 72%;
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #818cf8);
+            border-radius: 999px;
+        }
+        .progress-footer {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 6px;
+            font-size: 12px;
+            color: #52525b;
+        }
+        .card-note {
+            margin-top: 18px;
+            font-size: 12px;
+            color: #71717a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .footer-chips {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 0 32px 24px;
+            position: relative;
+            z-index: 5;
+        }
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
             font-size: 13px;
+            color: #a1a1aa;
+            transition: all 0.2s ease;
         }
-        .month-select-trigger.open, .month-select-trigger:focus-visible { border-color: rgba(255, 255, 255, 0.26) !important; }
-        .month-select-menu { border-color: rgba(255, 255, 255, 0.12); background: rgba(19, 21, 27, 0.98); }
-        .month-select-item.active { background: rgba(99, 102, 241, .2); color: #c7d2fe; }
-        .players-columns-menu {
-            padding: 8px 10px;
-            min-width: 148px;
+        .chip:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.12);
         }
-        body.theme-midnight .ui-select-menu { border-color: rgba(148, 163, 184, .25); background: rgba(14, 16, 24, .98); }
-        body.theme-midnight .ui-select-item.active { background: rgba(148, 163, 184, .18); color: #cbd5e1; }
-        body.theme-indigo .ui-select-menu { border-color: rgba(99, 102, 241, .28); background: rgba(21, 29, 56, .98); }
-        body.theme-indigo .ui-select-item.active { background: rgba(99, 102, 241, .2); color: #a5b4fc; }
-        body.theme-emerald .ui-select-menu { border-color: rgba(16, 185, 129, .25); background: rgba(13, 26, 23, .98); }
-        body.theme-emerald .ui-select-item.active { background: rgba(16, 185, 129, .18); color: #34d399; }
-        body.theme-crimson .ui-select-menu { border-color: rgba(244, 63, 94, .25); background: rgba(36, 18, 24, .98); }
-        body.theme-crimson .ui-select-item.active { background: rgba(244, 63, 94, .18); color: #fda4af; }
-        body.theme-graphite .ui-select-menu { border-color: rgba(161, 161, 170, .24); background: rgba(23, 24, 28, .98); }
-        body.theme-graphite .ui-select-item.active { background: rgba(161, 161, 170, .16); color: #d4d4d8; }
-        body.theme-midnight .month-select-menu { border-color: rgba(148, 163, 184, .25); background: rgba(14, 16, 24, .98); }
-        body.theme-indigo .month-select-menu { border-color: rgba(99, 102, 241, .28); background: rgba(21, 29, 56, .98); }
-        body.theme-emerald .month-select-menu { border-color: rgba(16, 185, 129, .25); background: rgba(13, 26, 23, .98); }
-        body.theme-crimson .month-select-menu { border-color: rgba(244, 63, 94, .25); background: rgba(36, 18, 24, .98); }
-        body.theme-graphite .month-select-menu { border-color: rgba(161, 161, 170, .24); background: rgba(23, 24, 28, .98); }
-
-        /* Надежный вход: transition от app-preload -> normal */
-        #leftNav, #adminPanel, #loginButton { will-change: transform, opacity; }
-        body.app-preload #leftNav {
-            opacity: 0;
-            transform: translateX(-48px);
+        .footer {
+            position: relative;
+            z-index: 5;
+            text-align: center;
+            font-size: 12px;
+            color: #52525b;
+            padding-bottom: 24px;
         }
-        body.app-preload #adminPanel,
-        body.app-preload #loginButton {
-            opacity: 0;
-            transform: translateX(48px);
+        @media (max-width: 960px) {
+            .hero {
+                flex-direction: column;
+                gap: 40px;
+                padding: 40px 24px 80px;
+            }
+            h1 { font-size: 40px; }
+            .hero-card { width: 100%; max-width: 100%; }
         }
-        @media (prefers-reduced-motion: reduce) {
-            #leftNav, #adminPanel, #loginButton { transition: none !important; }
-        }
-
-        /* Anti-flicker: hide shell until session init */
-        body.app-preload #loginButton {
-            visibility: hidden !important;
-            pointer-events: none !important;
-        }
-        /* Hide admin panel during preload to avoid flash before session init */
-        body.app-preload #adminPanel {
-            pointer-events: none !important;
+        @media (max-width: 480px) {
+            h1 { font-size: 32px; }
+            .feature-grid { grid-template-columns: 1fr; }
+            header { padding: 16px 20px; }
         }
     </style>
 </head>
-<body class="bg-[#09090b] text-white min-h-screen w-full relative overflow-hidden selection:bg-[#5865F2] selection:text-white app-preload">
+<body>
+    <div class="grid-bg"></div>
+    <div class="glow glow-1"></div>
+    <div class="glow glow-2"></div>
+    <div class="glow glow-3"></div>
 
-    <div class="fixed inset-0 pointer-events-none z-0">
-        <div class="absolute inset-0 grid-bg"></div>
-        <div class="absolute -top-[200px] -left-[200px] w-[600px] h-[600px] bg-[#5865F2] rounded-full blur-[120px] opacity-[0.07]"></div>
-        <div class="absolute top-[20%] left-[10%] w-[300px] h-[300px] bg-indigo-500 rounded-full blur-[100px] opacity-[0.05]"></div>
-    </div>
-
-    <div id="loginButton" class="fixed top-12 right-12 z-50">
-        <a href="/auth" class="glass-panel px-6 py-3 rounded-xl flex items-center gap-3 hover:bg-white/[0.05]">
-            <i class="ph-fill ph-sign-in text-indigo-400 text-2xl"></i>
-            <span class="text-white font-semibold">Войти</span>
+    <header>
+        <a class="logo" href="/">
+            <img src="/images/fearsearch-logo.webp" alt="FearSearch">
+            FearSearch
         </a>
-    </div>
+        <div class="online-badge">Система онлайн</div>
+    </header>
 
-    <aside id="adminPanel" class="fixed top-12 right-12 z-50 w-[280px] hidden">
-        <div class="glass-panel p-4 rounded-2xl mb-4">
-            <div class="flex flex-col items-center">
-                <div id="userAvatar" class="hidden"></div>
-                <h3 id="userName" class="text-white font-bold text-center text-lg mb-1">Username</h3>
-                <p class="text-gray-400 text-xs text-center mb-4">Администратор</p>
-                <button type="button" onclick="logout()" class="w-full bg-white/5 hover:bg-white/10 text-gray-300 font-semibold py-2 px-4 rounded-lg text-sm">
-                    Выйти
-                </button>
+    <main class="hero">
+        <div class="hero-text">
+            <div class="badge">
+                <span>✨</span> Staff панель для FearProject
             </div>
+            <h1>Админ-панель <span class="accent">для FearProject</span></h1>
+            <p class="description">
+                Панель управления для стаффа серверов FearProject. Здесь собраны онлайн игроки,
+                статистика серверов, дропы, наказания, проверки config.vdf, поиск обходчиков,
+                управление пользователями, whitelist и настройки сайта. Всё необходимое для
+                администрирования — в одном месте, с авторизацией через Discord.
+            </p>
+            <a class="discord-btn" href="/api/auth/discord">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+                </svg>
+                Войти через Discord
+                <span class="arrow">›</span>
+            </a>
+            <p class="hint">Только для участников Discord-сервера FearProject с ролью стаффа.</p>
         </div>
-
-        <div id="adminMenu" class="glass-panel rounded-2xl overflow-hidden">
-            <div class="p-4 border-b border-white/[0.08]">
-                <h3 class="text-white font-bold text-sm">Панель управления</h3>
+        <div class="hero-card">
+            <div class="card-header">
+                <span class="card-title">Превью панели</span>
+                <span class="live-badge">Live</span>
             </div>
-            <nav class="p-2">
-                <a href="/settings" class="block w-full px-4 py-3 text-left text-gray-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-3 mb-1">
-                    <i class="ph ph-gear text-lg"></i>
-                    <span class="text-sm font-medium">Настройки</span>
-                </a>
-                <button type="button" onclick="openLocalSettingsModal()" class="block w-full px-4 py-3 text-left text-gray-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-3 mb-1">
-                    <i class="ph ph-sliders text-lg"></i>
-                    <span class="text-sm font-medium">Локальные настройки</span>
-                </button>
-                <a href="/whitelist" class="block w-full px-4 py-3 text-left text-gray-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-3">
-                    <i class="ph ph-check-circle text-lg"></i>
-                    <span class="text-sm font-medium">Список чистых</span>
-                </a>
-                <a href="/faq" class="block w-full px-4 py-3 text-left text-gray-400 hover:bg-white/[0.05] rounded-lg flex items-center gap-3 mt-1">
-                    <i class="ph ph-question text-lg"></i>
-                    <span class="text-sm font-medium">FAQ</span>
-                </a>
-            </nav>
-        </div>
-    </aside>
-
-    <aside id="leftNav" class="absolute top-12 left-12 z-50">
-        <section class="glass-panel p-3 pr-6 rounded-2xl flex items-center gap-4 relative min-w-[240px] mb-4">
-            <div class="relative w-[52px] h-[52px] rounded-xl flex items-center justify-center shrink-0 overflow-hidden">
-                <svg width="52" height="52" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg" class="scale-110"><path d="M2.42711 35.6695C2.42618 35.65 2.42557 35.6306 2.42528 35.6111C2.40078 33.8034 4.46646 31.8081 4.46649 30L3.81858 19.5V14.28C3.81802 12.7731 3.31716 12.1307 3.6459 10.6497C3.67091 10.5405 3.69781 10.4317 3.7266 10.3234C3.75538 10.2151 3.78605 10.1073 3.81858 10C3.85112 9.89275 4.39302 10.5075 4.42926 10.4014C4.46551 10.2954 3.5176 9.28856 3.55751 9.18381C3.59742 9.07909 3.63914 8.97509 3.68266 8.87181C3.72619 8.7685 3.77149 8.66599 3.81858 8.56429C3.86568 8.46259 3.91452 8.36173 3.96511 8.2617C4.01571 8.16171 4.06803 8.0626 4.12207 7.9644C4.17611 7.86622 4.23184 7.76899 4.28926 7.67272C4.34668 7.57648 4.40576 7.48126 4.46649 7.38707C4.52723 7.29285 4.58958 7.19973 4.65355 7.10772C4.71752 7.01567 4.78307 6.92476 4.8502 6.835C4.91733 6.74527 4.986 6.65672 5.05622 6.56933C5.12642 6.48198 5.19812 6.39585 5.27134 6.31096C5.34453 6.2261 5.41918 6.14253 5.4953 6.06025C5.57139 5.97797 5.6489 5.89704 5.72784 5.81746C5.77477 5.77073 5.82218 5.7245 5.87005 5.67877C5.91792 5.63304 5.96626 5.58781 6.01507 5.54308C6.06388 5.49831 6.11316 5.45408 6.16291 5.41037C6.21263 5.36664 6.26279 5.32343 6.31339 5.28075C6.36402 5.23807 6.41508 5.1959 6.46656 5.15425C6.51804 5.11262 6.56996 5.07152 6.62232 5.03096C6.67465 4.9904 6.72739 4.95038 6.78054 4.9109C6.83369 4.87143 6.88725 4.8325 6.94123 4.79413C6.9952 4.75576 7.04956 4.71795 7.10429 4.6807C7.15903 4.64346 7.21415 4.60678 7.26964 4.57066C7.32514 4.53455 7.38101 4.49902 7.43724 4.46406C7.4935 4.4291 7.5501 4.39473 7.60704 4.36094C7.66397 4.32715 7.72126 4.29395 7.7789 4.26134C7.83651 4.22873 7.89447 4.19672 7.95279 4.16531C8.01107 4.1339 8.06967 4.10309 8.12857 4.07289C8.1875 4.04268 8.24674 4.01309 8.30628 3.98411C8.36583 3.95513 8.42566 3.92677 8.48576 3.89902C8.54589 3.87127 8.60629 3.84415 8.66695 3.81765C8.72764 3.79115 8.7886 3.76528 8.84982 3.74004C8.91103 3.7148 8.9725 3.69019 9.03422 3.66622C9.09594 3.64224 9.15791 3.61891 9.22012 3.59621C9.28231 3.57352 9.34473 3.55147 9.40738 3.53006C9.47007 3.50866 9.53295 3.4879 9.59601 3.46779C9.65911 3.44768 9.72239 3.42822 9.78587 3.40942C9.84938 3.39062 9.91306 3.37247 9.97692 3.35498C10.0408 3.33749 10.1048 3.32066 10.169 3.3045C10.2332 3.28833 10.2976 3.27282 10.3621 3.25798C10.4267 3.24314 10.4914 3.22897 10.5562 3.21547C10.621 3.20196 10.686 3.18913 10.7511 3.17696C10.8161 3.1648 10.8813 3.15331 10.9466 3.14249C11.012 3.13167 11.0774 3.12153 11.143 3.11206C11.2085 3.10259 11.2741 3.0938 11.3398 3.08568C12.0594 2.99958 12.777 3.01298 13.5 3.01249L27 4L30.5 4.5C31.967 4.49958 31.0573 4.66726 32.5 5C34.2014 5.39242 35.2698 4.25998 36.5 5.5C38.1953 7.20865 36.3338 9.1163 36.5 11.5C36.5268 11.885 38.5003 12.1135 38.5 12.5L38 13.5L38.5 17.5L40 26.5L40.7597 33C40.7599 33.5491 40.0931 34.4596 40 35C39.7447 36.4816 41.3728 37.0927 40.4971 38.3192C40.3374 38.5428 40.9523 40.2064 40.7597 40.4027C40.6693 40.3562 40.5783 40.3131 40.4971 40.2514C40.0664 40.0759 39.6518 39.8456 39.2354 39.6386L36.5952 38.3192L33.1016 36.5943L32.0479 36.0669C31.8488 35.9671 31.6376 35.874 31.4483 35.7573C31.1405 36.0929 30.7712 36.3873 30.4294 36.6891L28.7471 38.1772L23.6628 42.6936C23.5089 42.8101 23.3758 42.9517 23.2421 43.09C22.7696 40.8507 22.4151 38.5849 21.952 36.3433C21.3002 36.6922 20.626 37.009 19.9645 37.3399L15.9831 39.3302C13.5167 40.5938 11.0405 41.8379 8.55452 43.0626C8.67165 42.7562 8.8675 42.4544 9.02409 42.1656L9.93001 40.4883L13.6069 33.6432C13.2493 33.7938 12.8355 33.8726 12.4605 33.9773L10.2124 34.6074L3.8733 36.3855C2.88619 36.6639 1.87763 36.9072 0.901798 37.2207C0.997261 37.132 2.41147 35.7393 2.41147 35.7393C2.42305 35.7185 2.4219 35.6928 2.42711 35.6695Z" fill="#FDFDFD"/><mask id="m0" maskUnits="userSpaceOnUse" x="0" y="2" width="44" height="42" style="mask-type:alpha"><path d="M2.42711 35.6695C2.42618 35.65 2.42557 35.6306 2.42528 35.6111C2.40078 33.8034 2.42532 31.9915 2.42535 30.1834L2.42552 19.3134L2.42504 14.2611C2.42447 12.7542 2.33118 11.2292 2.65992 9.74833C2.68493 9.63907 2.71182 9.53028 2.74062 9.42199C2.7694 9.31366 2.80007 9.20586 2.8326 9.09859C2.86514 8.99134 2.89953 8.88469 2.93578 8.77862C2.97202 8.67258 3.0101 8.56718 3.05001 8.46243C3.08992 8.35771 3.13163 8.25371 3.17516 8.15043C3.21868 8.04712 3.26399 7.94461 3.31108 7.84291C3.35817 7.74122 3.40701 7.64035 3.45761 7.54033C3.50821 7.44033 3.56052 7.34123 3.61457 7.24302C3.66861 7.14484 3.72434 7.04761 3.78176 6.95134C3.83918 6.8551 3.89826 6.75988 3.95899 6.66569C4.01972 6.57148 4.08207 6.47836 4.14604 6.38634C4.21001 6.29429 4.27556 6.20339 4.34269 6.11363C4.40982 6.0239 4.4785 5.93534 4.54872 5.84795C4.61892 5.7606 4.69062 5.67448 4.76384 5.58959C4.83702 5.50472 4.91168 5.42115 4.9878 5.33887C5.06389 5.25659 5.1414 5.17566 5.22034 5.09608C5.26727 5.04935 5.31467 5.00312 5.36254 4.95739C5.41042 4.91166 5.45876 4.86643 5.50757 4.8217C5.55638 4.77693 5.60566 4.7327 5.65541 4.68899C5.70513 4.64526 5.75529 4.60205 5.80589 4.55937C5.85652 4.51669 5.90757 4.47452 5.95905 4.43287C6.01053 4.39124 6.06245 4.35014 6.11481 4.30958C6.16714 4.26902 6.21988 4.229 6.27304 4.18952C6.32619 4.15005 6.37975 4.11112 6.43372 4.07275C6.4877 4.03438 6.54205 3.99657 6.59679 3.95932C6.65153 3.92208 6.70664 3.8854 6.76214 3.84928C6.81764 3.81318 6.8735 3.77764 6.92974 3.74268C6.986 3.70772 7.0426 3.67335 7.09953 3.63956C7.15647 3.60577 7.21376 3.57257 7.2714 3.53996C7.32901 3.50735 7.38697 3.47534 7.44528 3.44393C7.50357 3.41252 7.56216 3.38171 7.62106 3.35151C7.68 3.3213 7.73923 3.29171 7.79878 3.26273C7.85833 3.23375 7.91815 3.20539 7.97826 3.17764C8.03839 3.1499 8.09879 3.12277 8.15945 3.09627C8.22014 3.06977 8.28109 3.0439 8.34231 3.01866C8.40353 2.99342 8.465 2.96881 8.52672 2.94484C8.58843 2.92086 8.6504 2.89753 8.71262 2.87483C8.7748 2.85214 8.83722 2.83009 8.89988 2.80868C8.96257 2.78728 9.02544 2.76652 9.08851 2.74641C9.15161 2.7263 9.21489 2.70684 9.27837 2.68804C9.34188 2.66924 9.40556 2.65109 9.46942 2.6336C9.53328 2.61611 9.59731 2.59928 9.66152 2.58312C9.72573 2.56695 9.7901 2.55145 9.85464 2.53661C9.91917 2.52177 9.98385 2.50759 10.0487 2.49409C10.1135 2.48058 10.1785 2.46775 10.2436 2.45558C10.3086 2.44342 10.3738 2.43193 10.4391 2.42111C10.5045 2.41029 10.5699 2.40015 10.6355 2.39068C10.701 2.38121 10.7666 2.37242 10.8323 2.36431C11.5518 2.2782 12.2695 2.2916 12.9925 2.29111L27.1696 2.2929L31.3723 2.29199C32.8394 2.29157 34.1939 2.22272 35.6367 2.55546C37.3381 2.94788 38.9752 3.87125 40.2055 5.11126C41.9008 6.81991 42.8142 9.00764 42.9805 11.3913C43.0073 11.7763 42.9894 12.1733 42.9891 12.5598L42.9885 14.6627L42.9869 20.2965L42.9861 31.0708L42.9878 33.9493C42.988 34.4984 43.0357 35.0914 42.9425 35.6317C42.6873 37.1133 42.1525 38.511 41.2768 39.7375C41.1172 39.9612 40.9523 40.2064 40.7597 40.4027C40.6693 40.3562 40.5783 40.3132 40.4971 40.2514C40.0664 40.0759 39.6518 39.8457 39.2354 39.6386L36.5952 38.3192L33.1016 36.5943L32.0479 36.0669C31.8488 35.9671 31.6376 35.874 31.4483 35.7573C31.1405 36.0929 30.7712 36.3873 30.4294 36.6891L28.7471 38.1772L23.6628 42.6936C23.5089 42.8101 23.3758 42.9517 23.2421 43.09C22.7696 40.8507 22.4151 38.5849 21.952 36.3433C21.3002 36.6922 20.626 37.009 19.9645 37.3399L15.9831 39.3302C13.5167 40.5938 11.0405 41.8379 8.55452 43.0626C8.67165 42.7563 8.8675 42.4544 9.02409 42.1656L9.93001 40.4883L13.6069 33.6432C13.2493 33.7938 12.8355 33.8726 12.4605 33.9773L10.2124 34.6075L3.8733 36.3855C2.88619 36.6639 1.87763 36.9072 0.901798 37.2207C0.997261 37.132 2.41069 35.7407 2.41147 35.7393C2.42305 35.7185 2.4219 35.6928 2.42711 35.6695Z" fill="#FDFDFD"/></mask><g mask="url(#m0)"><path d="M2.42529 35.6111C2.42557 35.6306 2.42618 35.65 2.42711 35.6695C2.62864 35.4025 3.02614 35.1042 3.28721 34.8824C4.00376 34.2704 4.67601 33.5922 5.35639 32.9405C6.65623 31.6952 7.97223 30.4085 9.10435 29.0067C10.1547 27.7062 11.0691 26.2712 11.9239 24.836C12.2344 24.3147 12.8031 23.4543 12.9938 22.9278C13.1222 22.6402 13.2871 22.3798 13.4385 22.1051C13.5912 21.8282 13.7334 21.5438 13.8743 21.2608C14.4258 20.1455 14.9188 19.0048 15.3533 17.8388C16.2029 15.5877 16.7841 13.2524 17.7329 11.0364C17.9861 10.445 18.2415 9.85516 18.5734 9.30296C19.536 7.76784 20.7953 6.73045 22.5928 6.31751C24.5402 5.87012 27.0095 5.99394 28.7286 7.07312C31.0899 8.55548 32.2409 11.4964 32.8284 14.0973C32.9101 14.4669 32.9835 14.8382 33.0486 15.211C33.0858 15.4303 33.1097 15.657 33.1579 15.8737C33.4566 15.9666 33.7498 16.1227 34.0348 16.2522L35.5652 16.9463L41.3373 19.554C41.6215 19.6801 39.8078 52.9663 40 53L51 15.8737L45.5 12C45.5003 11.6136 46.0268 10.885 46 10.5C45.8338 8.1163 44.1953 4.29177 42.5 2.58311C41.2698 1.3431 39.6326 0.419731 37.9312 0.0273124C36.4885 -0.305429 32.467 -1.00042 31 -1L27 -1.5L13 -0.5C12.6713 0.980908 -2.50057 7.59171 -2.5 9.09858L-0.5 14.6626L-2.5 40.5C-2.50003 42.3081 2.40078 33.8034 2.42529 35.6111Z" fill="#4D70EF"/></g><path d="M10.4885 5.67935C10.551 5.65114 10.5956 5.61621 10.6661 5.63482C10.852 5.68397 11.1603 5.86582 11.3445 5.95219L13.0315 6.73372L16.941 8.53209L17.991 9.01398C18.179 9.10052 18.4055 9.18232 18.5734 9.30297C18.2415 9.85517 17.9861 10.445 17.7329 11.0364C16.7841 13.2524 16.2029 15.5877 15.3533 17.8388C14.9188 19.0048 14.4258 20.1455 13.8743 21.2608C13.7334 21.5439 13.5912 21.8282 13.4385 22.1051C13.2871 22.3798 13.1222 22.6402 12.9938 22.9278C12.8323 22.6833 12.695 22.2172 12.5846 21.936L11.6799 19.6288L9.55258 14.2082L8.99761 12.7945C8.90864 12.5672 8.77431 12.3137 8.73633 12.0751C8.60398 11.8925 8.41879 11.7446 8.28177 11.5617C7.79297 10.9093 7.61667 10.0454 7.62828 9.24427C7.64254 8.26092 7.95428 7.36657 8.67289 6.67489C8.99963 6.36042 10.0483 5.67108 10.4885 5.67935Z" fill="#003C96"/><path d="M8.73633 12.0751C8.60398 11.8925 8.41879 11.7446 8.28177 11.5617C7.79297 10.9093 7.61667 10.0454 7.62828 9.24427C7.64254 8.26091 7.95428 7.36657 8.67289 6.67489C8.99963 6.36042 10.0483 5.67107 10.4885 5.67934C10.4657 5.70067 10.4431 5.72226 10.4207 5.74411C10.3984 5.76599 10.3763 5.78814 10.3546 5.81055C10.3328 5.83296 10.3113 5.85564 10.2901 5.87857C10.2688 5.90151 10.2479 5.92472 10.2272 5.94818C10.2066 5.97165 10.1862 5.99536 10.1662 6.01933C10.1461 6.04327 10.1263 6.06747 10.1069 6.09193C10.0874 6.11636 10.0682 6.14105 10.0494 6.16598C10.0305 6.19089 10.012 6.21602 9.99372 6.2414C9.97548 6.2668 9.95755 6.29241 9.93995 6.31822C9.92232 6.34403 9.90503 6.37007 9.88808 6.39632C9.87109 6.42255 9.85445 6.44899 9.83814 6.47565C9.8218 6.50232 9.80581 6.52917 9.79018 6.55622C9.77451 6.58326 9.75919 6.6105 9.7442 6.63793C9.72921 6.66535 9.71456 6.69295 9.70024 6.72073C9.68596 6.74851 9.67199 6.77647 9.65835 6.8046C9.64474 6.83273 9.63148 6.86103 9.61858 6.88952C9.60564 6.91797 9.59307 6.94657 9.58087 6.97532C9.56864 7.00409 9.55677 7.03302 9.54527 7.06209C9.53378 7.09113 9.52263 7.12031 9.51183 7.14965C9.50107 7.17898 9.49066 7.20844 9.48059 7.23804C9.47053 7.26764 9.46084 7.29735 9.45151 7.32719C9.44218 7.35702 9.43322 7.38695 9.42463 7.41699C9.41606 7.44706 9.40785 7.47721 9.39999 7.50745C9.39215 7.5377 9.38469 7.56804 9.37759 7.59849C9.37049 7.62894 9.36376 7.65946 9.35739 7.69005C9.35106 7.72065 9.3451 7.75132 9.33953 7.78206C9.33393 7.81283 9.32871 7.84364 9.32387 7.8745C9.31906 7.90539 9.31461 7.93632 9.31053 7.9673C9.30646 7.9983 9.30276 8.02934 9.29945 8.0604C9.29616 8.09149 9.29324 8.12262 9.29069 8.15377C9.28817 8.18492 9.28601 8.21609 9.28422 8.24727C9.28246 8.27848 9.28108 8.30971 9.28009 8.34095C9.25413 9.46229 9.75542 10.6322 10.53 11.4353C10.5502 11.4563 10.5707 11.477 10.5914 11.4975C10.6121 11.518 10.6331 11.5382 10.6543 11.5581C10.6755 11.5781 10.697 11.5978 10.7187 11.6172C10.7404 11.6366 10.7624 11.6558 10.7845 11.6746C10.8067 11.6935 10.8292 11.7121 10.8518 11.7304C10.8745 11.7488 10.8973 11.7668 10.9204 11.7846C10.9435 11.8023 10.9668 11.8198 10.9904 11.837C11.0139 11.8541 11.0377 11.871 11.0616 11.8876C11.0856 11.9041 11.1097 11.9204 11.1341 11.9364C11.1584 11.9524 11.183 11.9681 11.2077 11.9834C11.2325 11.9988 11.2574 12.0139 11.2825 12.0286C11.3077 12.0434 11.333 12.0578 11.3584 12.0719C11.3839 12.086 11.4096 12.0998 11.4354 12.1133C11.4612 12.1268 11.4872 12.14 11.5133 12.1528C11.5395 12.1656 11.5658 12.1782 11.5923 12.1903C11.6187 12.2025 11.6453 12.2144 11.6721 12.2259C11.6989 12.2374 11.7258 12.2486 11.7528 12.2595C11.7798 12.2703 11.807 12.2808 11.8343 12.291C11.8616 12.3011 11.889 12.311 11.9166 12.3205C11.9441 12.33 11.9718 12.3391 11.9995 12.3479C12.0273 12.3567 12.0552 12.3652 12.0831 12.3733C12.1111 12.3814 12.1392 12.3892 12.1674 12.3966C12.1956 12.404 12.2238 12.4111 12.2522 12.4178C12.2805 12.4245 12.3089 12.4308 12.3374 12.4369C12.3659 12.4429 12.3945 12.4485 12.4232 12.4538C12.4518 12.4591 12.4805 12.4641 12.5093 12.4686C12.5381 12.4732 12.5669 12.4774 12.5957 12.4813C12.6246 12.4851 12.6536 12.4886 12.6825 12.4918C12.7115 12.4949 12.7405 12.4977 12.7695 12.5001C12.7985 12.5026 12.8276 12.5046 12.8567 12.5063C12.8858 12.508 12.9149 12.5094 12.944 12.5103C12.9731 12.5113 13.0022 12.5119 13.0313 12.5122C13.2169 12.5145 13.3942 12.4931 13.5767 12.4616C12.6594 12.9825 11.5488 13.2801 10.5061 12.9891C9.88715 12.8162 9.21725 12.5004 8.73633 12.0751Z" fill="#FDFDFD"/><path d="M33.1579 15.8737C33.4566 15.9666 33.7498 16.1227 34.0347 16.2522L35.5652 16.9463L41.3372 19.554C41.6215 19.6801 42.7947 20.2628 42.9869 20.2965L42.9861 31.0708L42.9878 33.9493C42.988 34.4984 43.0356 35.0914 42.9425 35.6317C42.6873 37.1133 42.1525 38.511 41.2768 39.7375C41.1172 39.9612 40.9523 40.2064 40.7597 40.4027C40.6693 40.3562 40.5783 40.3132 40.4971 40.2514C40.1259 39.7489 39.8355 39.1545 39.5346 38.6063C38.8346 37.3586 38.187 36.0842 37.5917 34.7832C37.4109 34.3904 37.2221 33.9994 37.0505 33.6025C36.9525 33.376 36.8703 33.1438 36.769 32.9185C35.9817 31.1678 35.285 29.5939 34.8227 27.7154C34.4101 26.0395 34.2196 24.352 34.0176 22.6428L33.5065 18.4832C33.4015 17.6455 33.3235 16.6941 33.1579 15.8737Z" fill="#003C96"/><path d="M3.28721 34.8824L3.30895 34.943C3.35061 34.9526 3.33016 34.9551 3.36445 34.9384C3.69102 34.7791 4.21176 34.7134 4.57604 34.6191C5.69892 34.3285 6.82722 34.0543 7.93949 33.7249C10.2425 33.043 12.533 32.3126 14.8272 31.6014L16.4215 31.0988C16.6797 31.0187 16.9832 30.8868 17.2506 30.8741L17.2947 30.8951C17.2641 31.0369 16.11 32.7816 15.9402 33.0513C15.0745 34.426 14.2439 35.8249 13.3719 37.1955C12.6547 38.3227 11.9665 39.4558 11.3092 40.6193C11.1869 40.8357 11.0681 41.0612 10.938 41.2723C10.8863 41.3563 10.817 41.4311 10.7739 41.5197C10.8605 41.5236 10.9601 41.4523 11.0329 41.4069C11.4384 41.1541 11.8278 40.8712 12.2312 40.6135L16.3196 38.01L20.0868 35.6151C20.606 35.282 21.1349 34.9605 21.6449 34.6137C21.918 34.4279 23.4983 33.2335 23.6299 33.2428C23.6774 33.2988 23.6675 33.4296 23.6692 33.5043C23.6883 34.3105 23.6591 35.1177 23.6605 35.9238L23.6712 40.9845C23.6707 41.3893 23.6552 41.7943 23.6537 42.1993C23.653 42.3596 23.6385 42.5357 23.6628 42.6936C23.5089 42.8101 23.3758 42.9517 23.2421 43.09C22.7696 40.8507 22.4151 38.5849 21.952 36.3433C21.3002 36.6922 20.626 37.009 19.9645 37.3399L15.9831 39.3302C13.5167 40.5938 11.0405 41.8379 8.55452 43.0626C8.67165 42.7563 8.8675 42.4544 9.02409 42.1656L9.93001 40.4883L13.6069 33.6432C13.2493 33.7938 12.8355 33.8726 12.4605 33.9773L10.2124 34.6075L3.8733 36.3855C2.88619 36.6639 1.87763 36.9072 0.901798 37.2207C0.997261 37.132 2.41147 35.7393 2.41147 35.7393C2.42305 35.7185 2.4219 35.6928 2.42711 35.6695C2.62864 35.4025 3.02614 35.1042 3.28721 34.8824Z" fill="#E4E3E3"/><path d="M29.3303 11.9065C29.6166 11.8744 29.9389 11.9784 30.1757 12.1374C30.6046 12.4253 30.8897 12.9429 30.9843 13.4429C31.1652 14.4 31.2191 15.8008 30.6462 16.6357C30.3935 17.0039 30.0597 17.2323 29.6216 17.3157C29.3066 17.3219 29.0286 17.2772 28.7578 17.1061C28.3219 16.8306 28.0539 16.3683 27.9411 15.8737C27.7378 14.9825 27.6865 13.4705 28.1922 12.6786C28.4704 12.2429 28.8328 12.0171 29.3303 11.9065Z" fill="black"/><path d="M23.2509 11.8628C23.5098 11.8411 23.7979 11.9234 24.0197 12.0553C24.4759 12.3267 24.7558 12.8102 24.8848 13.3134C25.0993 14.1504 25.0877 15.7024 24.6431 16.4467C24.3825 16.883 24.0181 17.1309 23.5305 17.2537C23.2239 17.263 22.9644 17.2157 22.6985 17.058C22.2372 16.7844 21.9762 16.3352 21.8505 15.8254C21.6426 14.9816 21.632 13.389 22.0961 12.6331C22.3695 12.1875 22.7554 11.9805 23.2509 11.8628Z" fill="black"/></svg>
-            </div>
-            <div class="flex flex-col gap-[2px] flex-1">
-                <div class="flex items-center justify-between gap-4 text-[13px] leading-tight">
-                    <span class="text-[#9ca3af] font-medium tracking-wide">Админов:</span>
-                    <span id="adminCount" class="text-white font-bold tracking-wide tabular-nums text-[14px]">0</span>
-                </div>
-                <div class="flex items-center justify-between gap-4 text-[13px] leading-tight mt-0.5">
-                    <span class="text-[#9ca3af] font-medium tracking-wide">Игроков:</span>
-                    <span id="playerCount" class="text-white font-bold tracking-wide tabular-nums text-[14px]">0</span>
-                </div>
-                <div class="flex items-center justify-between gap-4 text-[13px] leading-tight mt-0.5">
-                    <span class="text-[#9ca3af] font-medium tracking-wide">Репорты:</span>
-                    <span id="reportCount" class="text-rose-400 font-bold tracking-wide tabular-nums text-[14px]">0</span>
-                </div>
-            </div>
-            <div class="absolute top-2 right-2 flex items-center justify-center">
-                <span class="status-dot" title="Онлайн"></span>
-            </div>
-        </section>
-
-        <nav class="glass-panel rounded-2xl overflow-hidden py-1 pointer-events-auto" aria-label="Категории банов">
-            <div class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer" data-category="Игроки" onclick="openSidePanel('Игроки', 'amber')">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
-                        <i class="ph ph-warning text-amber-400 text-xl"></i>
+            <div class="feature-grid">
+                <div class="feature">
+                    <div class="feature-icon">🔒</div>
+                    <div>
+                        <div class="feature-text">Discord OAuth2</div>
+                        <div class="feature-sub">Безопасный вход</div>
                     </div>
-                    <span class="text-[15px] font-semibold text-gray-100">Игроки</span>
                 </div>
-                <div class="h-8 px-3.5 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20 shrink-0">
-                    <span id="suspiciousCount" class="text-amber-400 text-[14px] font-bold tabular-nums">0</span>
-                </div>
-            </div>
-
-            <div class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer" data-category="Наказания" onclick="openSidePanel('Наказания', 'emerald')">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0">
-                        <svg width="22" height="22" viewBox="0 0 20 21" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5.14501 6.22379C5.14501 5.80044 5.22935 5.38123 5.39323 4.9901C5.5571 4.59897 5.7973 4.24358 6.1001 3.94423C6.40289 3.64487 6.76237 3.40741 7.158 3.2454C7.55362 3.08339 7.97765 3 8.40588 3C8.8341 3 9.25813 3.08339 9.65376 3.2454C10.0494 3.40741 10.4089 3.64487 10.7117 3.94423C11.0145 4.24358 11.2547 4.59897 11.4185 4.9901C11.5824 5.38123 11.6667 5.80044 11.6667 6.22379C11.6667 7.0788 11.3232 7.89878 10.7117 8.50336C10.1001 9.10794 9.27071 9.44759 8.40588 9.44759C7.54104 9.44759 6.71163 9.10794 6.1001 8.50336C5.48856 7.89878 5.14501 7.0788 5.14501 6.22379ZM1.66675 14.3907C1.66675 13.5357 2.0103 12.7157 2.62183 12.1112C3.23337 11.5066 4.06278 11.1669 4.92762 11.1669H5.22327C5.38559 11.1675 5.54327 11.1922 5.69631 11.2409L6.44936 11.4842C7.28057 11.7526 8.15918 11.8472 9.02936 11.7618C9.06178 11.7592 9.09437 11.7647 9.12403 11.7779C9.15369 11.7912 9.17944 11.8117 9.19886 11.8375C9.21827 11.8633 9.2307 11.8936 9.23497 11.9255C9.23924 11.9574 9.23522 11.9898 9.22327 12.0197C8.97028 12.6363 8.84036 13.2955 8.84066 13.9609C8.84066 15.0372 9.17457 16.037 9.74501 16.864C9.82414 16.9792 9.74762 17.1417 9.60588 17.146C7.32465 17.2242 5.04118 17.0802 2.78849 16.7162C2.4756 16.6653 2.19114 16.5063 1.98572 16.2675C1.78031 16.0286 1.66728 15.7255 1.66675 15.412V14.3907Z" fill="#6ee7b7"/><path fill-rule="evenodd" clip-rule="evenodd" d="M10.8333 14.1667C10.8333 15.0307 11.107 15.8307 11.5728 16.484C11.9415 17.0053 12.4302 17.4303 12.9977 17.7232C13.5651 18.0161 14.1947 18.1681 14.8333 18.1667C15.6244 18.1667 16.3977 17.9321 17.0555 17.4925C17.7133 17.053 18.226 16.4283 18.5288 15.6974C18.8315 14.9665 18.9107 14.1622 18.7564 13.3863C18.6021 12.6104 18.2211 11.8977 17.6617 11.3382C17.1023 10.7788 16.3895 10.3979 15.6136 10.2435C14.8377 10.0892 14.0334 10.1684 13.3025 10.4712C12.5716 10.7739 11.9469 11.2866 11.5074 11.9444C11.0678 12.6022 10.8333 13.3755 10.8333 14.1667ZM14.8333 16.8333C14.3569 16.8336 13.8891 16.7062 13.4786 16.4644L17.131 12.812C17.3699 13.2171 17.4975 13.6781 17.5007 14.1483C17.5039 14.6186 17.3827 15.0813 17.1494 15.4896C16.9161 15.898 16.579 16.2373 16.1722 16.4733C15.7655 16.7093 15.3035 16.8335 14.8333 16.8333ZM12.5355 15.5213L16.1879 11.8689C15.6786 11.5679 15.0836 11.4448 14.4966 11.5191C13.9096 11.5933 13.364 11.8607 12.9456 12.279C12.5273 12.6974 12.2599 13.243 12.1857 13.83C12.1114 14.417 12.2345 15.012 12.5355 15.5213Z" fill="#6ee7b7"/></svg>
+                <div class="feature">
+                    <div class="feature-icon">🛡️</div>
+                    <div>
+                        <div class="feature-text">Роли сервера</div>
+                        <div class="feature-sub">Автоматические права</div>
                     </div>
-                    <span class="text-[15px] font-semibold text-gray-100">Наказания</span>
                 </div>
-                <div class="h-8 px-3.5 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shrink-0">
-                    <i class="ph ph-arrow-right text-emerald-400 text-sm"></i>
-                </div>
-            </div>
-
-            <div class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer" data-category="Проверка" onclick="openSidePanel('Проверка', 'cyan')">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center shrink-0">
-                        <svg width="22" height="22" viewBox="0 0 20 21" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M8.75008 3.83333C7.31349 3.83333 5.93574 4.40401 4.91992 5.41984C3.9041 6.43566 3.33341 7.81341 3.33341 9.25C3.33341 10.6866 3.9041 12.0643 4.91992 13.0802C5.93574 14.096 7.31349 14.6667 8.75008 14.6667C10.1867 14.6667 11.5644 14.096 12.5802 13.0802C13.5961 12.0643 14.1667 10.6866 14.1667 9.25C14.1667 7.81341 13.5961 6.43566 12.5802 5.41984C11.5644 4.40401 10.1867 3.83333 8.75008 3.83333ZM1.66675 9.25C1.66684 8.12049 1.93705 7.00738 2.45483 6.00355C2.9726 4.99971 3.72293 4.13424 4.64321 3.47936C5.56349 2.82448 6.62704 2.39917 7.74512 2.23892C8.8632 2.07867 10.0034 2.18812 11.0706 2.55815C12.1377 2.92817 13.101 3.54804 13.8799 4.36603C14.6587 5.18402 15.2307 6.17642 15.5481 7.26043C15.8654 8.34443 15.919 9.48862 15.7042 10.5975C15.4894 11.7064 15.0126 12.7479 14.3134 13.635L17.3567 16.6783C17.5085 16.8355 17.5925 17.046 17.5906 17.2645C17.5887 17.483 17.5011 17.692 17.3466 17.8465C17.1921 18.001 16.9831 18.0887 16.7646 18.0906C16.5461 18.0925 16.3356 18.0085 16.1784 17.8567L13.1351 14.8133C12.0906 15.6367 10.8354 16.1493 9.51319 16.2926C8.19096 16.4359 6.8551 16.204 5.65849 15.6235C4.46189 15.043 3.45288 14.1374 2.74694 13.0102C2.041 11.8831 1.66666 10.58 1.66675 9.25ZM7.91675 6.33333C7.91675 6.11232 8.00455 5.90036 8.16083 5.74408C8.31711 5.5878 8.52907 5.5 8.75008 5.5C9.74464 5.5 10.6985 5.89509 11.4017 6.59835C12.105 7.30161 12.5001 8.25544 12.5001 9.25C12.5001 9.47101 12.4123 9.68297 12.256 9.83925C12.0997 9.99553 11.8878 10.0833 11.6667 10.0833C11.4457 10.0833 11.2338 9.99553 11.0775 9.83925C10.9212 9.68297 10.8334 9.47101 10.8334 9.25C10.8334 8.69746 10.6139 8.16756 10.2232 7.77686C9.83252 7.38616 9.30262 7.16666 8.75008 7.16666C8.52907 7.16666 8.31711 7.07887 8.16083 6.92259C8.00455 6.76631 7.91675 6.55435 7.91675 6.33333Z" fill="#22d3ee"/></svg>
+                <div class="feature">
+                    <div class="feature-icon">⚡</div>
+                    <div>
+                        <div class="feature-text">Live data</div>
+                        <div class="feature-sub">Обновления онлайн</div>
                     </div>
-                    <span class="text-[15px] font-semibold text-gray-100">Проверка</span>
                 </div>
-                <div class="h-8 px-3.5 rounded-full bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20 shrink-0">
-                    <i class="ph ph-arrow-right text-cyan-400 text-sm"></i>
-                </div>
-            </div>
-
-            <div class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer" data-category="Дропы" onclick="openSidePanel('Дропы', 'yellow')">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-yellow-500/10 flex items-center justify-center shrink-0">
-                        <i class="ph ph-gift text-yellow-400 text-xl"></i>
+                <div class="feature">
+                    <div class="feature-icon">📊</div>
+                    <div>
+                        <div class="feature-text">Статистика</div>
+                        <div class="feature-sub">Серверы и игроки</div>
                     </div>
-                    <span class="text-[15px] font-semibold text-gray-100">Дропы</span>
-                </div>
-                <div class="h-8 px-3.5 rounded-full bg-yellow-500/10 flex items-center justify-center border border-yellow-500/20 shrink-0">
-                    <i class="ph ph-arrow-right text-yellow-400 text-sm"></i>
                 </div>
             </div>
-
-            <div class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer" onclick="location.href='/vdf-history'">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0">
-                        <i class="ph ph-files text-blue-400 text-xl"></i>
-                    </div>
-                    <span class="text-[15px] font-semibold text-gray-100">История VDF</span>
+            <div class="progress">
+                <div class="progress-header">
+                    <span>Fear Project сервера</span>
+                    <span>Онлайн</span>
                 </div>
-                <div class="h-8 px-3.5 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0">
-                    <i class="ph ph-arrow-square-out text-blue-400 text-sm"></i>
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
                 </div>
-            </div>
-
-            <div id="navItemLauncher" class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer hidden" data-category="Лаунчер" onclick="openSidePanel('Лаунчер', 'violet')">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-violet-500/10 flex items-center justify-center shrink-0">
-                        <i class="ph ph-rocket-launch text-violet-400 text-xl"></i>
-                    </div>
-                    <span class="text-[15px] font-semibold text-gray-100">Лаунчер</span>
-                </div>
-                <div class="h-8 px-3.5 rounded-full bg-violet-500/10 flex items-center justify-center border border-violet-500/20 shrink-0">
-                    <i class="ph ph-code text-violet-400 text-sm"></i>
+                <div class="progress-footer">
+                    <span>Заполненность</span>
+                    <span>72%</span>
                 </div>
             </div>
-
-            <div id="navItemChanges" class="dropdown-item px-4 py-3.5 flex items-center justify-between cursor-pointer hidden" data-category="Изменения" onclick="openSidePanel('Изменения', 'indigo')">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0">
-                        <i class="ph ph-pencil-simple text-indigo-300 text-xl"></i>
-                    </div>
-                    <span class="text-[15px] font-semibold text-gray-100">Изменения</span>
-                </div>
-                <div class="h-8 px-3.5 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 shrink-0">
-                    <i class="ph ph-arrow-right text-indigo-300 text-sm"></i>
-                </div>
-            </div>
-        </nav>
-    </aside>
-
-    <main id="sidePanel" class="absolute top-12 left-1/2 -translate-x-1/2 w-[min(1200px,calc(100vw-700px))] max-w-[1200px]">
-        <div class="glass-panel rounded-2xl overflow-hidden">
-            <header class="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
-                <h2 id="panelTitle" class="text-white text-[16px] font-bold">Загрузка...</h2>
-                <button type="button" onclick="closeSidePanel()" class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center">
-                    <i class="ph ph-x text-gray-400 text-lg"></i>
-                </button>
-            </header>
-            <div id="panelContent" data-smooth-scroll-container="1" class="p-6 max-h-[80vh] overflow-y-auto hide-scrollbar">
-                <p class="text-gray-400 text-sm">Загрузка...</p>
+            <div class="card-note">
+                <span>⚡</span> Данные обновляются в реальном времени через WebSocket
             </div>
         </div>
     </main>
 
-    <div id="playerModal" class="fixed inset-0 z-[200] hidden">
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closePlayerModal()"></div>
-        <div data-smooth-scroll-container="1" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(560px,90vw)] max-h-[80vh] overflow-y-auto hide-scrollbar">
-            <div class="glass-panel rounded-2xl p-6" id="playerModalContent"></div>
-        </div>
+    <div class="footer-chips">
+        <div class="chip">👥 Стафф</div>
+        <div class="chip">🔍 Проверки</div>
+        <div class="chip">🛡️ Наказания</div>
+        <div class="chip">🏆 Топ-1000</div>
+        <div class="chip">🖥️ Сервера</div>
+        <div class="chip">🎁 Дропы</div>
     </div>
 
-    <div id="friendsModal" class="fixed inset-0 z-[200] hidden">
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeFriendsModal()"></div>
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(420px,90vw)] max-h-[70vh] overflow-hidden flex flex-col">
-            <div class="glass-panel rounded-2xl p-6">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-white text-lg font-bold">Друзья</h3>
-                    <button onclick="closeFriendsModal()" class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center shrink-0"><i class="ph ph-x text-gray-400"></i></button>
-                </div>
-                <div id="friendsModalContent" data-smooth-scroll-container="1" class="overflow-y-auto hide-scrollbar max-h-[50vh]"></div>
-            </div>
-        </div>
-    </div>
-
-    <div id="localSettingsModal" class="fixed inset-0 z-[210] hidden">
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeLocalSettingsModal()"></div>
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(460px,92vw)]">
-            <div class="glass-panel rounded-2xl p-6">
-                <div class="flex items-center justify-between mb-5">
-                    <h3 class="text-white text-lg font-bold">Локальные настройки</h3>
-                    <button type="button" onclick="closeLocalSettingsModal()" class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center">
-                        <i class="ph ph-x text-gray-400"></i>
-                    </button>
-                </div>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-gray-400 text-xs font-semibold mb-2">Тема</label>
-                        <div id="localThemeGroup" class="grid grid-cols-2 gap-2">
-                            <button type="button" data-local-theme="dark" class="local-opt-btn">Тёмная</button>
-                            <button type="button" data-local-theme="midnight" class="local-opt-btn">Midnight</button>
-                            <button type="button" data-local-theme="indigo" class="local-opt-btn">Indigo</button>
-                            <button type="button" data-local-theme="emerald" class="local-opt-btn">Emerald</button>
-                            <button type="button" data-local-theme="crimson" class="local-opt-btn">Crimson</button>
-                            <button type="button" data-local-theme="graphite" class="local-opt-btn">Graphite</button>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-gray-400 text-xs font-semibold mb-2">Анимации</label>
-                        <div id="localAnimationGroup" class="grid grid-cols-3 gap-2">
-                            <button type="button" data-local-anim="off" class="local-opt-btn">Выкл</button>
-                            <button type="button" data-local-anim="soft" class="local-opt-btn">Мягкие</button>
-                            <button type="button" data-local-anim="full" class="local-opt-btn">Полные</button>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-gray-400 text-xs font-semibold mb-2">Плавный скролл</label>
-                        <div id="localScrollGroup" class="grid grid-cols-3 gap-2">
-                            <button type="button" data-local-scroll="off" class="local-opt-btn">Выкл</button>
-                            <button type="button" data-local-scroll="balanced" class="local-opt-btn">Стандарт</button>
-                            <button type="button" data-local-scroll="glide" class="local-opt-btn">Плавный</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="flex justify-end gap-2 mt-6">
-                    <button type="button" onclick="resetLocalSettings()" class="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-semibold">Сбросить</button>
-                    <button type="button" onclick="saveLocalSettings()" class="px-3 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold">Сохранить</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <div class="footer">© 2026 FearSearch Staff Panel — только для авторизованного стаффа</div>
 
     <script>
-        // Bootstrap: чтобы авторизованные пользователи могли загрузить защищенные .js ассеты.
-        // Пользовательский токен хранится в localStorage, поэтому кладем его в cookie до загрузки JS.
-        (function () {
-            try {
-                var raw = localStorage.getItem('user');
-                var u = raw ? JSON.parse(raw) : null;
-                var token = u && u.sessionToken;
-                if (!token) return;
-                var hasCookie = false;
+        (function() {
+            const params = new URLSearchParams(window.location.search);
+            const discordAuthData = params.get('discord_auth');
+            if (discordAuthData) {
                 try {
-                    hasCookie = String(document.cookie || '').split(';').some(function (c) {
-                        return String(c).trim().startsWith('sessionToken=');
-                    });
-                } catch (_) {}
-                if (hasCookie) return;
-                var secure = location && location.protocol === 'https:' ? 'Secure; ' : '';
-                document.cookie = 'sessionToken=' + encodeURIComponent(token) + '; Path=/; SameSite=Lax; ' + secure;
-            } catch (_) {}
+                    const normalized = discordAuthData.replace(/-/g, '+').replace(/_/g, '/');
+                    const data = JSON.parse(atob(normalized));
+                    if (data && data.sessionToken) {
+                        localStorage.setItem('user', JSON.stringify(data));
+                        window.location.replace('/dashboard');
+                    }
+                } catch (e) {
+                    console.error('discord_auth parse error', e);
+                }
+            }
         })();
     </script>
-    <script src="/js/session.js"></script>
-    <script src="script.js"></script>
 </body>
 </html>

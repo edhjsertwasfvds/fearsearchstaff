@@ -4532,7 +4532,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     };
     const preloadTimer = setTimeout(revealUi, 2000);
     const path = window.location.pathname;
-    const isPublicLanding = path === '/' || path === '/index.html' || path === '/index.html/' || path === '/dashboard' || path === '/dashboard/' || path === '/home' || path === '/home/';
+    const isPublicLanding = path === '/' || path === '/index.html' || path === '/index.html/' || path === '/home' || path === '/home/';
 
     // Discord OAuth callback присылает данные сессии в URL — сохраняем и убираем из адреса.
     const params = new URLSearchParams(window.location.search);
