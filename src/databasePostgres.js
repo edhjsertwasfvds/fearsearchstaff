@@ -157,6 +157,16 @@ async function initDatabase() {
             launcher_api_key TEXT UNIQUE,
             discord_id TEXT UNIQUE
         );
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_users' AND column_name = 'level'
+            ) THEN
+                ALTER TABLE panel_users ADD COLUMN level INTEGER NOT NULL DEFAULT 1;
+            END IF;
+        END
+        $$;
         CREATE TABLE IF NOT EXISTS panel_staff_tickets (
             steam_id TEXT NOT NULL,
             ym TEXT NOT NULL,
