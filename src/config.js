@@ -15,7 +15,7 @@ const DXDCS_COOKIE = process.env.DXDCS_COOKIE || '';
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || '';
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || '';
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
-const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || '';
+const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI || process.env.DISCORD_REDIRECT_URL || '';
 const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID || '';
 const DISCORD_DEFAULT_LEVEL = Math.min(5, Math.max(0, Number(process.env.DISCORD_DEFAULT_LEVEL || '0')));
 const DISCORD_ROLE_LEVELS = (() => {
