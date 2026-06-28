@@ -12,7 +12,6 @@ const loaderProgress = document.getElementById('loaderProgress');
 const progressBar = document.getElementById('progressBar');
 const saveBanner = document.getElementById('saveBanner');
 
-dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
     dropZone.classList.add('dragover');
