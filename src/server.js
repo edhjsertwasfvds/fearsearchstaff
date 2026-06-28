@@ -1590,15 +1590,22 @@ const server = http.createServer(async (req, res) => {
                 }
                 // Check username uniqueness
                 try {
+                    if (typeof db.getAllUsers !== 'function') {
+                        throw new Error('db.getAllUsers is not available');
+                    }
                     const allUsers = await db.getAllUsers();
+                    if (!Array.isArray(allUsers)) {
+                        throw new Error('db.getAllUsers did not return an array');
+                    }
                     if (allUsers.some(u => u.username === username)) {
                         res.writeHead(409, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ error: 'Пользователь с таким логином уже существует' }));
                         return;
                     }
-                } catch (_) {
+                } catch (checkErr) {
+                    console.error('[Auth] Register username check error:', checkErr);
                     res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: 'Ошибка проверки логина' }));
+                    res.end(JSON.stringify({ error: 'Ошибка проверки логина: ' + (checkErr.message || 'unknown') }));
                     return;
                 }
                 const existingBySteam = await db.getUserBySteamId(steamId);
