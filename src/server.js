@@ -1617,7 +1617,7 @@ const server = http.createServer(async (req, res) => {
                 const userId = await db.createPendingUser(username, password, username, steamId);
                 const confirmationCode = crypto.randomBytes(8).toString('hex').toUpperCase().slice(0, 12);
                 const expiresAt = Date.now() + 30 * 60 * 1000;
-                await db.createRegistrationConfirmation(userId, 'pending', confirmationCode, expiresAt);
+                await db.createRegistrationConfirmation(userId, null, confirmationCode, expiresAt);
                 await db.createBotTask('send_registration_dm', { userId, steamId, username, confirmationCode });
                 await db.logLoginEvent(userId, 'register_started', { username, steamId, confirmationCode }, { ip: clientIp, userAgent: req.headers['user-agent'] });
                 console.log(`[Auth] Регистрация начата: ${username} (id=${userId}, steamId=${steamId}, code=${confirmationCode})`);
