@@ -100,10 +100,14 @@
         async function loadDetails(checkId) {
             if (expandedId === checkId) {
                 expandedId = null;
-                loadChecks();
+                renderCurrentChecks();
                 return;
             }
             expandedId = checkId;
+            await renderDetails(checkId);
+        }
+
+        async function renderDetails(checkId) {
             const row = document.getElementById('check-row-' + checkId);
             if (!row) return;
             const old = row.nextElementSibling;
@@ -159,7 +163,14 @@
             }
         }
 
+        let lastChecks = [];
+
+        function renderCurrentChecks() {
+            renderChecks(lastChecks);
+        }
+
         function renderChecks(checks) {
+            lastChecks = checks;
             if (checks.length === 0) {
                 listEl.innerHTML = '<div class="p-8 text-center text-gray-500">История VDF-проверок пуста</div>';
                 return;
@@ -189,6 +200,9 @@
                         </tbody>
                     </table>
                 </div>`;
+            if (expandedId) {
+                renderDetails(expandedId);
+            }
         }
 
         loadChecks();
