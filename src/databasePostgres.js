@@ -239,15 +239,26 @@ async function initDatabase() {
                 ALTER TABLE panel_users ALTER COLUMN steam_id DROP NOT NULL;
             END IF;
             -- Drop NOT NULL from any other column that might cause INSERT failures (e.g. last_login from old schema)
-            FOR col IN
-                SELECT column_name
+            DECLARE
+                drop_not_null_sql TEXT;
+            BEGIN
+                SELECT COALESCE(
+                    string_agg(
+                        format('ALTER TABLE panel_users ALTER COLUMN %I DROP NOT NULL', column_name),
+                        '; '
+                    ),
+                    ''
+                )
+                INTO drop_not_null_sql
                 FROM information_schema.columns
                 WHERE table_name = 'panel_users'
                   AND column_name NOT IN ('id', 'username')
-                  AND is_nullable = 'NO'
-            LOOP
-                EXECUTE format('ALTER TABLE panel_users ALTER COLUMN %I DROP NOT NULL', col.column_name);
-            END LOOP;
+                  AND is_nullable = 'NO';
+
+                IF drop_not_null_sql <> '' THEN
+                    EXECUTE drop_not_null_sql;
+                END IF;
+            END;
         END
         $$;
         DO $$
