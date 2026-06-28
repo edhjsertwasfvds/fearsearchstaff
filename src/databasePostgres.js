@@ -1491,6 +1491,25 @@ async function getVdfHistoryChecks(limit = 100) {
     }
 }
 
+async function getVdfHistoryBannedByConfigHash(configHash) {
+    try {
+        const { rows } = await poolQuery(`
+            SELECT steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+                   vac_banned, vac_days_ago, yooma_banned, yooma_reason, created_at
+            FROM vdf_history
+            WHERE config_hash = $1 AND (fear_banned = TRUE OR vac_banned = TRUE OR yooma_banned = TRUE)
+            ORDER BY created_at DESC
+        `, [configHash]);
+        return rows.map(r => ({
+            ...r,
+            created_at: r.created_at ? (r.created_at.toISOString ? r.created_at.toISOString() : String(r.created_at)) : null
+        }));
+    } catch (e) {
+        console.error('[panelPg] getVdfHistoryBannedByConfigHash error:', e && e.message);
+        return [];
+    }
+}
+
 async function getVdfHistoryDetails(check_id) {
     try {
         const { rows } = await poolQuery(`
@@ -1770,6 +1789,7 @@ module.exports = {
     getPunishmentsMonthComparison,
     getTicketsMonthComparison,
     getVdfHistoryChecks,
+    getVdfHistoryBannedByConfigHash,
     getVdfHistoryDetails,
     getVdfContentByCheckId,
     saveVdfHistory,

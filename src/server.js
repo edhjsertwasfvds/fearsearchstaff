@@ -249,6 +249,7 @@ const backgroundState = {
 };
 
 let dropsRefreshRunning = false;
+let bannedOnlineInFlight = null; // Promise для дедупликации параллельных запросов
 async function refreshDropsCache() {
     if (dropsRefreshRunning) return;
     dropsRefreshRunning = true;
@@ -4218,6 +4219,153 @@ const server = http.createServer(async (req, res) => {
             const result = await db.getLinkedSteamAccounts(steamId);
             sendJson(res, 200, result);
         } catch (err) {
+            sendError(res, 500, 'DB_ERROR', err.message || 'DB error');
+        }
+        return;
+    }
+
+    // --- Связанные группы с банами среди онлайн-игроков (Обходники) ---
+    if (parsedUrl.pathname === '/api/linked-accounts/banned-online' && req.method === 'GET') {
+        const session = await resolveUserSession(req);
+        if (!session) {
+            sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
+            return;
+        }
+        try {
+            // Дедупликация: параллельные запросы ждут одного и того же результата.
+            if (bannedOnlineInFlight) {
+                const cachedResult = await bannedOnlineInFlight;
+                sendJson(res, 200, cachedResult);
+                return;
+            }
+
+            const computePromise = (async () => {
+                const limit = Math.min(200, parseInt(parsedUrl.searchParams.get('limit') || '100', 10) || 100);
+                const groups = await db.getAllLinkedGroups(limit, 0);
+                const cached = getCachedData('players');
+                const onlineContext = buildOnlinePlayersContext(cached);
+                const onlineSteamIds = onlineContext.steamIds;
+                const playerDataMap = onlineContext.playerDataMap;
+
+                // Функция для перепроверки текущего бана на Fear с кэшированием.
+                async function reverifyFearBans(steamId) {
+                    try {
+                        const cachedPunishments = punishmentsService.getPunishmentsFromCache(steamId, 'player');
+                        let list;
+                        if (cachedPunishments) {
+                            list = cachedPunishments;
+                        } else {
+                            const res = await punishmentsService.fetchPunishmentsForSteamId(steamId, 'player');
+                            list = Array.isArray(res.punishments) ? res.punishments : [];
+                            punishmentsService.setPunishmentsToCache(steamId, 'player', list);
+                        }
+                        return (Array.isArray(list) ? list : []).filter(p => p._active);
+                    } catch (e) {
+                        console.warn('[banned-online] reverify error for', steamId, e && e.message);
+                        return [];
+                    }
+                }
+
+                // Простая очередь concurrency.
+                async function runWithConcurrency(tasks, concurrency) {
+                    const results = [];
+                    let i = 0;
+                    async function worker() {
+                        while (i < tasks.length) {
+                            const idx = i++;
+                            results[idx] = await tasks[idx]();
+                        }
+                    }
+                    await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
+                    return results;
+                }
+
+                const processedGroups = [];
+                let totalApiCalls = 0;
+                const maxApiCalls = 200;
+
+                for (const g of groups) {
+                    const onlineInGroup = (g.steamIds || []).filter(sid => onlineSteamIds.has(String(sid)));
+                    if (onlineInGroup.length === 0) continue;
+
+                    // VDF-история: баны для этого конфига.
+                    const vdfBanned = await db.getVdfHistoryBannedByConfigHash(g.configHash);
+                    const vdfBannedMap = new Map();
+                    for (const r of vdfBanned) {
+                        const sid = String(r.steamid);
+                        if (!vdfBannedMap.has(sid)) vdfBannedMap.set(sid, r);
+                    }
+
+                    // Из онлайн-игроков группы отбираем тех, кто был с баном в VDF-истории.
+                    const candidates = onlineInGroup.filter(sid => vdfBannedMap.has(String(sid)));
+                    if (candidates.length === 0) continue;
+
+                    // Перепроверяем баны на Fear.
+                    const tasks = candidates.slice(0, Math.max(1, maxApiCalls - totalApiCalls)).map(sid => async () => {
+                        totalApiCalls++;
+                        const activeBans = await reverifyFearBans(sid);
+                        const onlineData = playerDataMap.get(String(sid));
+                        return {
+                            sid,
+                            activeBans,
+                            onlineData: onlineData || null,
+                            vdfRecord: vdfBannedMap.get(String(sid))
+                        };
+                    });
+                    if (tasks.length === 0) break;
+                    const results = await runWithConcurrency(tasks, 5);
+
+                    const bannedAccounts = [];
+                    let banCount = 0;
+                    for (const r of results) {
+                        if (r.activeBans.length === 0) continue;
+                        banCount += r.activeBans.length;
+                        for (const b of r.activeBans) {
+                            const duration = Number(b.duration) || 0;
+                            const expires = Number(b.expires) || 0;
+                            const durationDays = duration > 0 ? Math.ceil(duration / 86400) : 0;
+                            const expiresDate = expires > 0 ? new Date(expires * 1000).toLocaleString('ru-RU') : 'Навсегда';
+                            bannedAccounts.push({
+                                steamId: r.sid,
+                                nickname: r.onlineData?.nickname || b.name || r.vdfRecord?.nickname || 'Unknown',
+                                avatar: r.onlineData?.avatar || 'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg',
+                                serverName: r.onlineData?.serverName || '—',
+                                reason: String(b.reason || b.ban_reason || '—').trim(),
+                                durationDays,
+                                expiresDate,
+                                source: 'Fear'
+                            });
+                        }
+                    }
+
+                    if (bannedAccounts.length === 0) continue;
+
+                    processedGroups.push({
+                        configHash: g.configHash,
+                        filename: g.filename || 'VDF',
+                        createdAt: g.createdAt,
+                        accountCount: g.accountCount,
+                        onlineCount: onlineInGroup.length,
+                        banCount,
+                        bannedAccounts
+                    });
+
+                    if (totalApiCalls >= maxApiCalls) break;
+                }
+
+                return { groups: processedGroups };
+            })();
+
+            bannedOnlineInFlight = computePromise;
+            try {
+                const result = await computePromise;
+                sendJson(res, 200, result);
+                return result;
+            } finally {
+                bannedOnlineInFlight = null;
+            }
+        } catch (err) {
+            console.error('[banned-online] error:', err);
             sendError(res, 500, 'DB_ERROR', err.message || 'DB error');
         }
         return;

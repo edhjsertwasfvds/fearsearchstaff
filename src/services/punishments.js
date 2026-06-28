@@ -67,8 +67,11 @@ function isActive(p) {
     const now = Math.floor(Date.now() / 1000);
     const expires = Number(p.expires) || 0;
     const duration = Number(p.duration) || 0;
-    if (Number(p.status) === 1) return true;
-    if (expires === 0 && duration === 0) return true; // permanent
+    // Бан активен, если статус активен и срок не истёк (или перманент).
+    if (Number(p.status) === 1) {
+        return expires === 0 || expires > now;
+    }
+    if (expires === 0) return true; // permanent
     return expires > now;
 }
 

@@ -854,6 +854,21 @@ function getVdfHistoryChecks(limit = 100) {
     }));
 }
 
+function getVdfHistoryBannedByConfigHash(configHash) {
+    try {
+        return db.prepare(`
+            SELECT steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+                   vac_banned, vac_days_ago, yooma_banned, yooma_reason, created_at
+            FROM vdf_history
+            WHERE config_hash = ? AND (fear_banned = 1 OR vac_banned = 1 OR yooma_banned = 1)
+            ORDER BY created_at DESC
+        `).all(configHash);
+    } catch (e) {
+        console.error('[panelSqlite] getVdfHistoryBannedByConfigHash error:', e && e.message);
+        return [];
+    }
+}
+
 function getVdfHistoryDetails(check_id) {
     return db.prepare(`
         SELECT id, check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
@@ -1017,7 +1032,7 @@ module.exports = {
     getActivityHeatmap, getActivityByServer,
     replaceFearPunishments, getFearPunishmentsStats, getFearPunishmentsByAdmin,
     getStaffPunishmentsDaily, getPunishmentsTrend, getPunishmentsMonthComparison, getTicketsMonthComparison,
-    getVdfHistoryChecks, getVdfHistoryDetails, getVdfContentByCheckId, saveVdfHistory,
+    getVdfHistoryChecks, getVdfHistoryBannedByConfigHash, getVdfHistoryDetails, getVdfContentByCheckId, saveVdfHistory,
     getLinkedSteamAccounts, getAllLinkedGroups,
     saveDrops, getDrops, getDropsCount,
     logLoginEvent, getLoginLogsByUserId, getSessionsByUserId,
@@ -1155,7 +1170,7 @@ function getAllLinkedGroups(limit = 100, offset = 0) {
             result.push({
                 configHash: g.config_hash,
                 filename: g.filename,
-                createdAt: g.created_at ? String(g.created_at) : null,
+                createdAt: g.created_at ? new Date(Number(g.created_at) * 1000).toISOString() : null,
                 accountCount: g.account_count,
                 steamIds: accounts.map(a => a.steamid)
             });

@@ -78,12 +78,29 @@
                 <div class="w-10 h-10 bg-rose-500/10 rounded-xl flex items-center justify-center">
                     <i class="ph ph-user-circle-minus text-rose-400 text-xl"></i>
                 </div>
-                <h2 class="text-xl font-bold text-white">Группы связанных SteamID</h2>
+                <div>
+                    <h2 class="text-xl font-bold text-white">Активные баны среди онлайн-игроков</h2>
+                    <p class="text-gray-500 text-xs">Показаны только группы, где сейчас играют аккаунты с баном в VDF-истории и перепроверены на Fear.</p>
+                </div>
+                <button onclick="loadBannedOnlineGroups()" class="ml-auto px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors bg-white/5 text-gray-300 hover:bg-white/10 flex items-center gap-2">
+                    <i class="ph ph-arrows-clockwise"></i> Обновить
+                </button>
+            </div>
+            <div id="bannedOnlineList" class="space-y-3 max-h-[700px] overflow-y-auto pr-1 custom-scroll"></div>
+            <div id="bannedOnlineLoading" class="text-gray-500 text-sm py-4">Загрузка...</div>
+        </section>
+
+        <section class="glass-panel p-6 rounded-2xl mb-6">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center">
+                    <i class="ph ph-users text-gray-400 text-xl"></i>
+                </div>
+                <h2 class="text-xl font-bold text-white">Все группы связанных SteamID</h2>
                 <button onclick="loadGroups()" class="ml-auto px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors bg-white/5 text-gray-300 hover:bg-white/10 flex items-center gap-2">
                     <i class="ph ph-arrows-clockwise"></i> Обновить
                 </button>
             </div>
-            <div id="groupsList" class="space-y-3 max-h-[700px] overflow-y-auto pr-1 custom-scroll"></div>
+            <div id="groupsList" class="space-y-3 max-h-[400px] overflow-y-auto pr-1 custom-scroll"></div>
             <div id="groupsLoading" class="text-gray-500 text-sm py-4">Загрузка...</div>
         </section>
 
@@ -114,6 +131,10 @@
             d.textContent = s;
             return d.innerHTML;
         }
+        function safeAvatarUrl(url) {
+            const u = String(url || '').trim();
+            return /^https:\/\/avatars\.steamstatic\.com\//i.test(u) ? u : 'https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_medium.jpg';
+        }
 
         async function loadGroups() {
             const list = document.getElementById('groupsList');
@@ -139,8 +160,8 @@
                         </div>
                         <div class="flex flex-wrap gap-2">
                             ${g.steamIds.map(sid => `
-                                <a href="https://steamcommunity.com/profiles/${sid}" target="_blank" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-xs transition-colors">
-                                    <i class="ph ph-steam-logo"></i> ${sid}
+                                <a href="https://steamcommunity.com/profiles/${esc(sid)}" target="_blank" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-xs transition-colors">
+                                    <i class="ph ph-steam-logo"></i> ${esc(sid)}
                                 </a>
                             `).join('')}
                         </div>
@@ -148,6 +169,111 @@
                 `).join('');
             } catch (e) {
                 console.error('loadGroups error:', e);
+                list.innerHTML = '<p class="text-gray-500 text-sm">Ошибка загрузки</p>';
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        function groupIdFromHash(hash) {
+            return 'banned-' + String(hash || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
+        }
+
+        function toggleBannedGroup(hash) {
+            const el = document.getElementById('banned-group-' + groupIdFromHash(hash));
+            if (!el) return;
+            const isHidden = el.classList.contains('hidden');
+            el.classList.toggle('hidden', !isHidden);
+            const caret = el.previousElementSibling?.querySelector('.ph-caret-down');
+            if (caret) {
+                caret.classList.toggle('rotate-180', isHidden);
+            }
+        }
+
+        function formatDurationDays(days) {
+            if (!days || days <= 0) return 'Навсегда';
+            return days + ' ' + (days === 1 ? 'день' : days < 5 ? 'дня' : 'дней');
+        }
+        function pluralBan(n) {
+            if (!n) return '0 банов';
+            const last = n % 10;
+            const lastTwo = n % 100;
+            if (lastTwo >= 11 && lastTwo <= 19) return n + ' банов';
+            if (last === 1) return n + ' бан';
+            if (last >= 2 && last <= 4) return n + ' бана';
+            return n + ' банов';
+        }
+
+        async function loadBannedOnlineGroups() {
+            const list = document.getElementById('bannedOnlineList');
+            const loading = document.getElementById('bannedOnlineLoading');
+            list.innerHTML = '';
+            loading.classList.remove('hidden');
+            try {
+                const res = await fetch('/api/linked-accounts/banned-online', { headers: authHeaders() });
+                if (!res.ok) {
+                    list.innerHTML = '<p class="text-gray-500 text-sm">Ошибка загрузки</p>';
+                    return;
+                }
+                const { groups } = await res.json();
+                if (!groups || groups.length === 0) {
+                    list.innerHTML = '<p class="text-gray-500 text-sm">Сейчас нет онлайн-групп с активными банами. Выполните проверку VDF в чекере или обновите позже.</p>';
+                    return;
+                }
+                list.innerHTML = groups.map(g => {
+                    const gid = groupIdFromHash(g.configHash);
+                    return `
+                    <div class="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                        <div class="flex items-center justify-between gap-2 cursor-pointer" onclick="toggleBannedGroup('${esc(g.configHash)}')">
+                            <div>
+                                <div class="text-sm font-semibold text-white flex items-center gap-2">
+                                    ${esc(g.filename || 'VDF')}
+                                    <span class="px-2 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-400">${pluralBan(g.banCount)}</span>
+                                </div>
+                                <div class="text-xs text-gray-500 mt-0.5">${g.onlineCount} онлайн из ${g.accountCount} акк. • ${g.createdAt ? new Date(g.createdAt).toLocaleString('ru-RU') : '—'}</div>
+                            </div>
+                            <i class="ph ph-caret-down text-gray-400 text-lg transition-transform"></i>
+                        </div>
+                        <div id="banned-group-${gid}" class="hidden mt-4">
+                            <div class="overflow-x-auto rounded-lg border border-white/10">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-white/5 text-gray-400">
+                                        <tr>
+                                            <th class="px-3 py-2">Игрок</th>
+                                            <th class="px-3 py-2">SteamID</th>
+                                            <th class="px-3 py-2">Сервер</th>
+                                            <th class="px-3 py-2">Причина</th>
+                                            <th class="px-3 py-2">Срок</th>
+                                            <th class="px-3 py-2">Истекает</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${g.bannedAccounts.map(a => `
+                                            <tr class="border-t border-white/5">
+                                                <td class="px-3 py-2">
+                                                    <div class="flex items-center gap-2">
+                                                        <img src="${esc(safeAvatarUrl(a.avatar))}" alt="" class="w-8 h-8 rounded-full" onerror="this.style.display='none'">
+                                                        <span class="text-white font-medium text-xs">${esc(a.nickname)}</span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 py-2 font-mono text-gray-400 text-xs">
+                                                    <a href="https://steamcommunity.com/profiles/${esc(a.steamId)}" target="_blank" class="hover:text-gray-200">${esc(a.steamId)}</a>
+                                                </td>
+                                                <td class="px-3 py-2 text-gray-400 text-xs">${esc(a.serverName)}</td>
+                                                <td class="px-3 py-2 text-rose-300 text-xs max-w-[180px] truncate" title="${esc(a.reason)}">${esc(a.reason)}</td>
+                                                <td class="px-3 py-2 text-gray-300 text-xs">${formatDurationDays(a.durationDays)}</td>
+                                                <td class="px-3 py-2 text-gray-300 text-xs whitespace-nowrap">${esc(a.expiresDate)}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('loadBannedOnlineGroups error:', e);
                 list.innerHTML = '<p class="text-gray-500 text-sm">Ошибка загрузки</p>';
             } finally {
                 loading.classList.add('hidden');
@@ -232,6 +358,7 @@
                     5: 'bg-rose-500/20 text-rose-400'
                 };
                 document.getElementById('userLevel').className = 'level-badge ' + (badgeStyles[currentUserLevel] || badgeStyles[1]);
+                loadBannedOnlineGroups();
                 loadGroups();
             } catch (e) {
                 console.error('init error', e);
