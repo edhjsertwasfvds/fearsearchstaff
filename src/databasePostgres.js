@@ -142,6 +142,13 @@ async function initDatabase() {
             username TEXT NOT NULL,
             display_name TEXT NOT NULL,
             level INTEGER NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            country TEXT,
+            city TEXT,
+            device TEXT,
+            os TEXT,
+            browser TEXT,
             expires_at BIGINT NOT NULL,
             created_at BIGINT NOT NULL,
             last_activity BIGINT NOT NULL
@@ -152,8 +159,9 @@ async function initDatabase() {
             password_hash TEXT NOT NULL,
             display_name TEXT NOT NULL,
             level INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'pending',
             created_at BIGINT NOT NULL,
-            steam_id TEXT,
+            steam_id TEXT UNIQUE,
             launcher_api_key TEXT UNIQUE,
             discord_id TEXT UNIQUE
         );
@@ -165,8 +173,95 @@ async function initDatabase() {
             ) THEN
                 ALTER TABLE panel_users ADD COLUMN level INTEGER NOT NULL DEFAULT 1;
             END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_users' AND column_name = 'status'
+            ) THEN
+                ALTER TABLE panel_users ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';
+            END IF;
         END
         $$;
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_sessions' AND column_name = 'ip_address'
+            ) THEN
+                ALTER TABLE panel_sessions ADD COLUMN ip_address TEXT;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_sessions' AND column_name = 'user_agent'
+            ) THEN
+                ALTER TABLE panel_sessions ADD COLUMN user_agent TEXT;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_sessions' AND column_name = 'country'
+            ) THEN
+                ALTER TABLE panel_sessions ADD COLUMN country TEXT;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_sessions' AND column_name = 'city'
+            ) THEN
+                ALTER TABLE panel_sessions ADD COLUMN city TEXT;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_sessions' AND column_name = 'device'
+            ) THEN
+                ALTER TABLE panel_sessions ADD COLUMN device TEXT;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_sessions' AND column_name = 'os'
+            ) THEN
+                ALTER TABLE panel_sessions ADD COLUMN os TEXT;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_sessions' AND column_name = 'browser'
+            ) THEN
+                ALTER TABLE panel_sessions ADD COLUMN browser TEXT;
+            END IF;
+        END
+        $$;
+        CREATE TABLE IF NOT EXISTS panel_login_logs (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            country TEXT,
+            city TEXT,
+            device TEXT,
+            os TEXT,
+            browser TEXT,
+            action TEXT NOT NULL,
+            details TEXT,
+            created_at BIGINT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS panel_registration_confirmations (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            discord_id TEXT NOT NULL,
+            confirmation_code TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            level INTEGER,
+            expires_at BIGINT NOT NULL,
+            created_at BIGINT NOT NULL,
+            confirmed_at BIGINT,
+            rejected_at BIGINT
+        );
+        CREATE TABLE IF NOT EXISTS panel_bot_tasks (
+            id SERIAL PRIMARY KEY,
+            type TEXT NOT NULL,
+            payload JSONB NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            result JSONB,
+            created_at BIGINT NOT NULL,
+            processed_at BIGINT
+        );
         CREATE TABLE IF NOT EXISTS panel_staff_tickets (
             steam_id TEXT NOT NULL,
             ym TEXT NOT NULL,
@@ -672,15 +767,51 @@ async function getAllSettings() {
     return result;
 }
 
-async function createUser(username, password, displayName, level = 1) {
+async function createUser(username, password, displayName, level = 1, status = 'active', steamId = null) {
     const hash = bcrypt.hashSync(password, 10);
     const { rows } = await poolQuery(
-        'INSERT INTO panel_users (username, password_hash, display_name, level, created_at, steam_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
-        [username, hash, displayName || username, level, Date.now(), null]
+        'INSERT INTO panel_users (username, password_hash, display_name, level, status, created_at, steam_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+        [username, hash, displayName || username, level, status, Date.now(), steamId]
     );
     const newId = rows[0].id;
     await ensureUserLauncherApiKey(newId);
     return newId;
+}
+
+async function createPendingUser(username, password, displayName, steamId) {
+    return createUser(username, password, displayName, 0, 'pending', steamId);
+}
+
+async function getUserBySteamId(steamId) {
+    const { rows } = await poolQuery(
+        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id FROM panel_users WHERE steam_id = $1',
+        [steamId]
+    );
+    const user = rows[0];
+    return user ? {
+        id: user.id,
+        username: user.username,
+        displayName: user.display_name,
+        level: user.level,
+        status: user.status,
+        createdAt: user.created_at,
+        steamId: user.steam_id || null,
+        discordId: user.discord_id || null
+    } : null;
+}
+
+async function updateUserStatusAndLevel(id, status, level) {
+    await poolQuery(
+        'UPDATE panel_users SET status = $1, level = $2 WHERE id = $3',
+        [status, level, id]
+    );
+}
+
+async function updateUserDiscordId(id, discordId) {
+    await poolQuery(
+        'UPDATE panel_users SET discord_id = $1 WHERE id = $2',
+        [discordId, id]
+    );
 }
 
 async function createOrUpdateDiscordUser(discordId, username, displayName, level) {
@@ -715,13 +846,15 @@ async function verifyUser(username, password) {
         username: user.username,
         displayName: user.display_name,
         level: user.level,
-        steamId: user.steam_id || null
+        status: user.status,
+        steamId: user.steam_id || null,
+        discordId: user.discord_id || null
     };
 }
 
 async function getUserById(id) {
     const { rows } = await poolQuery(
-        'SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM panel_users WHERE id = $1',
+        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id FROM panel_users WHERE id = $1',
         [id]
     );
     const user = rows[0];
@@ -731,6 +864,7 @@ async function getUserById(id) {
               username: user.username,
               displayName: user.display_name,
               level: user.level,
+              status: user.status,
               createdAt: user.created_at,
               steamId: user.steam_id || null,
               discordId: user.discord_id || null
@@ -740,7 +874,7 @@ async function getUserById(id) {
 
 async function getUserByDiscordId(discordId) {
     const { rows } = await poolQuery(
-        'SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM panel_users WHERE discord_id = $1',
+        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id FROM panel_users WHERE discord_id = $1',
         [discordId]
     );
     const user = rows[0];
@@ -750,6 +884,7 @@ async function getUserByDiscordId(discordId) {
               username: user.username,
               displayName: user.display_name,
               level: user.level,
+              status: user.status,
               createdAt: user.created_at,
               steamId: user.steam_id || null,
               discordId: user.discord_id || null
@@ -859,19 +994,33 @@ async function deleteInviteCode(code) {
     return r.rowCount > 0;
 }
 
-async function saveSession(token, userId, username, displayName, level, expiresAt, createdAt, lastActivity) {
+async function saveSession(token, userId, username, displayName, level, expiresAt, createdAt, lastActivity, sessionInfo = {}) {
+    const ip = sessionInfo.ip || null;
+    const ua = sessionInfo.userAgent || null;
+    const country = sessionInfo.country || null;
+    const city = sessionInfo.city || null;
+    const device = sessionInfo.device || null;
+    const os = sessionInfo.os || null;
+    const browser = sessionInfo.browser || null;
     await poolQuery(
-        `INSERT INTO panel_sessions (token, user_id, username, display_name, level, expires_at, created_at, last_activity)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `INSERT INTO panel_sessions (token, user_id, username, display_name, level, ip_address, user_agent, country, city, device, os, browser, expires_at, created_at, last_activity)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (token) DO UPDATE SET
            user_id = EXCLUDED.user_id,
            username = EXCLUDED.username,
            display_name = EXCLUDED.display_name,
            level = EXCLUDED.level,
+           ip_address = EXCLUDED.ip_address,
+           user_agent = EXCLUDED.user_agent,
+           country = EXCLUDED.country,
+           city = EXCLUDED.city,
+           device = EXCLUDED.device,
+           os = EXCLUDED.os,
+           browser = EXCLUDED.browser,
            expires_at = EXCLUDED.expires_at,
            created_at = EXCLUDED.created_at,
            last_activity = EXCLUDED.last_activity`,
-        [token, userId, username, displayName, level, expiresAt, createdAt, lastActivity]
+        [token, userId, username, displayName, level, ip, ua, country, city, device, os, browser, expiresAt, createdAt, lastActivity]
     );
 }
 
@@ -899,7 +1048,12 @@ async function cleanupExpiredSessionsDb() {
 }
 
 async function getActiveSessionsFromDb() {
-    const { rows } = await poolQuery('SELECT * FROM panel_sessions WHERE expires_at > $1', [Date.now()]);
+    const { rows } = await poolQuery('SELECT * FROM panel_sessions WHERE expires_at > $1 ORDER BY last_activity DESC', [Date.now()]);
+    return rows;
+}
+
+async function getSessionsByUserId(userId) {
+    const { rows } = await poolQuery('SELECT * FROM panel_sessions WHERE user_id = $1 ORDER BY last_activity DESC', [userId]);
     return rows;
 }
 
@@ -1163,6 +1317,104 @@ async function getVdfContentByCheckId(check_id) {
     }
 }
 
+async function logLoginEvent(userId, action, details = null, sessionInfo = {}) {
+    const ip = sessionInfo.ip || null;
+    const ua = sessionInfo.userAgent || null;
+    const country = sessionInfo.country || null;
+    const city = sessionInfo.city || null;
+    const device = sessionInfo.device || null;
+    const os = sessionInfo.os || null;
+    const browser = sessionInfo.browser || null;
+    const detailsJson = details ? JSON.stringify(details) : null;
+    await poolQuery(
+        `INSERT INTO panel_login_logs (user_id, ip_address, user_agent, country, city, device, os, browser, action, details, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [userId, ip, ua, country, city, device, os, browser, action, detailsJson, Date.now()]
+    );
+}
+
+async function getLoginLogsByUserId(userId, limit = 50) {
+    const { rows } = await poolQuery(
+        'SELECT * FROM panel_login_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+        [userId, limit]
+    );
+    return rows;
+}
+
+async function createRegistrationConfirmation(userId, discordId, confirmationCode, expiresAt) {
+    const { rows } = await poolQuery(
+        `INSERT INTO panel_registration_confirmations (user_id, discord_id, confirmation_code, status, expires_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [userId, discordId, confirmationCode, 'pending', expiresAt, Date.now()]
+    );
+    return rows[0].id;
+}
+
+async function getPendingRegistrationConfirmation(userId) {
+    const { rows } = await poolQuery(
+        `SELECT * FROM panel_registration_confirmations
+         WHERE user_id = $1 AND status = 'pending' AND expires_at > $2
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId, Date.now()]
+    );
+    return rows[0] || null;
+}
+
+async function getRegistrationConfirmationByCode(code) {
+    const { rows } = await poolQuery(
+        `SELECT * FROM panel_registration_confirmations
+         WHERE confirmation_code = $1 AND status = 'pending' AND expires_at > $2
+         LIMIT 1`,
+        [code, Date.now()]
+    );
+    return rows[0] || null;
+}
+
+async function updateRegistrationConfirmation(id, status, level = null) {
+    const now = Date.now();
+    const confirmedAt = status === 'confirmed' ? now : null;
+    const rejectedAt = status === 'rejected' ? now : null;
+    await poolQuery(
+        `UPDATE panel_registration_confirmations
+         SET status = $1, level = COALESCE($2, level), confirmed_at = COALESCE($3, confirmed_at), rejected_at = COALESCE($4, rejected_at)
+         WHERE id = $5`,
+        [status, level, confirmedAt, rejectedAt, id]
+    );
+}
+
+async function createBotTask(type, payload) {
+    const { rows } = await poolQuery(
+        `INSERT INTO panel_bot_tasks (type, payload, status, created_at)
+         VALUES ($1,$2,$3,$4) RETURNING id`,
+        [type, JSON.stringify(payload), 'pending', Date.now()]
+    );
+    return rows[0].id;
+}
+
+async function getPendingBotTasks(type, limit = 10) {
+    const { rows } = await poolQuery(
+        `SELECT * FROM panel_bot_tasks WHERE type = $1 AND status = 'pending' ORDER BY created_at ASC LIMIT $2`,
+        [type, limit]
+    );
+    return rows;
+}
+
+async function updateBotTask(id, status, result = null) {
+    await poolQuery(
+        `UPDATE panel_bot_tasks SET status = $1, result = $2, processed_at = $3 WHERE id = $4`,
+        [status, result ? JSON.stringify(result) : null, Date.now(), id]
+    );
+}
+
+async function getRegistrationStatus(userId) {
+    const { rows } = await poolQuery(
+        `SELECT status, level, confirmed_at FROM panel_registration_confirmations
+         WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [userId]
+    );
+    return rows[0] || null;
+}
+
 module.exports = {
     initialize,
     getDbPath,
@@ -1237,5 +1489,20 @@ module.exports = {
     getTicketsMonthComparison,
     getVdfHistoryChecks,
     getVdfHistoryDetails,
-    getVdfContentByCheckId
+    getVdfContentByCheckId,
+    createPendingUser,
+    getUserBySteamId,
+    updateUserStatusAndLevel,
+    updateUserDiscordId,
+    logLoginEvent,
+    getLoginLogsByUserId,
+    createRegistrationConfirmation,
+    getPendingRegistrationConfirmation,
+    getRegistrationConfirmationByCode,
+    updateRegistrationConfirmation,
+    createBotTask,
+    getPendingBotTasks,
+    updateBotTask,
+    getRegistrationStatus,
+    getSessionsByUserId
 };
