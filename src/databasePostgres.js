@@ -238,6 +238,16 @@ async function initDatabase() {
             ) THEN
                 ALTER TABLE panel_users ALTER COLUMN steam_id DROP NOT NULL;
             END IF;
+            -- Drop NOT NULL from any other column that might cause INSERT failures (e.g. last_login from old schema)
+            FOR col IN
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'panel_users'
+                  AND column_name NOT IN ('id', 'username')
+                  AND is_nullable = 'NO'
+            LOOP
+                EXECUTE format('ALTER TABLE panel_users ALTER COLUMN %I DROP NOT NULL', col.column_name);
+            END LOOP;
         END
         $$;
         DO $$
