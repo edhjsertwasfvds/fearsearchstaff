@@ -200,7 +200,7 @@
                 return;
             }
             try {
-                const res = await fetch('/api/session', { headers: authHeaders() });
+                const res = await fetch('/api/me', { headers: authHeaders() });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok || data.error) {
                     localStorage.removeItem('user');

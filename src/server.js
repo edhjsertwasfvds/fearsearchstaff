@@ -2988,11 +2988,13 @@ const server = http.createServer(async (req, res) => {
         if (!session) return;
         const user = await db.getUserById(session.userId);
         const launcherApiKey = await db.ensureUserLauncherApiKey(session.userId);
+        // Возвращаем актуальный уровень из БД, а не закешированный в сессии.
+        const actualLevel = user?.level ?? session.level ?? 1;
         sendJson(res, 200, {
             id: session.userId,
             username: session.username,
             displayName: session.displayName,
-            level: session.level,
+            level: actualLevel,
             steamId: user?.steamId || null,
             launcherApiKey: launcherApiKey || null
         });
