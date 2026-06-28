@@ -863,6 +863,80 @@ function getVdfContentByCheckId(check_id) {
     return { content: row.content || '', filename: row.filename || `check_${check_id}.vdf` };
 }
 
+function saveVdfHistory(results, filename = '', vdfText = '') {
+    if (!Array.isArray(results) || results.length === 0) return null;
+    const steamids = results.map(r => r.steamid).filter(Boolean);
+    if (steamids.length === 0) return null;
+
+    let configHash;
+    if (vdfText) {
+        configHash = crypto.createHash('sha256').update(vdfText).digest('hex').slice(0, 64);
+    } else {
+        configHash = crypto.createHash('sha256').update(steamids.join(',')).digest('hex').slice(0, 64);
+    }
+
+    const maxRow = db.prepare('SELECT COALESCE(MAX(check_id), 0) AS max_check_id FROM vdf_history').get();
+    const checkId = (maxRow?.max_check_id || 0) + 1;
+
+    const now = Math.floor(Date.now() / 1000);
+
+    db.prepare(`
+        INSERT INTO config_hashes (config_hash, filename, content, created_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(config_hash) DO UPDATE SET
+            filename = excluded.filename,
+            content = excluded.content,
+            created_at = excluded.created_at
+    `).run(configHash, filename || '', vdfText || '', now);
+
+    const insertAccount = db.prepare(`
+        INSERT INTO config_accounts (config_hash, steamid, created_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(config_hash, steamid) DO NOTHING
+    `);
+    for (const sid of steamids) {
+        insertAccount.run(configHash, sid, now);
+    }
+
+    db.prepare('DELETE FROM vdf_history WHERE check_id = ?').run(checkId);
+
+    const insertHistory = db.prepare(`
+        INSERT INTO vdf_history
+            (check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+             vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
+             admin_group, config_hash, filename, attachment_url, message_url, on_fear, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const r of results) {
+        const ydata = r.yooma_data || {};
+        const activeYooma = (ydata.punishments || []).some(p => p.status === 'active');
+        const yoomaReason = activeYooma
+            ? (ydata.punishments.find(p => p.status === 'active').reason || ydata.punishments.find(p => p.status === 'active').type_name || '')
+            : '';
+        insertHistory.run(
+            checkId,
+            r.steamid || '',
+            r.nickname || '',
+            r.fear_banned ? 1 : 0,
+            r.fear_reason || '',
+            r.fear_unban || '',
+            r.vac_banned ? 1 : 0,
+            r.vac_days || 0,
+            r.game_bans || 0,
+            activeYooma ? 1 : 0,
+            yoomaReason,
+            r.admin_group || '',
+            configHash,
+            filename || '',
+            '',
+            '',
+            r.on_fear ? 1 : 0,
+            now
+        );
+    }
+    return checkId;
+}
+
 module.exports = {
     initialize,
     getDbPath, closeDatabase, initDatabase,
@@ -886,5 +960,5 @@ module.exports = {
     getActivityHeatmap, getActivityByServer,
     replaceFearPunishments, getFearPunishmentsStats, getFearPunishmentsByAdmin,
     getStaffPunishmentsDaily, getPunishmentsTrend, getPunishmentsMonthComparison, getTicketsMonthComparison,
-    getVdfHistoryChecks, getVdfHistoryDetails, getVdfContentByCheckId
+    getVdfHistoryChecks, getVdfHistoryDetails, getVdfContentByCheckId, saveVdfHistory
 };

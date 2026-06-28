@@ -139,6 +139,7 @@ const db = require('./database');
 const whitelistCache = require('./whitelistCache');
 const auth = require('./auth');
 const discordAuth = require('./discordAuth');
+const checker = require('./checker');
 
 async function getStaffHiddenSiteSteamIdSet() {
     let raw = await db.getSetting('staff_hidden_site_steam_ids', '[]');
@@ -1582,7 +1583,7 @@ const server = http.createServer(async (req, res) => {
                     res.end(JSON.stringify({ error: 'Пароль минимум 6 символов' }));
                     return;
                 }
-                if (!/^765611[0-9]{12}$/.test(steamId)) {
+                if (!/^765611[0-9]{10,13}$/.test(steamId)) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'Неверный формат Steam ID' }));
                     return;
@@ -4283,6 +4284,24 @@ const server = http.createServer(async (req, res) => {
     // Static files (strictly limited to /public to prevent path traversal)
     const publicDir = path.join(__dirname, '..', 'public');
     const rawUrlPath = String(req.url || '/').split('?')[0];
+
+    // Checker API: hosted locally on Railway
+    if (rawUrlPath && rawUrlPath.startsWith('/checker/api/')) {
+        try {
+            await checker.handleCheckerApi(req, res, rawUrlPath);
+        } catch (err) {
+            console.error('[Checker] error:', err.message);
+            sendError(res, 500, 'CHECKER_ERROR', err.message);
+        }
+        return;
+    }
+    // Checker root redirect
+    if (rawUrlPath === '/checker') {
+        res.writeHead(302, { Location: '/checker/' });
+        res.end();
+        return;
+    }
+
     // Авторизованных пользователей с главной отправляем в дашборд
     if (rawUrlPath === '/' || rawUrlPath === '/index.html') {
         const tokenFromCookie = getSessionTokenFromCookie(req.headers.cookie || '');
@@ -4310,6 +4329,7 @@ const server = http.createServer(async (req, res) => {
     else if (urlPath === '/whitelist' || urlPath === '/whitelist/') fileRelPath = '/whitelist.html';
     else if (urlPath === '/faq' || urlPath === '/faq/') fileRelPath = '/faq.html';
     else if (urlPath === '/dashboard' || urlPath === '/dashboard/' || urlPath === '/home') fileRelPath = '/dashboard.html';
+    else if (urlPath === '/checker' || urlPath === '/checker/') fileRelPath = '/checker/index.html';
 
     // Guard: если пользователь не авторизован, не отдаём защищённые HTML страницы.
     // Делается на сервере, чтобы работало даже если JS не загрузился.

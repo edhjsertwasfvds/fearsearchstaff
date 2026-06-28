@@ -302,6 +302,39 @@ async function initDatabase() {
             admin_avatar TEXT,
             updated_at BIGINT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS config_hashes (
+            config_hash VARCHAR(64) PRIMARY KEY,
+            filename TEXT,
+            content TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS config_accounts (
+            config_hash VARCHAR(64) NOT NULL REFERENCES config_hashes(config_hash) ON DELETE CASCADE,
+            steamid VARCHAR(32) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(config_hash, steamid)
+        );
+        CREATE TABLE IF NOT EXISTS vdf_history (
+            id SERIAL PRIMARY KEY,
+            check_id INTEGER NOT NULL,
+            steamid VARCHAR(32) NOT NULL,
+            nickname TEXT,
+            fear_banned BOOLEAN DEFAULT FALSE,
+            fear_reason TEXT,
+            fear_unban_time TEXT,
+            vac_banned BOOLEAN DEFAULT FALSE,
+            vac_days_ago INTEGER DEFAULT 0,
+            game_bans INTEGER DEFAULT 0,
+            yooma_banned BOOLEAN DEFAULT FALSE,
+            yooma_reason TEXT,
+            admin_group TEXT,
+            config_hash VARCHAR(64),
+            filename TEXT,
+            attachment_url TEXT,
+            message_url TEXT,
+            on_fear BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        );
     `);
     await pool.query(`
         CREATE INDEX IF NOT EXISTS idx_panel_action_logs_user ON panel_action_logs(user_discord_id);
@@ -318,10 +351,13 @@ async function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_panel_fear_pun_admin ON panel_fear_punishments(admin_steamid);
         CREATE INDEX IF NOT EXISTS idx_panel_fear_pun_created ON panel_fear_punishments(created);
         CREATE INDEX IF NOT EXISTS idx_panel_fear_pun_status ON panel_fear_punishments(status);
+        CREATE INDEX IF NOT EXISTS idx_vdf_history_steamid ON vdf_history(steamid);
+        CREATE INDEX IF NOT EXISTS idx_vdf_history_check_id ON vdf_history(check_id);
     `);
     // Миграция: добавляем discord_id и launcher_api_key в старые таблицы panel_users
     try { await poolQuery('ALTER TABLE panel_users ADD COLUMN discord_id TEXT UNIQUE'); } catch (_) {}
     try { await poolQuery('ALTER TABLE panel_users ADD COLUMN launcher_api_key TEXT UNIQUE'); } catch (_) {}
+    try { await poolQuery('ALTER TABLE config_hashes ADD COLUMN IF NOT EXISTS content TEXT'); } catch (_) {}
 
     const bootstrapUsers = getBootstrapUsersFromEnv();
     for (const u of bootstrapUsers) {
@@ -1317,6 +1353,77 @@ async function getVdfContentByCheckId(check_id) {
     }
 }
 
+async function saveVdfHistory(results, filename = '', vdfText = '') {
+    if (!Array.isArray(results) || results.length === 0) return null;
+    const steamids = results.map(r => r.steamid).filter(Boolean);
+    if (steamids.length === 0) return null;
+
+    let configHash;
+    if (vdfText) {
+        configHash = crypto.createHash('sha256').update(vdfText).digest('hex').slice(0, 64);
+    } else {
+        configHash = crypto.createHash('sha256').update(steamids.join(',')).digest('hex').slice(0, 64);
+    }
+
+    try {
+        const { rows: maxRow } = await poolQuery('SELECT COALESCE(MAX(check_id), 0) AS max_check_id FROM vdf_history');
+        const checkId = (maxRow[0]?.max_check_id || 0) + 1;
+
+        await poolQuery(`
+            INSERT INTO config_hashes (config_hash, filename, content)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (config_hash) DO UPDATE
+            SET filename = EXCLUDED.filename, content = EXCLUDED.content
+        `, [configHash, filename || '', vdfText || '']);
+
+        for (const sid of steamids) {
+            await poolQuery(`
+                INSERT INTO config_accounts (config_hash, steamid)
+                VALUES ($1, $2)
+                ON CONFLICT (config_hash, steamid) DO NOTHING
+            `, [configHash, sid]);
+        }
+
+        await poolQuery('DELETE FROM vdf_history WHERE check_id = $1', [checkId]);
+
+        for (const r of results) {
+            const ydata = r.yooma_data || {};
+            const active = (ydata.punishments || []).find(p => p.status === 'active');
+            const activeYooma = Boolean(active);
+            const yoomaReason = active ? (active.reason || active.type_name || '') : '';
+            await poolQuery(`
+                INSERT INTO vdf_history
+                    (check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+                     vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
+                     admin_group, config_hash, filename, attachment_url, message_url, on_fear)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            `, [
+                checkId,
+                r.steamid || '',
+                r.nickname || '',
+                Boolean(r.fear_banned),
+                r.fear_reason || '',
+                r.fear_unban || '',
+                Boolean(r.vac_banned),
+                r.vac_days || 0,
+                r.game_bans || 0,
+                activeYooma,
+                yoomaReason,
+                r.admin_group || '',
+                configHash,
+                filename || '',
+                '',
+                '',
+                Boolean(r.on_fear)
+            ]);
+        }
+        return checkId;
+    } catch (e) {
+        console.error('[panelPg] saveVdfHistory error:', e && e.message);
+        return null;
+    }
+}
+
 async function logLoginEvent(userId, action, details = null, sessionInfo = {}) {
     const ip = sessionInfo.ip || null;
     const ua = sessionInfo.userAgent || null;
@@ -1490,6 +1597,7 @@ module.exports = {
     getVdfHistoryChecks,
     getVdfHistoryDetails,
     getVdfContentByCheckId,
+    saveVdfHistory,
     createPendingUser,
     getUserBySteamId,
     updateUserStatusAndLevel,

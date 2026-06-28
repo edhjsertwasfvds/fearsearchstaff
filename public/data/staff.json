@@ -4,244 +4,384 @@
     "name": "Quasar",
     "avatar_full": "https://avatars.steamstatic.com/749be526dff10d95657759ff10a9a474b30b1d1c_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199645130988",
     "name": "𝓑𝓻𝓮𝓪𝓭",
     "avatar_full": "https://avatars.steamstatic.com/cc35a35bec578b2ebb674184fae61c99e945c409_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199795013192",
     "name": "in",
     "avatar_full": "https://avatars.steamstatic.com/a6073a15c563646efa5599dd1a708d63ab3daf3f_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561198388989868",
     "name": "rose",
     "avatar_full": "https://avatars.steamstatic.com/67ea90bfa7282740cbf2d2da1cc674b88217d43f_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199872130492",
     "name": "Hrilock",
     "avatar_full": "https://avatars.steamstatic.com/53fc82147498f7ade120d2cbd7ccd2a498b6756d_full.jpg",
     "group_display_name": "Ст. Администратор",
-    "group_name": "STADMIN"
+    "group_name": "STADMIN",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561198748005575",
     "name": "Рядовой",
     "avatar_full": "https://avatars.steamstatic.com/ff872888846cff88ed64c2c9b050719d9bc216ed_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199468993423",
     "name": "luniks.sˢᵗ",
     "avatar_full": "https://avatars.steamstatic.com/69252f1a5491715d7844814adcdc197bfcb09fe8_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199561947019",
     "name": "twitch.tv/sliks37",
     "avatar_full": "https://avatars.steamstatic.com/0bbfc06cc97e6afe98e578a82b3d521363dc3e8d_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561198162988388",
     "name": "твик",
     "avatar_full": "https://avatars.steamstatic.com/c80ba5114c9fc2d6d57dc687a226db0cc921297f_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561198805786012",
     "name": "Bazbazbaz",
     "avatar_full": "https://avatars.steamstatic.com/92c669e44bebd106a94c578a07e655ce846891e5_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199077199811",
     "name": "Jack Lat",
     "avatar_full": "https://avatars.steamstatic.com/a47e16b8bff23d7fa47e24534dc694e5890c21cb_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199097711339",
     "name": "pisex",
     "avatar_full": "https://avatars.steamstatic.com/9b4704a8f14a7a5beddf2521528c6e6af9dbbf46_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561198007541774",
     "name": "AspectUnk",
     "avatar_full": "https://avatars.steamstatic.com/3f5e9daea59216d7fe13df4e031d3537580e5e21_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199077499521",
     "name": "Oblome",
     "avatar_full": "https://avatars.steamstatic.com/a6073a15c563646efa5599dd1a708d63ab3daf3f_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199642664362",
     "name": "Патрульный",
     "avatar_full": "https://avatars.steamstatic.com/a792ea9bfa25e71e249958281e2af209194f661f_full.jpg",
     "group_display_name": "Стафф",
-    "group_name": "STAFF"
+    "group_name": "STAFF",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199011838789",
     "name": "топ 1 энигма",
     "avatar_full": "https://avatars.steamstatic.com/4bb92c4cde71c6906097b0b8ab7112bedb370dec_full.jpg",
     "group_display_name": "Ст. Модер",
-    "group_name": "STMODER"
+    "group_name": "STMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561198996086262",
     "name": "www",
     "avatar_full": "https://avatars.steamstatic.com/6cf641714b9947580c07965642fa9d19058ac2af_full.jpg",
     "group_display_name": "Ст. Модер",
-    "group_name": "STMODER"
+    "group_name": "STMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199187733023",
     "name": "ino",
     "avatar_full": "https://avatars.steamstatic.com/a6073a15c563646efa5599dd1a708d63ab3daf3f_full.jpg",
     "group_display_name": "Ст. Модер",
-    "group_name": "STMODER"
+    "group_name": "STMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561198379314064",
     "name": "CHETA",
     "avatar_full": "https://avatars.steamstatic.com/b288b9cc9a53c1f4b3bdd692809abf45c7c57dd8_full.jpg",
     "group_display_name": "Модератор",
-    "group_name": "MODER"
+    "group_name": "MODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199776786338",
     "name": "NerouN",
     "avatar_full": "https://avatars.steamstatic.com/150bc0cf420ec7c108bdea2cd9389536b25b563b_full.jpg",
     "group_display_name": "Модератор",
-    "group_name": "MODER"
+    "group_name": "MODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561198751025670",
     "name": "moloko",
     "avatar_full": "https://avatars.steamstatic.com/1d522776dde00a5394a5080060673a42eb200e98_full.jpg",
     "group_display_name": "Модератор",
-    "group_name": "MODER"
+    "group_name": "MODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199178271070",
     "name": "dutix",
     "avatar_full": "https://avatars.steamstatic.com/ea6f61a26009ce303ab4125c3d17627883dedc4c_full.jpg",
     "group_display_name": "Модератор",
-    "group_name": "MODER"
+    "group_name": "MODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199834051128",
     "name": "DrabDreaker|HVS",
     "avatar_full": "https://avatars.steamstatic.com/5e64d4dd5fc516c404b0b63d33e944ef8163bd85_full.jpg",
     "group_display_name": "Модератор",
-    "group_name": "MODER"
+    "group_name": "MODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199528873388",
     "name": "Belka",
     "avatar_full": "https://avatars.steamstatic.com/f4ea0e1840e08848528e15f9aa8fa8743784e2bb_full.jpg",
     "group_display_name": "Модератор",
-    "group_name": "MODER"
+    "group_name": "MODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199213385921",
     "name": "Kanyak",
     "avatar_full": "https://avatars.steamstatic.com/9ed108045e11e0df561f482520bc38f803b250ae_full.jpg",
     "group_display_name": "Модератор",
-    "group_name": "MODER"
+    "group_name": "MODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199566639200",
     "name": "hardhorezz | tomato | ᴰˢⱽ",
     "avatar_full": "https://avatars.steamstatic.com/a00ee7725329212ef9a6956d67e7b006da361719_full.jpg",
     "group_display_name": "Модератор",
-    "group_name": "MODER"
+    "group_name": "MODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199447808612",
     "name": "ＧｏＧｏＰｌａｙｅｒ",
     "avatar_full": "https://avatars.steamstatic.com/ef5606c037e9ec1912fde89460231f2a041161b3_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199809840722",
     "name": "FDM | RMツPON4IK",
     "avatar_full": "https://avatars.steamstatic.com/5dc3eb9679b70ee0d62a8f0eba994d3f81698fa2_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199134148137",
     "name": "Бриттани",
     "avatar_full": "https://avatars.steamstatic.com/f58cbf656372bfcb4f1e582da3b9a0bf92f08181_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199415622867",
     "name": "afka",
     "avatar_full": "https://avatars.steamstatic.com/efa6828c1edf67f8eb8cfddb5e8c58086f1341f9_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199281801758",
     "name": "𝘮𝟢𝘳𝘱𝘦𝘩𝘩_",
     "avatar_full": "https://avatars.steamstatic.com/86ed6924917cc0aa7fd040f745fae1113babbc34_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199806332566",
     "name": "v0idy",
     "avatar_full": "https://avatars.steamstatic.com/80f9f609d961977b7a0df8034d2a425017e57b99_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199499997464",
     "name": "конг666",
     "avatar_full": "https://avatars.steamstatic.com/403a7ff7c7ca73e53bb8e7573cc8d930c48b457f_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199376685193",
     "name": "sisi",
     "avatar_full": "https://avatars.steamstatic.com/fe8b09f74d44de4a59845cb673e805ba702fd71e_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   },
   {
     "steamid": "76561199293067355",
     "name": "unskill",
     "avatar_full": "https://avatars.steamstatic.com/efa51c52e4c74ff2662a59bbfad2af2cb033bafd_full.jpg",
     "group_display_name": "Мл. Модератор",
-    "group_name": "MLMODER"
+    "group_name": "MLMODER",
+    "group_id": null,
+    "discord_id": "",
+    "discord_nickname": "",
+    "discord_avatar": ""
   }
 ]

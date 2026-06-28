@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>Проверка аккаунтов — FearSupport</title>
+    <link rel="icon" href="https://media.discordapp.net/icons/1358108404182159451/9b9af31bec82d9cdde2941c4d71ab271.png" type="image/png">
+    <link rel="stylesheet" href="/checker/static/fearsupport.css">
+    <link rel="stylesheet" href="/checker/static/style.css?v=8">
+</head>
+<body class="min-h-screen antialiased text-dark-text bg-dark-bg flex flex-col items-center justify-center p-4 relative overflow-hidden">
+    <div class="absolute inset-0 bg-gradient-to-br from-dark-bg via-brand-950/20 to-dark-bg"></div>
+    <div class="absolute inset-0 opacity-10" style="background-image:radial-gradient(circle at 1px 1px, rgba(99, 102, 241, 0.15) 1px, transparent 0);background-size:32px 32px"></div>
+
+    <!-- Upload page -->
+    <div id="uploadPage" class="relative w-full max-w-2xl">
+        <div class="bg-dark-surface/80 backdrop-blur-xl border border-white/5 rounded-3xl p-8 shadow-2xl shadow-black/50 relative overflow-hidden">
+            <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-br from-white to-brand-100 drop-shadow-sm mb-3">Проверка аккаунтов</h1>
+                <p class="text-dark-muted text-sm max-w-lg mx-auto">
+                    Чтобы проверить аккаунты на баны, в поле ниже выберите/перетащите/вставьте необходимый(е) вам файлы(ы), затем дождитесь их проверки, и ознакомьтесь с результатом.
+                </p>
+            </div>
+
+            <label for="fileInput" id="dropZone" class="drop-zone relative block w-full rounded-2xl border-2 border-dashed cursor-pointer transition-colors duration-200 border-dark-border hover:border-brand-500/50 bg-dark-elevated/50">
+                <div class="flex flex-col items-center justify-center py-16 px-6">
+                    <div class="mb-4 transition-transform duration-200">
+                        <svg class="h-16 w-16 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                    </div>
+                    <p class="text-lg font-semibold text-dark-text mb-2">Перетащите .vdf файлы или нажмите</p>
+                    <p class="text-sm text-dark-muted">Поддерживаются только .vdf файлы</p>
+                </div>
+                <input id="fileInput" type="file" multiple accept=".vdf" class="sr-only">
+            </label>
+
+            <div class="mt-8 pt-6 border-t border-dark-border/50">
+                <a href="/dashboard" class="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-dark-elevated hover:bg-dark-border transition-colors text-dark-text text-sm font-medium">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                    </svg>
+                    Вернуться на главную
+                </a>
+            </div>
+
+            <div id="errorMessage" class="error-message"></div>
+        </div>
+    </div>
+
+    <!-- Loader -->
+    <div id="loader" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+        <div class="main-container loader-wrap">
+            <div class="card">
+                <div class="card-shine"></div>
+                <div class="card-content loader-content">
+                    <div class="loader-spinner"></div>
+                    <div class="loader-stage" id="loaderStage">Читаем VDF файл...</div>
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    <div class="loader-progress" id="loaderProgress">0 / 0</div>
+                    <div class="stages">
+                        <div class="stage waiting" id="stage-parse"><div class="stage-dot"></div><span>Чтение VDF</span></div>
+                        <div class="stage waiting" id="stage-steam"><div class="stage-dot"></div><span>Steam API</span></div>
+                        <div class="stage waiting" id="stage-fear"><div class="stage-dot"></div><span>Fear Project</span></div>
+                        <div class="stage waiting" id="stage-yooma"><div class="stage-dot"></div><span>Yooma.su</span></div>
+                        <div class="stage waiting" id="stage-done"><div class="stage-dot"></div><span>Готово</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results modal -->
+    <div id="resultsModal" class="modal-overlay" style="display:none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2>Результаты проверки</h2>
+                <button class="close-btn" onclick="resetPage()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-summary">
+                <div class="summary-item">
+                    <span class="summary-label">Всего</span>
+                    <span class="count" id="totalCount">0</span>
+                </div>
+                <div class="summary-item clean">
+                    <span class="summary-label">Чистых</span>
+                    <span class="count" id="cleanCount">0</span>
+                </div>
+                <div class="summary-item banned">
+                    <span class="summary-label">С банами</span>
+                    <span class="count" id="bannedCount">0</span>
+                </div>
+                <div class="summary-item warning">
+                    <span class="summary-label">Нет на Fear</span>
+                    <span class="count" id="notFearCount">0</span>
+                </div>
+            </div>
+            <div id="saveBanner" class="save-banner" style="display:none;"></div>
+            <div class="modal-body">
+                <div class="cards-grid" id="cardsGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/checker/static/app.js?v=8"></script>
+</body>
+</html>

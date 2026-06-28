@@ -174,7 +174,7 @@
                 showError('Пароль минимум 6 символов');
                 return;
             }
-            if (!/^765611[0-9]{12}$/.test(steamId)) {
+            if (!/^765611[0-9]{10,13}$/.test(steamId)) {
                 showError('Неверный формат Steam ID');
                 return;
             }
