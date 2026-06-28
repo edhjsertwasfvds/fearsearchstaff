@@ -1542,8 +1542,9 @@ const server = http.createServer(async (req, res) => {
                     expiresAt: session.expiresAt
                 }));
             } catch (err) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Invalid JSON' }));
+                console.error('[Auth] Login error:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Ошибка входа: ' + (err.message || 'unknown') }));
             }
         });
         return;
