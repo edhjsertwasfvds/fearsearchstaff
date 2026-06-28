@@ -4335,6 +4335,7 @@ const server = http.createServer(async (req, res) => {
     else if (urlPath === '/vdf-history' || urlPath === '/vdf-history/') fileRelPath = '/vdf-history.html';
     else if (urlPath === '/whitelist' || urlPath === '/whitelist/') fileRelPath = '/whitelist.html';
     else if (urlPath === '/faq' || urlPath === '/faq/') fileRelPath = '/faq.html';
+    else if (urlPath === '/privacy' || urlPath === '/privacy/') fileRelPath = '/privacy.html';
     else if (urlPath === '/dashboard' || urlPath === '/dashboard/' || urlPath === '/home') fileRelPath = '/dashboard.html';
     else if (urlPath === '/checker' || urlPath === '/checker/') fileRelPath = '/checker/index.html';
 
