@@ -913,6 +913,7 @@ function saveVdfHistory(results, filename = '', vdfText = '', source = 'site') {
 
     const maxRow = db.prepare('SELECT COALESCE(MAX(check_id), 0) AS max_check_id FROM vdf_history').get();
     const checkId = (maxRow?.max_check_id || 0) + 1;
+    if (!checkId || checkId <= 0) return null;
 
     const now = Math.floor(Date.now() / 1000);
 

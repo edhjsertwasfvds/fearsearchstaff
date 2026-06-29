@@ -1596,7 +1596,7 @@ async function saveVdfHistory(results, filename = '', vdfText = '', source = 'si
 
         const { rows: nextRow } = await poolQuery(`SELECT nextval('vdf_check_id_seq') AS check_id`);
         const checkId = nextRow[0]?.check_id;
-        if (!checkId) return null;
+        if (!checkId || checkId <= 0) return null;
 
         await poolQuery(`
             INSERT INTO config_hashes (config_hash, filename, content)
