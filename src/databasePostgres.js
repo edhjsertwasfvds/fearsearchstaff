@@ -1590,9 +1590,15 @@ async function saveVdfHistory(results, filename = '', vdfText = '', source = 'si
             INCREMENT BY 1
             NO CYCLE
         `);
-        await poolQuery(`
-            SELECT setval('vdf_check_id_seq', COALESCE((SELECT MAX(check_id) FROM vdf_history), 0) + 1, false)
-        `);
+        // Подгоняем последовательность только если она отстала от реального MAX(check_id).
+        // Так бот и сайт не пересекутся, если один из них уже двигал последовательность.
+        const { rows: seqRows } = await poolQuery(`SELECT last_value FROM vdf_check_id_seq`);
+        const { rows: maxRows } = await poolQuery(`SELECT COALESCE(MAX(check_id), 0) AS max_check_id FROM vdf_history`);
+        const seqLast = seqRows[0]?.last_value || 0;
+        const maxCheckId = maxRows[0]?.max_check_id || 0;
+        if (maxCheckId >= seqLast) {
+            await poolQuery(`SELECT setval('vdf_check_id_seq', $1, false)`, [maxCheckId + 1]);
+        }
 
         const { rows: nextRow } = await poolQuery(`SELECT nextval('vdf_check_id_seq') AS check_id`);
         const checkId = nextRow[0]?.check_id;
