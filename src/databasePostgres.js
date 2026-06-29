@@ -164,7 +164,8 @@ async function initDatabase() {
             last_login BIGINT DEFAULT 0,
             steam_id TEXT UNIQUE,
             launcher_api_key TEXT UNIQUE,
-            discord_id TEXT UNIQUE
+            discord_id TEXT UNIQUE,
+            discord_name TEXT
         );
         -- Убедимся, что last_login существует и не мешает INSERT в старых схемах.
         DO $$
@@ -244,6 +245,12 @@ async function initDatabase() {
                 WHERE table_name = 'panel_users' AND column_name = 'discord_id' AND is_nullable = 'NO'
             ) THEN
                 ALTER TABLE panel_users ALTER COLUMN discord_id DROP NOT NULL;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'panel_users' AND column_name = 'discord_name'
+            ) THEN
+                ALTER TABLE panel_users ADD COLUMN discord_name TEXT;
             END IF;
             IF EXISTS (
                 SELECT 1 FROM information_schema.columns
@@ -477,6 +484,7 @@ async function initDatabase() {
         CREATE TABLE IF NOT EXISTS vdf_history (
             id SERIAL PRIMARY KEY,
             check_id INTEGER NOT NULL,
+            source VARCHAR(16) DEFAULT 'site',
             steamid VARCHAR(32) NOT NULL,
             nickname TEXT,
             fear_banned BOOLEAN DEFAULT FALSE,
@@ -495,6 +503,8 @@ async function initDatabase() {
             on_fear BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMPTZ DEFAULT NOW()
         );
+        ALTER TABLE vdf_history ADD COLUMN IF NOT EXISTS source VARCHAR(16) DEFAULT 'site';
+
         CREATE TABLE IF NOT EXISTS drops (
             id BIGSERIAL PRIMARY KEY,
             external_id BIGINT,
@@ -995,7 +1005,7 @@ async function createPendingUser(username, password, displayName, steamId) {
 
 async function getUserBySteamId(steamId) {
     const { rows } = await poolQuery(
-        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id FROM panel_users WHERE steam_id = $1',
+        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id, discord_name FROM panel_users WHERE steam_id = $1',
         [steamId]
     );
     const user = rows[0];
@@ -1007,7 +1017,8 @@ async function getUserBySteamId(steamId) {
         status: user.status,
         createdAt: user.created_at,
         steamId: user.steam_id || null,
-        discordId: user.discord_id || null
+        discordId: user.discord_id || null,
+        discordName: user.discord_name || null
     } : null;
 }
 
@@ -1025,6 +1036,13 @@ async function updateUserDiscordId(id, discordId) {
     );
 }
 
+async function updateUserDiscordName(id, discordName) {
+    await poolQuery(
+        'UPDATE panel_users SET discord_name = $1 WHERE id = $2',
+        [discordName, id]
+    );
+}
+
 async function createOrUpdateDiscordUser(discordId, username, displayName, level) {
     const existing = await poolQuery('SELECT id FROM panel_users WHERE discord_id = $1', [discordId]);
     const safeUsername = username || 'discord_' + discordId;
@@ -1032,16 +1050,16 @@ async function createOrUpdateDiscordUser(discordId, username, displayName, level
     const now = Date.now();
     if (existing.rows[0]) {
         await poolQuery(
-            'UPDATE panel_users SET username = $1, display_name = $2, level = $3 WHERE id = $4',
-            [safeUsername, safeDisplayName, level, existing.rows[0].id]
+            'UPDATE panel_users SET username = $1, display_name = $2, level = $3, discord_name = $4 WHERE id = $5',
+            [safeUsername, safeDisplayName, level, safeDisplayName, existing.rows[0].id]
         );
         return existing.rows[0].id;
     }
     const tempPassword = crypto.randomBytes(16).toString('hex');
     const hash = bcrypt.hashSync(tempPassword, 10);
     const { rows } = await poolQuery(
-        'INSERT INTO panel_users (username, password_hash, display_name, level, created_at, steam_id, discord_id, last_login) VALUES ($1,$2,$3,$4,$5,$6,$7,0) RETURNING id',
-        [safeUsername, hash, safeDisplayName, level, now, null, discordId]
+        'INSERT INTO panel_users (username, password_hash, display_name, level, created_at, steam_id, discord_id, discord_name, last_login) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0) RETURNING id',
+        [safeUsername, hash, safeDisplayName, level, now, null, discordId, safeDisplayName]
     );
     const newId = rows[0].id;
     await ensureUserLauncherApiKey(newId);
@@ -1059,13 +1077,14 @@ async function verifyUser(username, password) {
         level: user.level,
         status: user.status,
         steamId: user.steam_id || null,
-        discordId: user.discord_id || null
+        discordId: user.discord_id || null,
+        discordName: user.discord_name || null
     };
 }
 
 async function getUserById(id) {
     const { rows } = await poolQuery(
-        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id FROM panel_users WHERE id = $1',
+        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id, discord_name FROM panel_users WHERE id = $1',
         [id]
     );
     const user = rows[0];
@@ -1078,14 +1097,15 @@ async function getUserById(id) {
               status: user.status,
               createdAt: user.created_at,
               steamId: user.steam_id || null,
-              discordId: user.discord_id || null
+              discordId: user.discord_id || null,
+              discordName: user.discord_name || null
           }
         : null;
 }
 
 async function getUserByDiscordId(discordId) {
     const { rows } = await poolQuery(
-        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id FROM panel_users WHERE discord_id = $1',
+        'SELECT id, username, display_name, level, status, created_at, steam_id, discord_id, discord_name FROM panel_users WHERE discord_id = $1',
         [discordId]
     );
     const user = rows[0];
@@ -1098,14 +1118,15 @@ async function getUserByDiscordId(discordId) {
               status: user.status,
               createdAt: user.created_at,
               steamId: user.steam_id || null,
-              discordId: user.discord_id || null
+              discordId: user.discord_id || null,
+              discordName: user.discord_name || null
           }
         : null;
 }
 
 async function getAllUsers() {
     const { rows } = await poolQuery(
-        'SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM panel_users ORDER BY level DESC, created_at ASC',
+        'SELECT id, username, display_name, level, created_at, steam_id, discord_id, discord_name FROM panel_users ORDER BY level DESC, created_at ASC',
         []
     );
     return rows.map((u) => ({
@@ -1115,7 +1136,8 @@ async function getAllUsers() {
         level: u.level,
         createdAt: u.created_at,
         steamId: u.steam_id || null,
-        discordId: u.discord_id || null
+        discordId: u.discord_id || null,
+        discordName: u.discord_name || null
     }));
 }
 
@@ -1475,7 +1497,8 @@ async function getVdfHistoryChecks(limit = 100) {
             SELECT check_id, filename,
                    MIN(created_at) AS created_at,
                    COUNT(*) AS count,
-                   COUNT(*) FILTER (WHERE fear_banned OR vac_banned OR yooma_banned) AS banned_count
+                   COUNT(*) FILTER (WHERE fear_banned OR vac_banned OR yooma_banned) AS banned_count,
+                   (array_agg(source ORDER BY id DESC))[1] AS source
             FROM vdf_history
             GROUP BY check_id, filename
             ORDER BY check_id DESC
@@ -1513,7 +1536,7 @@ async function getVdfHistoryBannedByConfigHash(configHash) {
 async function getVdfHistoryDetails(check_id) {
     try {
         const { rows } = await poolQuery(`
-            SELECT id, check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+            SELECT id, check_id, source, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
                    vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
                    admin_group, config_hash, filename, attachment_url, message_url, on_fear, created_at
             FROM vdf_history
@@ -1547,7 +1570,7 @@ async function getVdfContentByCheckId(check_id) {
     }
 }
 
-async function saveVdfHistory(results, filename = '', vdfText = '') {
+async function saveVdfHistory(results, filename = '', vdfText = '', source = 'site') {
     if (!Array.isArray(results) || results.length === 0) return null;
     const steamids = results.map(r => r.steamid).filter(Boolean);
     if (steamids.length === 0) return null;
@@ -1560,8 +1583,20 @@ async function saveVdfHistory(results, filename = '', vdfText = '') {
     }
 
     try {
-        const { rows: maxRow } = await poolQuery('SELECT COALESCE(MAX(check_id), 0) AS max_check_id FROM vdf_history');
-        const checkId = (maxRow[0]?.max_check_id || 0) + 1;
+        await poolQuery(`
+            CREATE SEQUENCE IF NOT EXISTS vdf_check_id_seq
+            AS INTEGER
+            START WITH 1
+            INCREMENT BY 1
+            NO CYCLE
+        `);
+        await poolQuery(`
+            SELECT setval('vdf_check_id_seq', COALESCE((SELECT MAX(check_id) FROM vdf_history), 0) + 1, false)
+        `);
+
+        const { rows: nextRow } = await poolQuery(`SELECT nextval('vdf_check_id_seq') AS check_id`);
+        const checkId = nextRow[0]?.check_id;
+        if (!checkId) return null;
 
         await poolQuery(`
             INSERT INTO config_hashes (config_hash, filename, content)
@@ -1578,8 +1613,6 @@ async function saveVdfHistory(results, filename = '', vdfText = '') {
             `, [configHash, sid]);
         }
 
-        await poolQuery('DELETE FROM vdf_history WHERE check_id = $1', [checkId]);
-
         for (const r of results) {
             const ydata = r.yooma_data || {};
             const active = (ydata.punishments || []).find(p => p.status === 'active');
@@ -1587,12 +1620,13 @@ async function saveVdfHistory(results, filename = '', vdfText = '') {
             const yoomaReason = active ? (active.reason || active.type_name || '') : '';
             await poolQuery(`
                 INSERT INTO vdf_history
-                    (check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+                    (check_id, source, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
                      vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
                      admin_group, config_hash, filename, attachment_url, message_url, on_fear)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             `, [
                 checkId,
+                source,
                 r.steamid || '',
                 r.nickname || '',
                 Boolean(r.fear_banned),
@@ -1797,6 +1831,7 @@ module.exports = {
     getUserBySteamId,
     updateUserStatusAndLevel,
     updateUserDiscordId,
+    updateUserDiscordName,
     logLoginEvent,
     getLoginLogsByUserId,
     createRegistrationConfirmation,
@@ -1812,7 +1847,8 @@ module.exports = {
     getAllLinkedGroups,
     saveDrops,
     getDrops,
-    getDropsCount
+    getDropsCount,
+    getDropsByPeriod
 };
 
 async function saveDrops(drops) {
@@ -1825,15 +1861,7 @@ async function saveDrops(drops) {
             await poolQuery(`
                 INSERT INTO drops (external_id, name, image, price, rarity_color, avatar, player_name, steamid, created_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                ON CONFLICT (external_id) DO UPDATE SET
-                    name = EXCLUDED.name,
-                    image = EXCLUDED.image,
-                    price = EXCLUDED.price,
-                    rarity_color = EXCLUDED.rarity_color,
-                    avatar = EXCLUDED.avatar,
-                    player_name = EXCLUDED.player_name,
-                    steamid = EXCLUDED.steamid,
-                    created_at = EXCLUDED.created_at
+                ON CONFLICT (external_id) DO NOTHING
             `, [
                 extId,
                 String(d.name || ''),
@@ -1884,6 +1912,47 @@ async function getDropsCount() {
     } catch (e) {
         console.error('[panelPg] getDropsCount error:', e && e.message);
         return 0;
+    }
+}
+
+async function getDropsByPeriod(period = 'all', limit = 1000, offset = 0) {
+    try {
+        let where = '';
+        const params = [];
+        if (period === 'day') {
+            where = "WHERE created_at >= NOW() - INTERVAL '1 day'";
+        } else if (period === 'week') {
+            where = "WHERE created_at >= NOW() - INTERVAL '7 days'";
+        } else if (period === 'month') {
+            where = "WHERE created_at >= NOW() - INTERVAL '30 days'";
+        }
+        const { rows: countRows } = await poolQuery(
+            `SELECT COUNT(*)::int AS cnt, COALESCE(SUM(CAST(NULLIF(price, '') AS NUMERIC)), 0)::numeric AS total FROM drops ${where}`,
+            params
+        );
+        const { cnt, total } = countRows[0] || { cnt: 0, total: 0 };
+        const { rows } = await poolQuery(
+            `SELECT id, external_id, name, image, price, rarity_color, avatar, player_name, steamid, created_at
+             FROM drops ${where}
+             ORDER BY created_at DESC, id DESC
+             LIMIT $1 OFFSET $2`,
+            [limit, offset]
+        );
+        const drops = rows.map(r => ({
+            id: r.external_id || r.id,
+            name: r.name,
+            image: r.image,
+            price: r.price,
+            rarity_color: r.rarity_color,
+            avatar: r.avatar,
+            player_name: r.player_name,
+            steamid: r.steamid,
+            created_at: r.created_at ? (r.created_at.toISOString ? r.created_at.toISOString() : String(r.created_at)) : null
+        }));
+        return { drops, total: cnt, totalMoney: Number(total) || 0 };
+    } catch (e) {
+        console.error('[panelPg] getDropsByPeriod error:', e && e.message);
+        return { drops: [], total: 0, totalMoney: 0 };
     }
 }
 

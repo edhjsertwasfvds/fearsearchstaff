@@ -199,12 +199,13 @@ async function checkFear(steamid) {
             },
             timeout: 5000
         });
+        console.log(`[Checker] Fear ${steamid}: status=${res.status}, hasData=${Boolean(res.data)}, url=${profileUrl}`);
         if (res.status === 200 && res.data) {
             _fearCache.set(steamid, { data: res.data, ts: now });
             return res.data;
         }
     } catch (e) {
-        // ignore
+        console.log(`[Checker] Fear ${steamid}: error ${e.message}, url=${profileUrl}`);
     }
     return null;
 }
@@ -241,6 +242,7 @@ async function checkYooma(steamid) {
             },
             timeout: 5000
         });
+        console.log(`[Checker] Yooma ${steamid}: status=${res.status}, ok=${res.data && res.data.ok}, punishments=${Array.isArray(res.data && res.data.punishments) ? res.data.punishments.length : 0}`);
         if (res.status !== 200 || !res.data || !res.data.ok) {
             const result = { found: false, punishments: [] };
             _yoomaCache.set(steamid, { data: result, ts: now });
@@ -478,6 +480,54 @@ async function handleDownloadVdf(checkId, res) {
     res.end(row.content);
 }
 
+async function handleDebug(req, res, rawUrlPath) {
+    if (rawUrlPath === '/checker/api/debug/parse-vdf' && req.method === 'POST') {
+        const body = await readRequestBody(req);
+        const { ids, vdfText, filename } = parseVdfFilesFromRequest(req, body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            total_found: ids.length,
+            unique_ids: ids.length,
+            filename: filename || '',
+            steamids: ids,
+            vdf_text_preview: String(vdfText || '').slice(0, 500)
+        }));
+        return;
+    }
+
+    const fearMatch = rawUrlPath.match(/^\/checker\/api\/debug\/fear\/(.+)$/);
+    if (fearMatch && req.method === 'GET') {
+        const steamid = decodeURIComponent(fearMatch[1]);
+        const data = await checkFear(steamid);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            steamid,
+            fear_api_base: FEAR_API_BASE,
+            found: Boolean(data),
+            profile: data,
+            banInfo: data ? (data.banInfo || null) : null
+        }));
+        return;
+    }
+
+    const yoomaMatch = rawUrlPath.match(/^\/checker\/api\/debug\/yooma\/(.+)$/);
+    if (yoomaMatch && req.method === 'GET') {
+        const steamid = decodeURIComponent(yoomaMatch[1]);
+        const data = await checkYooma(steamid);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            steamid,
+            found: data && data.found,
+            active: (data && data.punishments || []).filter(p => p.status === 'active').length,
+            data
+        }));
+        return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ detail: 'Not Found' }));
+}
+
 async function handleCheckerApi(req, res, rawUrlPath) {
     if (rawUrlPath === '/checker/api/parse-vdf' && req.method === 'POST') {
         await handleParseVdf(req, res);
@@ -494,6 +544,10 @@ async function handleCheckerApi(req, res, rawUrlPath) {
     if (rawUrlPath.startsWith('/checker/api/download-vdf/') && req.method === 'GET') {
         const checkId = rawUrlPath.replace('/checker/api/download-vdf/', '');
         await handleDownloadVdf(checkId, res);
+        return;
+    }
+    if (rawUrlPath.startsWith('/checker/api/debug/')) {
+        await handleDebug(req, res, rawUrlPath);
         return;
     }
     res.writeHead(404, { 'Content-Type': 'application/json' });

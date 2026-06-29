@@ -48,7 +48,7 @@ async function searchBddStaff(rawQ) {
     const q = String(rawQ || '').trim();
     if (q.length < 2) return [];
 
-    const base = `
+    const staffBase = `
         SELECT
             a.steamid,
             a.group_display_name,
@@ -59,38 +59,99 @@ async function searchBddStaff(rawQ) {
             p.last_activity,
             p.discord_id,
             p.discord_nickname,
-            p.ban_is_banned
+            p.ban_is_banned,
+            true AS is_staff
         FROM admins a
         LEFT JOIN profiles p ON p.steamid = a.steamid
     `;
 
-    let sql = base;
-    const params = [];
+    let staffSql = staffBase;
+    const staffParams = [];
 
     if (/^\d{17}$/.test(q)) {
-        sql += ' WHERE a.steamid = $1 ';
-        params.push(q);
+        staffSql += ' WHERE a.steamid = $1 ';
+        staffParams.push(q);
     } else if (/^\d{10,20}$/.test(q)) {
-        sql += ' WHERE (a.steamid = $1 OR (p.discord_id IS NOT NULL AND TRIM(p.discord_id) = $1)) ';
-        params.push(q);
+        staffSql += ' WHERE (a.steamid = $1 OR (p.discord_id IS NOT NULL AND TRIM(p.discord_id) = $1)) ';
+        staffParams.push(q);
     } else {
         const esc = q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
         const like = `%${esc}%`;
-        // SteamID, Discord ID, Discord nickname, имя админа или профиля
-        sql += ` WHERE (
+        staffSql += ` WHERE (
             (a.name IS NOT NULL AND a.name ILIKE $1 ESCAPE '\\')
             OR (p.name IS NOT NULL AND p.name ILIKE $1 ESCAPE '\\')
             OR (p.discord_nickname IS NOT NULL AND p.discord_nickname ILIKE $1 ESCAPE '\\')
             OR a.steamid ILIKE $1 ESCAPE '\\'
             OR (p.discord_id IS NOT NULL AND p.discord_id ILIKE $1 ESCAPE '\\')
         ) `;
-        params.push(like);
+        staffParams.push(like);
     }
 
-    sql += ' ORDER BY GREATEST(a.updated_at, COALESCE(p.updated_at, a.updated_at)) DESC NULLS LAST LIMIT 50';
+    staffSql += ' ORDER BY GREATEST(a.updated_at, COALESCE(p.updated_at, a.updated_at)) DESC NULLS LAST LIMIT 50';
 
-    const { rows } = await pool.query(sql, params);
-    return rows;
+    const profileBase = `
+        SELECT
+            p.steamid,
+            NULL::text AS group_display_name,
+            NULL::text AS group_name,
+            false AS is_frozen,
+            p.avatar_full AS admin_avatar_full,
+            p.name AS profile_name,
+            p.last_activity,
+            p.discord_id,
+            p.discord_nickname,
+            p.ban_is_banned,
+            false AS is_staff
+        FROM profiles p
+    `;
+
+    let profileSql = profileBase;
+    const profileParams = [];
+
+    if (/^\d{17}$/.test(q)) {
+        profileSql += ' WHERE p.steamid = $1 ';
+        profileParams.push(q);
+    } else if (/^\d{10,20}$/.test(q)) {
+        profileSql += ' WHERE (p.discord_id IS NOT NULL AND TRIM(p.discord_id) = $1) ';
+        profileParams.push(q);
+    } else {
+        const esc = q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+        const like = `%${esc}%`;
+        profileSql += ` WHERE (
+            (p.name IS NOT NULL AND p.name ILIKE $1 ESCAPE '\\')
+            OR (p.discord_nickname IS NOT NULL AND p.discord_nickname ILIKE $1 ESCAPE '\\')
+            OR (p.discord_id IS NOT NULL AND p.discord_id ILIKE $1 ESCAPE '\\')
+            OR p.steamid ILIKE $1 ESCAPE '\\'
+        ) `;
+        profileParams.push(like);
+    }
+
+    profileSql += ' ORDER BY p.updated_at DESC NULLS LAST LIMIT 50';
+
+    const [staffRes, profileRes] = await Promise.all([
+        pool.query(staffSql, staffParams),
+        pool.query(profileSql, profileParams)
+    ]);
+
+    const staffRows = staffRes.rows || [];
+    const profileRows = profileRes.rows || [];
+
+    const seen = new Set();
+    const merged = [];
+    for (const r of staffRows) {
+        const sid = String(r.steamid || '').trim();
+        if (sid && seen.has(sid)) continue;
+        if (sid) seen.add(sid);
+        merged.push(r);
+    }
+    for (const r of profileRows) {
+        const sid = String(r.steamid || '').trim();
+        if (sid && seen.has(sid)) continue;
+        if (sid) seen.add(sid);
+        merged.push(r);
+    }
+
+    return merged.slice(0, 50);
 }
 
 async function getStaffPunishments(adminSteamid, type, limit = 10000) {

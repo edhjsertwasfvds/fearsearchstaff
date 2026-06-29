@@ -4,6 +4,7 @@ const https = require('https');
 const config = require('../config');
 const punishments = require('./punishments');
 const bddStaffPg = require('../bddStaffPg');
+const db = require('../database');
 
 // Кэш стаффа и его статистики наказаний.
 // - список стаффа обновляем раз в 24 часа
@@ -21,8 +22,8 @@ const STAFF_JSON_PATH = config.path.join(__dirname, '..', '..', 'public', 'data'
 const STAFF_ADMINS_JSON_PATH = config.path.join(__dirname, '..', '..', 'public', 'data', 'staff-admins.json');
 const STAFF_STATS_FETCH_CONCURRENCY = 5;
 const PUNISHMENTS_DELAY_MS = 40;
-const STAFF_LIST_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const STAFF_STATS_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const STAFF_LIST_REFRESH_INTERVAL_MS = 60 * 60 * 1000; // список стаффа: раз в час
+const STAFF_STATS_REFRESH_INTERVAL_MS = 30 * 60 * 1000;  // статистика наказаний: раз в 30 минут
 
 // Кэш Discord-аватарок стаффа: discord_id -> { avatar_url, ts }
 const discordAvatarCache = new Map();
@@ -256,10 +257,12 @@ async function refreshStaffPunishmentsCache() {
                 const i = cursor++;
                 if (i >= staffList.length) return;
                 const sid = String(staffList[i]?.steamid || '');
+                const sName = String(staffList[i]?.name || '');
                 if (!sid) continue;
                 const fromCache = punishments.getPunishmentsFromCache(sid);
                 if (Array.isArray(fromCache)) {
                     dataBySteamId[sid] = fromCache;
+                    await savePunishmentsToDb(sid, sName, fromCache);
                     continue;
                 }
                 try {
@@ -267,7 +270,9 @@ async function refreshStaffPunishmentsCache() {
                     const normalizedList = Array.isArray(list) ? list : [];
                     dataBySteamId[sid] = normalizedList;
                     punishments.setPunishmentsToCache(sid, 'admin', normalizedList);
-                } catch (_) {
+                    await savePunishmentsToDb(sid, sName, normalizedList);
+                } catch (e) {
+                    console.warn('[Staff stats] Ошибка загрузки наказаний для', sid, e?.message || e);
                     dataBySteamId[sid] = [];
                 }
                 if (PUNISHMENTS_DELAY_MS > 0) await sleep(PUNISHMENTS_DELAY_MS);
@@ -279,6 +284,34 @@ async function refreshStaffPunishmentsCache() {
         console.log('[Staff stats] Обновлена статистика наказаний стафа:', staffList.length, 'чел.');
     } finally {
         staffPunishmentsCache.loading = false;
+    }
+}
+
+async function savePunishmentsToDb(adminSteamId, adminName, list) {
+    if (!adminSteamId || !Array.isArray(list)) return;
+    try {
+        const rows = list.map(p => {
+            const t = Number(p.type);
+            return {
+                punishment_id: p.id ?? p.punishment_id ?? 0,
+                steamid: String(p.steamid || p.SteamId || p.sid || ''),
+                name: String(p.name || p.Name || p.nickname || p.player_name || ''),
+                admin_steamid: String(p.admin_steamid ?? p.adminSteamId ?? p.admin_sid ?? adminSteamId),
+                admin_name: String(p.admin_name ?? p.adminName ?? p.admin ?? adminName ?? ''),
+                reason: String(p.reason ?? p.Reason ?? ''),
+                status: Number(p.status ?? p.Status ?? 0),
+                duration: Number(p.duration ?? p.Duration ?? 0),
+                created: Number(p.created ?? p.created_at ?? 0),
+                expires: Number(p.expires ?? p.expires_at ?? 0),
+                type: (t === 1 || t === 2) ? t : Number(p.punish_type ?? p.punishType ?? 0),
+                punish_type: (t === 1 || t === 2) ? t : Number(p.punish_type ?? p.punishType ?? 0),
+                avatar: String(p.avatar ?? p.Avatar ?? p.avatar_full ?? ''),
+                admin_avatar: String(p.admin_avatar ?? p.adminAvatar ?? p.admin_avatar_full ?? '')
+            };
+        });
+        await db.replaceFearPunishments(adminSteamId, rows);
+    } catch (e) {
+        console.warn('[Staff stats] Ошибка сохранения наказаний в БД для', adminSteamId, e?.message || e);
     }
 }
 

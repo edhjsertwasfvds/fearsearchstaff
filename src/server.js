@@ -254,37 +254,37 @@ async function refreshDropsCache() {
     if (dropsRefreshRunning) return;
     dropsRefreshRunning = true;
     try {
-        const pages = [1, 2, 3];
-        for (const page of pages) {
-            await new Promise((resolve) => {
-                const apiUrl = `https://api.fearproject.ru/drops/feed?page=${page}&limit=100`;
-                const req = https.get(apiUrl, {
-                    headers: {
-                        'Accept': '*/*',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
-                        'Origin': 'https://fearproject.ru',
-                        'Referer': 'https://fearproject.ru/',
-                        ...(FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {})
-                    }
-                }, (apiRes) => {
-                    let data = '';
-                    apiRes.on('data', c => data += c);
-                    apiRes.on('error', () => resolve());
-                    apiRes.on('end', async () => {
-                        try {
-                            const parsed = JSON.parse(data);
-                            const drops = Array.isArray(parsed.feed) ? parsed.feed : [];
-                            if (drops.length && typeof db.saveDrops === 'function') {
-                                await db.saveDrops(drops);
-                            }
-                        } catch (_) {}
-                        resolve();
-                    });
+        // API /drops/feed возвращает только последние 10 записей независимо от page/limit.
+        // Берём один feed и сохраняем только новые (ON CONFLICT DO NOTHING).
+        await new Promise((resolve) => {
+            const apiUrl = `https://api.fearproject.ru/drops/feed?page=1&limit=100`;
+            const req = https.get(apiUrl, {
+                headers: {
+                    'Accept': '*/*',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+                    'Origin': 'https://fearproject.ru',
+                    'Referer': 'https://fearproject.ru/',
+                    ...(FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {})
+                }
+            }, (apiRes) => {
+                let data = '';
+                apiRes.on('data', c => data += c);
+                apiRes.on('error', () => resolve());
+                apiRes.on('end', async () => {
+                    try {
+                        const parsed = JSON.parse(data);
+                        const drops = Array.isArray(parsed.feed) ? parsed.feed : [];
+                        if (drops.length && typeof db.saveDrops === 'function') {
+                            const saved = await db.saveDrops(drops);
+                            console.log('[Drops] feed saved:', saved, 'new of', drops.length);
+                        }
+                    } catch (_) {}
+                    resolve();
                 });
-                req.setTimeout(15000, () => { try { req.destroy(); } catch (_) {} resolve(); });
-                req.on('error', () => resolve());
             });
-        }
+            req.setTimeout(15000, () => { try { req.destroy(); } catch (_) {} resolve(); });
+            req.on('error', () => resolve());
+        });
     } catch (e) {
         console.warn('[Drops] refresh error:', e && e.message);
     } finally {
@@ -1735,6 +1735,34 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    if (parsedUrl.pathname.match(/^\/api\/users\/\d+\/login-logs$/) && req.method === 'GET') {
+        const session = await requireSession(req, res, USER_LEVEL_ADMIN);
+        if (!session) return;
+        const userId = parseInt(parsedUrl.pathname.split('/api/users/')[1].split('/')[0]);
+        if (!userId) {
+            sendError(res, 400, 'BAD_REQUEST', 'Invalid user id');
+            return;
+        }
+        try {
+            const target = await db.getUserById(userId);
+            if (!target) {
+                sendError(res, 404, 'NOT_FOUND', 'Пользователь не найден');
+                return;
+            }
+            if (session.level < USER_LEVEL_SUPER && target.level >= session.level && userId !== session.userId) {
+                sendError(res, 403, 'FORBIDDEN', 'Нельзя смотреть логи пользователя с таким же или выше уровнем');
+                return;
+            }
+            const limit = Math.min(1000, parseInt(parsedUrl.searchParams.get('limit') || '100', 10) || 100);
+            const logs = await auth.getUserLoginLogs(userId, limit);
+            sendJson(res, 200, { logs });
+        } catch (err) {
+            console.error('[Auth] Login logs error:', err);
+            sendError(res, 500, 'INTERNAL_ERROR', err.message);
+        }
+        return;
+    }
+
     if (req.url === '/api/users' && req.method === 'POST') {
         const session = await requireSession(req, res, USER_LEVEL_ADMIN);
         if (!session) return;
@@ -1791,14 +1819,14 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    if (req.url.match(/^\/api\/users\/\d+$/) && req.method === 'PUT') {
+    if (parsedUrl.pathname.match(/^\/api\/users\/\d+$/) && req.method === 'PUT') {
         const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
             return;
         }
-        const userId = parseInt(req.url.split('/api/users/')[1]);
+        const userId = parseInt(parsedUrl.pathname.split('/api/users/')[1]);
         let body = '';
         let bodySize = 0;
         let bodyTooLarge = false;
@@ -1858,6 +1886,26 @@ const server = http.createServer(async (req, res) => {
                     console.log(`[Auth] SteamID ${target.username} обновлён: ${steamId || '—'} (by ${session.username})`);
                     safeLog(session, 'user_steamid_update', String(steamId || ''), String(target.username), `id=${userId}`);
                 }
+                if (Object.prototype.hasOwnProperty.call(payload, 'discordId')) {
+                    if (session.level < USER_LEVEL_SUPER) {
+                        res.writeHead(403, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Недостаточно прав для привязки Discord ID (нужен уровень 5)' }));
+                        return;
+                    }
+                    const discordId = String(payload.discordId || '').trim();
+                    const discordName = String(payload.discordName || '').trim();
+                    if (discordId !== '' && !/^\d{10,}$/.test(discordId)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Некорректный Discord ID' }));
+                        return;
+                    }
+                    await db.updateUserDiscordId(userId, discordId === '' ? null : discordId);
+                    if (typeof db.updateUserDiscordName === 'function') {
+                        await db.updateUserDiscordName(userId, discordName === '' ? null : discordName);
+                    }
+                    console.log(`[Auth] Discord ${target.username} обновлён: ${discordId || '—'} / ${discordName || '—'} (by ${session.username})`);
+                    safeLog(session, 'user_discord_update', String(discordId || ''), String(target.username), `id=${userId} name=${discordName || ''}`);
+                }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true }));
             } catch (err) {
@@ -1868,14 +1916,14 @@ const server = http.createServer(async (req, res) => {
                         return;
                     }
                     
-    if (req.url.match(/^\/api\/users\/\d+$/) && req.method === 'DELETE') {
+    if (parsedUrl.pathname.match(/^\/api\/users\/\d+$/) && req.method === 'DELETE') {
         const session = await getSessionFromReq(req);
         if (!session || session.level < USER_LEVEL_ADMIN) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Недостаточно прав' }));
             return;
         }
-        const userId = parseInt(req.url.split('/api/users/')[1]);
+        const userId = parseInt(parsedUrl.pathname.split('/api/users/')[1]);
         if (!userId) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Invalid user id' }));
@@ -2516,13 +2564,11 @@ const server = http.createServer(async (req, res) => {
     // --- Maintenance banner (public) ---
     if (req.url === '/api/maintenance' && req.method === 'GET') {
         const session = await getSessionFromReq(req);
-        if (session && session.level >= USER_LEVEL_SUPER) {
-            sendJson(res, 200, { active: false, message: '', suppressedForLevel: session.level });
-            return;
-        }
         const active = await db.getSetting('maintenance_active', 'false') === 'true';
         const message = await db.getSetting('maintenance_message', 'Проводятся технические работы. Приносим извинения за неудобства.') || 'Проводятся технические работы.';
-        sendJson(res, 200, { active, message });
+        // Для суперадминов баннер не показывается, но статус возвращаем реальный — чтобы кнопка в настройках работала корректно.
+        const bannerSuppressed = !!(session && session.level >= USER_LEVEL_SUPER);
+        sendJson(res, 200, { active, message, bannerSuppressed });
         return;
     }
     if (req.url === '/api/maintenance' && req.method === 'POST') {
@@ -3036,6 +3082,28 @@ const server = http.createServer(async (req, res) => {
         }
         try {
             const rows = await bddStaffPg.searchBddStaff(q);
+            // Обновляем panel_users discord_id/discord_name по steam_id, если в результатах есть данные.
+            if (Array.isArray(rows) && rows.length > 0) {
+                (async () => {
+                    for (const r of rows) {
+                        const sid = String(r.steamid || '').trim();
+                        const did = String(r.discord_id || '').trim();
+                        const dname = String(r.discord_nickname || '').trim();
+                        if (!sid || !did) continue;
+                        try {
+                            const panelUser = await db.getUserBySteamId(sid);
+                            if (!panelUser || panelUser.discordId === did) continue;
+                            await db.updateUserDiscordId(panelUser.id, did);
+                            if (typeof db.updateUserDiscordName === 'function') {
+                                await db.updateUserDiscordName(panelUser.id, dname || null);
+                            }
+                            console.log(`[BDD] Обновлён Discord для panel_user ${panelUser.id}: ${did} / ${dname || '—'}`);
+                        } catch (updErr) {
+                            console.warn('[BDD] Ошибка обновления panel_user:', updErr && updErr.message);
+                        }
+                    }
+                })().catch(() => {});
+            }
             sendJson(res, 200, { ok: true, rows });
         } catch (e) {
             console.error('[bdd-staff/search]', e && e.message, e && e.code);
@@ -4378,30 +4446,44 @@ const server = http.createServer(async (req, res) => {
             sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
             return;
         }
+        const period = String(parsedUrl.searchParams.get('period') || 'all').toLowerCase();
+        const validPeriods = ['day', 'week', 'month', 'all'];
+        const safePeriod = validPeriods.includes(period) ? period : 'all';
         const limit = Math.min(5000, parseInt(parsedUrl.searchParams.get('limit') || '1000', 10) || 1000);
         const offset = Math.max(0, parseInt(parsedUrl.searchParams.get('offset') || '0', 10) || 0);
         try {
-            let [drops, total] = await Promise.all([
-                db.getDrops(limit, offset),
-                db.getDropsCount()
-            ]);
+            let result = { drops: [], total: 0, totalMoney: 0 };
+            if (typeof db.getDropsByPeriod === 'function') {
+                result = await db.getDropsByPeriod(safePeriod, limit, offset);
+            } else {
+                const [drops, total] = await Promise.all([
+                    db.getDrops(limit, offset),
+                    db.getDropsCount()
+                ]);
+                result = { drops, total, totalMoney: 0 };
+            }
             // Если база пустая, подтягиваем свежие дропы из Fear API.
-            if (total === 0) {
+            if (result.total === 0 && safePeriod === 'all') {
                 if (dropsRefreshRunning) {
                     // Ждём, пока текущий фоновый запрос наполнит таблицу.
                     await new Promise(r => setTimeout(r, 2000));
                 } else {
                     await refreshDropsCache();
                 }
-                [drops, total] = await Promise.all([
-                    db.getDrops(limit, offset),
-                    db.getDropsCount()
-                ]);
+                if (typeof db.getDropsByPeriod === 'function') {
+                    result = await db.getDropsByPeriod(safePeriod, limit, offset);
+                } else {
+                    const [drops, total] = await Promise.all([
+                        db.getDrops(limit, offset),
+                        db.getDropsCount()
+                    ]);
+                    result = { drops, total, totalMoney: 0 };
+                }
             } else {
                 // В фоне обновляем кэш.
                 refreshDropsCache().catch((e) => console.warn('[Drops] background refresh failed:', e && e.message));
             }
-            sendJson(res, 200, { drops, total });
+            sendJson(res, 200, { drops: result.drops, total: result.total, totalMoney: result.totalMoney, period: safePeriod });
         } catch (err) {
             sendError(res, 500, 'DB_ERROR', err.message || 'DB error');
         }

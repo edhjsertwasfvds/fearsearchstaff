@@ -212,17 +212,18 @@
             renderChecks(lastChecks);
         }
 
-        function checksEqual(a, b) {
-            if (a.length !== b.length) return false;
-            for (let i = 0; i < a.length; i++) {
-                if (a[i].check_id !== b[i].check_id) return false;
-                if (a[i].count !== b[i].count) return false;
-                if (a[i].banned_count !== b[i].banned_count) return false;
-                if (a[i].filename !== b[i].filename) return false;
-                if (a[i].created_at !== b[i].created_at) return false;
-            }
-            return true;
-        }
+function checksEqual(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i].check_id !== b[i].check_id) return false;
+        if (a[i].count !== b[i].count) return false;
+        if (a[i].banned_count !== b[i].banned_count) return false;
+        if (a[i].filename !== b[i].filename) return false;
+        if (a[i].created_at !== b[i].created_at) return false;
+        if (a[i].source !== b[i].source) return false;
+    }
+    return true;
+}
 
         function renderChecks(checks) {
             lastChecks = checks;
@@ -253,6 +254,7 @@
                             <tr>
                                 <th class="px-4 py-3 font-semibold">#</th>
                                 <th class="px-4 py-3 font-semibold">Дата</th>
+                                <th class="px-4 py-3 font-semibold">Источник</th>
                                 <th class="px-4 py-3 font-semibold">Файл</th>
                                 <th class="px-4 py-3 font-semibold">Аккаунтов</th>
                                 <th class="px-4 py-3 font-semibold">С банами</th>
@@ -263,6 +265,7 @@
                                 <tr id="check-row-${c.check_id}" class="border-t border-white/5 hover:bg-white/[0.04] cursor-pointer transition-colors" onclick="loadDetails(${c.check_id})">
                                     <td class="px-4 py-3 font-mono text-[#5865F2]">#${c.check_id}</td>
                                     <td class="px-4 py-3 text-gray-300">${formatDate(c.created_at)}</td>
+                                    <td class="px-4 py-3 text-gray-400">${escapeHtml(c.source || 'site')}</td>
                                     <td class="px-4 py-3 text-gray-400">${escapeHtml(c.filename || '—')}</td>
                                     <td class="px-4 py-3 text-white font-semibold">${c.count || 0}</td>
                                     <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium ${(c.banned_count || 0) > 0 ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}">${c.banned_count || 0}</span></td>

@@ -233,6 +233,9 @@ function initDatabase() {
         db.exec('ALTER TABLE users ADD COLUMN discord_id TEXT');
     } catch (_) {}
     try {
+        db.exec('ALTER TABLE users ADD COLUMN discord_name TEXT');
+    } catch (_) {}
+    try {
         db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord_id ON users(discord_id)');
     } catch (_) {}
     try {
@@ -312,6 +315,7 @@ function initDatabase() {
     db.exec(`CREATE TABLE IF NOT EXISTS vdf_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         check_id INTEGER NOT NULL,
+        source TEXT DEFAULT 'site',
         steamid TEXT NOT NULL,
         nickname TEXT,
         fear_banned INTEGER DEFAULT 0,
@@ -330,6 +334,7 @@ function initDatabase() {
         on_fear INTEGER DEFAULT 0,
         created_at INTEGER NOT NULL
     )`);
+    db.exec(`ALTER TABLE vdf_history ADD COLUMN source TEXT DEFAULT 'site'`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_vdf_history_steamid ON vdf_history(steamid)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_vdf_history_check_id ON vdf_history(check_id)`);
     db.exec(`CREATE TABLE IF NOT EXISTS drops (
@@ -609,12 +614,12 @@ function createOrUpdateDiscordUser(discordId, username, displayName, level) {
     const safeDisplayName = displayName || safeUsername;
     const now = Date.now();
     if (existing) {
-        db.prepare('UPDATE users SET username = ?, display_name = ?, level = ? WHERE id = ?').run(safeUsername, safeDisplayName, level, existing.id);
+        db.prepare('UPDATE users SET username = ?, display_name = ?, level = ?, discord_name = ? WHERE id = ?').run(safeUsername, safeDisplayName, level, safeDisplayName, existing.id);
         return existing.id;
     }
     const tempPassword = crypto.randomBytes(16).toString('hex');
     const hash = bcrypt.hashSync(tempPassword, 10);
-    const result = db.prepare('INSERT INTO users (username, password_hash, display_name, level, created_at, steam_id, discord_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(safeUsername, hash, safeDisplayName, level, now, null, discordId);
+    const result = db.prepare('INSERT INTO users (username, password_hash, display_name, level, created_at, steam_id, discord_id, discord_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(safeUsername, hash, safeDisplayName, level, now, null, discordId, safeDisplayName);
     const newId = result.lastInsertRowid;
     ensureUserLauncherApiKey(newId);
     return newId;
@@ -622,17 +627,17 @@ function createOrUpdateDiscordUser(discordId, username, displayName, level) {
 function verifyUser(username, password) {
     const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
     if (!user || !bcrypt.compareSync(password, user.password_hash)) return null;
-    return { id: user.id, username: user.username, displayName: user.display_name, level: user.level, steamId: user.steam_id || null };
+    return { id: user.id, username: user.username, displayName: user.display_name, level: user.level, steamId: user.steam_id || null, discordId: user.discord_id || null, discordName: user.discord_name || null };
 }
 function getUserById(id) {
-    const user = db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM users WHERE id = ?').get(id);
-    return user ? { id: user.id, username: user.username, displayName: user.display_name, level: user.level, createdAt: user.created_at, steamId: user.steam_id || null, discordId: user.discord_id || null } : null;
+    const user = db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id, discord_name FROM users WHERE id = ?').get(id);
+    return user ? { id: user.id, username: user.username, displayName: user.display_name, level: user.level, createdAt: user.created_at, steamId: user.steam_id || null, discordId: user.discord_id || null, discordName: user.discord_name || null } : null;
 }
 function getUserByDiscordId(discordId) {
-    const user = db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM users WHERE discord_id = ?').get(discordId);
-    return user ? { id: user.id, username: user.username, displayName: user.display_name, level: user.level, createdAt: user.created_at, steamId: user.steam_id || null, discordId: user.discord_id || null } : null;
+    const user = db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id, discord_name FROM users WHERE discord_id = ?').get(discordId);
+    return user ? { id: user.id, username: user.username, displayName: user.display_name, level: user.level, createdAt: user.created_at, steamId: user.steam_id || null, discordId: user.discord_id || null, discordName: user.discord_name || null } : null;
 }
-function getAllUsers() { return db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id FROM users ORDER BY level DESC, created_at ASC').all().map(u => ({ id: u.id, username: u.username, displayName: u.display_name, level: u.level, createdAt: u.created_at, steamId: u.steam_id || null, discordId: u.discord_id || null })); }
+function getAllUsers() { return db.prepare('SELECT id, username, display_name, level, created_at, steam_id, discord_id, discord_name FROM users ORDER BY level DESC, created_at ASC').all().map(u => ({ id: u.id, username: u.username, displayName: u.display_name, level: u.level, createdAt: u.created_at, steamId: u.steam_id || null, discordId: u.discord_id || null, discordName: u.discord_name || null })); }
 function deleteUser(id) { return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0; }
 function updateUserLevel(id, level) { return db.prepare('UPDATE users SET level = ? WHERE id = ?').run(level, id).changes > 0; }
 function updateUserPassword(id, newPassword) { const hash = bcrypt.hashSync(newPassword, 10); return db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, id).changes > 0; }
@@ -839,15 +844,17 @@ function getVdfHistoryChecks(limit = 100) {
     const rows = db.prepare(`
         SELECT check_id, filename, MIN(created_at) as created_at,
                COUNT(*) as count,
-               SUM(CASE WHEN fear_banned OR vac_banned OR yooma_banned THEN 1 ELSE 0 END) as banned_count
+               SUM(CASE WHEN fear_banned OR vac_banned OR yooma_banned THEN 1 ELSE 0 END) as banned_count,
+               source
         FROM vdf_history
-        GROUP BY check_id, filename
+        GROUP BY check_id, filename, source
         ORDER BY check_id DESC
         LIMIT ?
     `).all(limit);
     return rows.map(r => ({
         check_id: r.check_id,
         filename: r.filename || '',
+        source: r.source || 'site',
         created_at: r.created_at,
         count: r.count || 0,
         banned_count: r.banned_count || 0
@@ -871,7 +878,7 @@ function getVdfHistoryBannedByConfigHash(configHash) {
 
 function getVdfHistoryDetails(check_id) {
     return db.prepare(`
-        SELECT id, check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+        SELECT id, check_id, source, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
                vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
                admin_group, filename, on_fear, created_at
         FROM vdf_history
@@ -892,7 +899,7 @@ function getVdfContentByCheckId(check_id) {
     return { content: row.content || '', filename: row.filename || `check_${check_id}.vdf` };
 }
 
-function saveVdfHistory(results, filename = '', vdfText = '') {
+function saveVdfHistory(results, filename = '', vdfText = '', source = 'site') {
     if (!Array.isArray(results) || results.length === 0) return null;
     const steamids = results.map(r => r.steamid).filter(Boolean);
     if (steamids.length === 0) return null;
@@ -931,10 +938,10 @@ function saveVdfHistory(results, filename = '', vdfText = '') {
 
     const insertHistory = db.prepare(`
         INSERT INTO vdf_history
-            (check_id, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
+            (check_id, source, steamid, nickname, fear_banned, fear_reason, fear_unban_time,
              vac_banned, vac_days_ago, game_bans, yooma_banned, yooma_reason,
              admin_group, config_hash, filename, attachment_url, message_url, on_fear, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const r of results) {
         const ydata = r.yooma_data || {};
@@ -944,6 +951,7 @@ function saveVdfHistory(results, filename = '', vdfText = '') {
             : '';
         insertHistory.run(
             checkId,
+            source,
             r.steamid || '',
             r.nickname || '',
             r.fear_banned ? 1 : 0,
@@ -1005,6 +1013,15 @@ function updateUserDiscordId(id, discordId) {
         return Promise.resolve();
     }
 }
+function updateUserDiscordName(id, discordName) {
+    try {
+        db.prepare('UPDATE users SET discord_name = ? WHERE id = ?').run(discordName, id);
+        return Promise.resolve();
+    } catch (e) {
+        console.warn('[panelSqlite] updateUserDiscordName error:', e && e.message);
+        return Promise.resolve();
+    }
+}
 function createBotTask(type, payload) { return Promise.resolve({ id: 0, type, payload: JSON.stringify(payload), status: 'pending' }); }
 function getPendingBotTasks() { return Promise.resolve([]); }
 function updateBotTask() { return Promise.resolve(); }
@@ -1039,7 +1056,8 @@ module.exports = {
     getUserBySteamId, createPendingUser, createRegistrationConfirmation,
     createBotTask, getRegistrationStatus, getRegistrationConfirmationByCode,
     updateUserStatusAndLevel, updateRegistrationConfirmation, updateBotTask,
-    getPendingBotTasks, updateUserDiscordId
+    getPendingBotTasks, updateUserDiscordId, updateUserDiscordName,
+    getDropsByPeriod
 };
 
 function saveDrops(drops) {
@@ -1047,15 +1065,7 @@ function saveDrops(drops) {
     const insert = db.prepare(`
         INSERT INTO drops (external_id, name, image, price, rarity_color, avatar, player_name, steamid, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (external_id) DO UPDATE SET
-            name = excluded.name,
-            image = excluded.image,
-            price = excluded.price,
-            rarity_color = excluded.rarity_color,
-            avatar = excluded.avatar,
-            player_name = excluded.player_name,
-            steamid = excluded.steamid,
-            created_at = excluded.created_at
+        ON CONFLICT (external_id) DO NOTHING
     `);
     let inserted = 0;
     const now = Date.now();
@@ -1111,6 +1121,47 @@ function getDropsCount() {
     } catch (e) {
         console.error('[panelSqlite] getDropsCount error:', e && e.message);
         return 0;
+    }
+}
+
+function getDropsByPeriod(period = 'all', limit = 1000, offset = 0) {
+    try {
+        let where = '';
+        const params = [];
+        const now = Date.now();
+        if (period === 'day') {
+            where = 'WHERE created_at >= ?';
+            params.push(now - 24 * 60 * 60 * 1000);
+        } else if (period === 'week') {
+            where = 'WHERE created_at >= ?';
+            params.push(now - 7 * 24 * 60 * 60 * 1000);
+        } else if (period === 'month') {
+            where = 'WHERE created_at >= ?';
+            params.push(now - 30 * 24 * 60 * 60 * 1000);
+        }
+        const countRow = db.prepare(`SELECT COUNT(*) AS cnt, COALESCE(SUM(CAST(NULLIF(price, '') AS REAL)), 0) AS total FROM drops ${where}`).get(...params);
+        const { cnt, total } = countRow || { cnt: 0, total: 0 };
+        const rows = db.prepare(
+            `SELECT id, external_id, name, image, price, rarity_color, avatar, player_name, steamid, created_at
+             FROM drops ${where}
+             ORDER BY created_at DESC, id DESC
+             LIMIT ? OFFSET ?`
+        ).all(...params, limit, offset);
+        const drops = rows.map(r => ({
+            id: r.external_id || r.id,
+            name: r.name,
+            image: r.image,
+            price: r.price,
+            rarity_color: r.rarity_color,
+            avatar: r.avatar,
+            player_name: r.player_name,
+            steamid: r.steamid,
+            created_at: r.created_at ? new Date(r.created_at).toISOString() : null
+        }));
+        return { drops, total: cnt, totalMoney: Number(total) || 0 };
+    } catch (e) {
+        console.error('[panelSqlite] getDropsByPeriod error:', e && e.message);
+        return { drops: [], total: 0, totalMoney: 0 };
     }
 }
 

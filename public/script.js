@@ -8,7 +8,7 @@ const state = {
     yooma: { loading: false, players: [] },
     suspicious: { loading: false, players: [] },
     allPlayers: { loading: false, players: [], requestPending: 0 },
-    drops: { loading: false, drops: [], total: 0 },
+    drops: { loading: false, drops: [], total: 0, totalMoney: 0, period: 'all' },
     faceitLevels: {},
     openCategory: null,
     /** Вкладка внутри «Проверка»: player | admins */
@@ -408,13 +408,15 @@ function getLocalSettings() {
 
 function applyLocalSettings(settings = getLocalSettings()) {
     const body = document.body;
-    if (!body) return;
-    body.classList.remove('theme-midnight', 'theme-indigo', 'theme-emerald', 'theme-crimson', 'theme-graphite');
-    if (settings.theme === 'midnight') body.classList.add('theme-midnight');
-    if (settings.theme === 'indigo') body.classList.add('theme-indigo');
-    if (settings.theme === 'emerald') body.classList.add('theme-emerald');
-    if (settings.theme === 'crimson') body.classList.add('theme-crimson');
-    if (settings.theme === 'graphite') body.classList.add('theme-graphite');
+    const html = document.documentElement;
+    if (!body || !html) return;
+    const themeClasses = ['theme-midnight', 'theme-indigo', 'theme-emerald', 'theme-crimson', 'theme-graphite'];
+    body.classList.remove(...themeClasses);
+    html.classList.remove(...themeClasses);
+    if (settings.theme !== 'dark') {
+        body.classList.add('theme-' + settings.theme);
+        html.classList.add('theme-' + settings.theme);
+    }
     body.classList.toggle('local-no-anim', settings.animationMode === 'off');
     body.classList.toggle('local-soft-anim', settings.animationMode === 'soft');
 
@@ -899,7 +901,7 @@ function buildChangesLayout(activeTab, mainHtml) {
         <div class="flex gap-4">
             <div class="w-[180px] shrink-0">
                 <div class="rounded-xl border border-white/10 bg-white/[0.03] p-2 space-y-1">
-                    <button type="button" onclick="setChangesTab('roles')" class="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${rolesActive ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-transparent'}">Роли</button>
+                    <button type="button" onclick="setChangesTab('roles')" class="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition-colors ${rolesActive ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-500/20' : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-transparent'}">Редактор ролей</button>
                 </div>
                 <div class="mt-2 text-[11px] text-gray-500 px-1">Доступ: с 3 уровня</div>
             </div>
@@ -1166,6 +1168,9 @@ function renderPanel() {
             `<option value="${escapeHtml(role)}" ${state.rolesEditor.roleName === role ? 'selected' : ''}>${escapeHtml(role)}</option>`
         ).join('');
         const main = `
+            <div class="mb-4 text-gray-400 text-sm leading-relaxed">
+                Редактор ролей Fear-панели. Позволяет сменить группу администратора по его SteamID. Для работы нужен действующий <code class="text-gray-300">access_token</code> от сайта FearProject.
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                 <input id="fearAccessToken" oninput="onRolesEditorAccessTokenInput()" type="text" value="${escapeHtml(state.rolesEditor.accessToken)}" placeholder="access_token" class="md:col-span-2 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-indigo-500">
                 <select id="fearRoleName" data-ui-select="1" class="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500">${roleOptions}</select>
@@ -1176,7 +1181,7 @@ function renderPanel() {
             </div>
             <div class="rounded-lg border border-white/10 bg-black/20 p-3 h-[320px] overflow-y-auto text-xs font-mono text-gray-300 whitespace-pre-wrap">${escapeHtml((state.rolesEditor.log || []).join('\n') || 'Лог пуст')}</div>
         `;
-        title.textContent = 'Изменения';
+        title.textContent = 'Редактор ролей';
         content.innerHTML = buildChangesLayout('roles', main);
         initUiSelects(content);
         return;
@@ -2567,15 +2572,22 @@ function buildPunishmentsListView(mode, monthScopedList, inputHtml, monthSelectH
     return inputHtml + monthSelectHtml + summaryCards + tables + emptyState;
 }
 
-async function loadDrops() {
+async function loadDrops(period = null) {
     if (state.drops.loading) return;
     state.drops.loading = true;
+    if (period) state.drops.period = period;
     scheduleRenderPanel();
     try {
-        const res = await fetch('/api/drops?limit=1000', { headers: apiAuthHeaders() });
-        const data = await res.json().catch(() => ({ drops: [], total: 0 }));
-            state.drops = { loading: false, drops: Array.isArray(data.drops) ? data.drops : [], total: data.total || 0 };
-
+        const p = state.drops.period || 'all';
+        const res = await fetch('/api/drops?period=' + encodeURIComponent(p) + '&limit=5000', { headers: apiAuthHeaders() });
+        const data = await res.json().catch(() => ({ drops: [], total: 0, totalMoney: 0 }));
+        state.drops = {
+            loading: false,
+            drops: Array.isArray(data.drops) ? data.drops : [],
+            total: data.total || 0,
+            totalMoney: data.totalMoney || 0,
+            period: data.period || p
+        };
     } catch (_) {
         state.drops.loading = false;
     }
@@ -2583,13 +2595,34 @@ async function loadDrops() {
     scheduleRenderPanel();
 }
 
+function setDropsPeriod(period) {
+    if (['day', 'week', 'month', 'all'].includes(period)) {
+        loadDrops(period);
+    }
+}
+
 function buildDropsTable(drops, total) {
-    const sorted = [...drops].sort((a, b) => (b.id || 0) - (a.id || 0));
+    const sorted = [...drops].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    const period = state.drops.period || 'all';
+    const totalMoney = state.drops.totalMoney || 0;
+    const periodBtn = (p, label) => `<button onclick="setDropsPeriod('${p}')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${period === p ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'}">${label}</button>`;
     return `
-        <div class="flex gap-3 mb-4 flex-wrap">
-            <div class="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
-                <span class="text-yellow-400 font-bold">${total || drops.length}</span>
-                <span class="text-gray-500 text-xs">дропов</span>
+        <div class="flex flex-col sm:flex-row gap-3 mb-4 flex-wrap items-start sm:items-center justify-between">
+            <div class="flex flex-wrap gap-2">
+                ${periodBtn('day', 'День')}
+                ${periodBtn('week', 'Неделя')}
+                ${periodBtn('month', 'Месяц')}
+                ${periodBtn('all', 'Всё время')}
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg px-3 py-2">
+                    <span class="text-yellow-400 font-bold">${total || drops.length}</span>
+                    <span class="text-gray-500 text-xs">дропов</span>
+                </div>
+                <div class="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2" title="Сумма цен предметов за выбранный период">
+                    <span class="text-emerald-400 font-bold">${totalMoney.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span class="text-gray-500 text-xs">₽</span>
+                </div>
             </div>
         </div>
         <div class="overflow-x-auto">
@@ -3894,7 +3927,7 @@ function mergeAllPlayersWithBans(players) {
 function buildBddStaffSearchPanel() {
     return `
         <div class="space-y-4">
-            <p class="text-gray-400 text-sm leading-relaxed">Поиск по админам: SteamID, Discord ID, Discord-ник, имя админа или имя профиля.</p>
+            <p class="text-gray-400 text-sm leading-relaxed">Поиск по общей БД (админы + все профили): SteamID, Discord ID, Discord-ник, имя админа или имя профиля.</p>
             <div class="flex flex-wrap gap-2 items-end">
                 <div class="flex-1 min-w-[220px]">
                     <label class="block text-gray-500 text-xs font-semibold mb-1">Query</label>
@@ -3935,6 +3968,7 @@ function buildBddStaffResultsFull(rows) {
             : (discordNick || discordId || '—');
         const lastConnect = formatBddStaffDate(r.last_activity);
         const badges = [
+            r.is_staff ? '<span class="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-semibold">staff</span>' : '',
             r.is_frozen ? '<span class="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-semibold">freeze</span>' : '',
             r.ban_is_banned ? '<span class="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px] font-semibold">banned</span>' : ''
         ].filter(Boolean).join(' ');
@@ -4708,16 +4742,10 @@ function applyLevelRestrictions(level) {
         const settingsLink = document.querySelector('a[href="/settings"]');
         if (settingsLink) settingsLink.style.display = 'none';
     }
-    // «Для лаунчера» — только уровень 5 (суперадмин)
-    const launcherNav = document.getElementById('navItemLauncher');
     const changesNav = document.getElementById('navItemChanges');
     if (changesNav) {
         if (level >= 3) changesNav.classList.remove('hidden');
         else changesNav.classList.add('hidden');
-    }
-    if (launcherNav) {
-        if (level >= 5) launcherNav.classList.remove('hidden');
-        else launcherNav.classList.add('hidden');
     }
 }
 

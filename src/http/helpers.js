@@ -1,8 +1,18 @@
 const auth = require('../auth');
 
 async function getSessionFromReq(req) {
+    let token = '';
     const header = req.headers['authorization'] || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (header.startsWith('Bearer ')) {
+        token = header.slice(7).trim();
+    }
+    if (!token) {
+        const cookie = req.headers['cookie'] || '';
+        const match = String(cookie).split(';').find(c => String(c).trim().startsWith('sessionToken='));
+        if (match) {
+            try { token = decodeURIComponent(match.split('=').slice(1).join('=')); } catch (_) {}
+        }
+    }
     return token ? await auth.getSession(token) : null;
 }
 

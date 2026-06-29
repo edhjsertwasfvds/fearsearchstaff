@@ -144,6 +144,16 @@
         </section>
     </main>
 
+    <div id="loginLogsModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+        <div class="glass-panel w-full max-w-3xl rounded-2xl p-6 max-h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between mb-4">
+                <h3 id="loginLogsTitle" class="text-lg font-bold text-white">История входов</h3>
+                <button onclick="closeLoginLogsModal()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"><i class="ph ph-x text-lg"></i></button>
+            </div>
+            <div id="loginLogsContent" class="overflow-y-auto custom-scroll flex-1 text-sm"></div>
+        </div>
+    </div>
+
     <script>
         let currentUserLevel = 0;
         let sessionToken = '';
@@ -267,24 +277,27 @@
                             <div>
                                 <span class="text-white text-sm font-semibold">${esc(u.displayName || u.username)}</span>
                                 ${isMe ? '<span class="text-amber-400 text-[10px] ml-1">(вы)</span>' : ''}
-                                <div class="text-gray-500 text-xs flex items-center gap-2 flex-wrap">
-                                    ${levelNames[u.level] || 'Уровень ' + u.level}
-                                    ${u.activeSessions > 0 ? `<span class="text-emerald-400">• ${u.activeSessions} ${u.activeSessions === 1 ? 'устройство' : (u.activeSessions < 5 ? 'устройства' : 'устройств')}</span>` : ''}
-                                </div>
-                                ${u.lastActivity ? `<div class="text-gray-500 text-[10px]">Последняя активность: ${new Date(u.lastActivity).toLocaleString('ru-RU')}</div>` : ''}
-                                ${canBindSteamId ? `<div class="text-gray-500 text-[10px] font-mono">SteamID: ${esc(u.steamId || 'не привязан')}</div>` : ''}
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            ${canEdit ? `
-                                <select onchange="changeLevel(${u.id}, this.value)" class="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
-                                    ${levelOpts}
-                                </select>
-                                ${canBindSteamId ? `<button onclick="promptSteamId(${u.id}, '${escOnclick(u.username)}', '${escOnclick(u.steamId || '')}')" class="px-2 h-8 rounded-lg hover:bg-cyan-500/10 text-cyan-400/70 hover:text-cyan-300 text-[11px] transition-colors" title="Привязать SteamID">SteamID</button>` : ''}
-                                <button onclick="promptPassword(${u.id}, '${escOnclick(u.username)}')" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-indigo-500/10 text-indigo-400/60 hover:text-indigo-400 transition-colors" title="Сменить пароль"><i class="ph ph-key text-base"></i></button>
-                                ${canDelete ? `<button onclick="deleteUser(${u.id}, '${escOnclick(u.username)}')" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-rose-500/10 text-rose-400/60 hover:text-rose-400 transition-colors" title="Удалить"><i class="ph ph-trash text-base"></i></button>` : ''}
-                            ` : ''}
-                        </div>
+                                 <div class="text-gray-500 text-xs flex items-center gap-2 flex-wrap">
+                                     ${levelNames[u.level] || 'Уровень ' + u.level}
+                                     ${u.activeSessions > 0 ? `<span class="text-emerald-400">• ${u.activeSessions} ${u.activeSessions === 1 ? 'устройство' : (u.activeSessions < 5 ? 'устройства' : 'устройств')}</span>` : ''}
+                                 </div>
+                                 ${u.lastActivity ? `<div class="text-gray-500 text-[10px]">Последняя активность: ${new Date(u.lastActivity).toLocaleString('ru-RU')}</div>` : ''}
+                                 ${canBindSteamId ? `<div class="text-gray-500 text-[10px] font-mono">SteamID: ${esc(u.steamId || 'не привязан')}</div>` : ''}
+                                 ${u.discordId || u.discordName ? `<div class="text-gray-500 text-[10px] font-mono">Discord: ${esc(u.discordName || '—')} <span class="text-gray-600">(${esc(u.discordId || '—')})</span></div>` : ''}
+                             </div>
+                         </div>
+                         <div class="flex items-center gap-2">
+                             ${canEdit ? `
+                                 <select onchange="changeLevel(${u.id}, this.value)" class="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-indigo-500 cursor-pointer">
+                                     ${levelOpts}
+                                 </select>
+                                 <button onclick="showLoginLogs(${u.id}, '${escOnclick(u.username)}')" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-blue-500/10 text-blue-400/60 hover:text-blue-400 transition-colors" title="История входов (IP)"><i class="ph ph-list-magnifying-glass text-base"></i></button>
+                                 ${canBindSteamId ? `<button onclick="promptSteamId(${u.id}, '${escOnclick(u.username)}', '${escOnclick(u.steamId || '')}')" class="px-2 h-8 rounded-lg hover:bg-cyan-500/10 text-cyan-400/70 hover:text-cyan-300 text-[11px] transition-colors" title="Привязать SteamID">SteamID</button>` : ''}
+                                 ${canBindSteamId ? `<button onclick="promptDiscord(${u.id}, '${escOnclick(u.username)}', '${escOnclick(u.discordId || '')}', '${escOnclick(u.discordName || '')}')" class="px-2 h-8 rounded-lg hover:bg-[#5865F2]/10 text-[#5865F2]/70 hover:text-[#5865F2] text-[11px] transition-colors" title="Привязать Discord">Discord</button>` : ''}
+                                 <button onclick="promptPassword(${u.id}, '${escOnclick(u.username)}')" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-indigo-500/10 text-indigo-400/60 hover:text-indigo-400 transition-colors" title="Сменить пароль"><i class="ph ph-key text-base"></i></button>
+                                 ${canDelete ? `<button onclick="deleteUser(${u.id}, '${escOnclick(u.username)}')" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-rose-500/10 text-rose-400/60 hover:text-rose-400 transition-colors" title="Удалить"><i class="ph ph-trash text-base"></i></button>` : ''}
+                             ` : ''}
+                         </div>
                     </div>`;
                 }).join('');
                 initUiSelects(container);
@@ -370,6 +383,69 @@
                 if (!res.ok && data.error) { alert(data.error); return; }
                 loadUsers();
             } catch (_) { alert('Ошибка удаления'); }
+        }
+
+        async function promptDiscord(id, username, currentDiscordId, currentDiscordName) {
+            const did = prompt(`Discord ID для "${username}" (пусто = снять привязку):`, currentDiscordId);
+            if (did === null) return;
+            const dname = prompt(`Discord имя для "${username}" (пусто = не менять):`, currentDiscordName);
+            if (dname === null) return;
+            const discordId = String(did || '').trim();
+            if (discordId !== '' && !/^\d{10,}$/.test(discordId)) {
+                alert('Некорректный Discord ID');
+                return;
+            }
+            try {
+                const res = await fetch(`/api/users/${id}`, {
+                    method: 'PUT',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ discordId, discordName: String(dname || '').trim() })
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                loadUsers();
+            } catch (_) { alert('Ошибка привязки Discord'); }
+        }
+
+        async function showLoginLogs(id, username) {
+            const modal = document.getElementById('loginLogsModal');
+            const content = document.getElementById('loginLogsContent');
+            const title = document.getElementById('loginLogsTitle');
+            title.textContent = `История входов — ${username}`;
+            content.innerHTML = '<p class="text-gray-500">Загрузка...</p>';
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            try {
+                const res = await fetch(`/api/users/${id}/login-logs?limit=100`, { headers: authHeaders() });
+                if (!res.ok) { content.innerHTML = `<p class="text-red-400">Ошибка загрузки</p>`; return; }
+                const data = await res.json();
+                const logs = Array.isArray(data.logs) ? data.logs : [];
+                if (logs.length === 0) {
+                    content.innerHTML = '<p class="text-gray-500">Нет записей</p>';
+                    return;
+                }
+                const rows = logs.map(l => {
+                    const time = l.created_at ? new Date(Number(l.created_at)).toLocaleString('ru-RU') : '—';
+                    return `<div class="p-3 bg-white/[0.03] rounded-lg mb-2 border border-white/5">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
+                            <span class="text-white font-medium">${esc(l.action || '—')}</span>
+                            <span class="text-gray-500 text-xs">${time}</span>
+                        </div>
+                        <div class="text-gray-400 text-xs mt-1 font-mono">IP: ${esc(l.ip_address || '—')}</div>
+                        ${l.country || l.city ? `<div class="text-gray-500 text-xs mt-0.5">${esc(l.country || '')}${l.city ? ' / ' + esc(l.city) : ''}</div>` : ''}
+                        ${l.device || l.browser ? `<div class="text-gray-600 text-[10px] mt-0.5">${esc(l.device || '')}${l.browser ? ' • ' + esc(l.browser) : ''}</div>` : ''}
+                    </div>`;
+                }).join('');
+                content.innerHTML = rows;
+            } catch (_) {
+                content.innerHTML = '<p class="text-red-400">Ошибка загрузки</p>';
+            }
+        }
+
+        function closeLoginLogsModal() {
+            const modal = document.getElementById('loginLogsModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
         }
 
         function getSessionToken() {
