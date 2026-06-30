@@ -1494,13 +1494,14 @@ async function getActivityByServer(days = 7) {
 async function getVdfHistoryChecks(limit = 100) {
     try {
         const { rows } = await poolQuery(`
-            SELECT check_id, filename,
+            SELECT check_id,
+                   (array_agg(filename ORDER BY id DESC))[1] AS filename,
                    MIN(created_at) AS created_at,
                    COUNT(*) AS count,
                    COUNT(*) FILTER (WHERE fear_banned OR vac_banned OR yooma_banned) AS banned_count,
                    (array_agg(source ORDER BY id DESC))[1] AS source
             FROM vdf_history
-            GROUP BY check_id, filename
+            GROUP BY check_id
             ORDER BY check_id DESC
             LIMIT $1
         `, [limit]);
@@ -1618,6 +1619,10 @@ async function saveVdfHistory(results, filename = '', vdfText = '', source = 'si
                 ON CONFLICT (config_hash, steamid) DO NOTHING
             `, [configHash, sid]);
         }
+
+        // Удаляем предыдущие записи этого check_id, чтобы не дублировать строки
+        // при повторном сохранении и чтобы сводка/детали показывали одинаковый набор.
+        await poolQuery(`DELETE FROM vdf_history WHERE check_id = $1`, [checkId]);
 
         for (const r of results) {
             const ydata = r.yooma_data || {};

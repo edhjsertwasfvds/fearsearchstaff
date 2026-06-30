@@ -42,11 +42,28 @@ function getPool() {
  * @param {string} rawQ
  * @returns {Promise<object[]>}
  */
+function normalizeSearchQuery(rawQ) {
+    let q = String(rawQ || '').trim();
+    // Discord-упоминание: <@123...> или <@!123...>
+    const mention = q.match(/^<@!?(\d{10,20})>$/);
+    if (mention) return mention[1];
+    // Убираем ведущие @/#
+    q = q.replace(/^[@#]+/, '').trim();
+    // Если пользователь вставил ID с пробелами, убираем их.
+    if (/^\d[\d\s]*$/.test(q)) {
+        q = q.replace(/\s+/g, '');
+    }
+    return q;
+}
+
 async function searchBddStaff(rawQ) {
     const pool = getPool();
     if (!pool) return [];
-    const q = String(rawQ || '').trim();
+    const q = normalizeSearchQuery(rawQ);
     if (q.length < 2) return [];
+
+    const isNumeric = /^\d{10,}$/.test(q);
+    const isSteamId = /^\d{17}$/.test(q);
 
     const staffBase = `
         SELECT
@@ -68,10 +85,10 @@ async function searchBddStaff(rawQ) {
     let staffSql = staffBase;
     const staffParams = [];
 
-    if (/^\d{17}$/.test(q)) {
+    if (isSteamId) {
         staffSql += ' WHERE a.steamid = $1 ';
         staffParams.push(q);
-    } else if (/^\d{10,20}$/.test(q)) {
+    } else if (isNumeric) {
         staffSql += ' WHERE (a.steamid = $1 OR (p.discord_id IS NOT NULL AND TRIM(p.discord_id) = $1)) ';
         staffParams.push(q);
     } else {
@@ -108,10 +125,10 @@ async function searchBddStaff(rawQ) {
     let profileSql = profileBase;
     const profileParams = [];
 
-    if (/^\d{17}$/.test(q)) {
+    if (isSteamId) {
         profileSql += ' WHERE p.steamid = $1 ';
         profileParams.push(q);
-    } else if (/^\d{10,20}$/.test(q)) {
+    } else if (isNumeric) {
         profileSql += ' WHERE (p.discord_id IS NOT NULL AND TRIM(p.discord_id) = $1) ';
         profileParams.push(q);
     } else {
@@ -133,8 +150,27 @@ async function searchBddStaff(rawQ) {
         pool.query(profileSql, profileParams)
     ]);
 
-    const staffRows = staffRes.rows || [];
-    const profileRows = profileRes.rows || [];
+    let staffRows = staffRes.rows || [];
+    let profileRows = profileRes.rows || [];
+
+    // Если точный поиск по цифровому ID ничего не нашёл, ищем вхождение подстроки.
+    if (staffRows.length === 0 && profileRows.length === 0 && isNumeric) {
+        const like = '%' + q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
+        const staffLikeSql = staffBase + ` WHERE (
+            a.steamid ILIKE $1 ESCAPE '\\'
+            OR (p.discord_id IS NOT NULL AND p.discord_id ILIKE $1 ESCAPE '\\')
+        ) ORDER BY GREATEST(a.updated_at, COALESCE(p.updated_at, a.updated_at)) DESC NULLS LAST LIMIT 50`;
+        const profileLikeSql = profileBase + ` WHERE (
+            p.steamid ILIKE $1 ESCAPE '\\'
+            OR (p.discord_id IS NOT NULL AND p.discord_id ILIKE $1 ESCAPE '\\')
+        ) ORDER BY p.updated_at DESC NULLS LAST LIMIT 50`;
+        const [staffLikeRes, profileLikeRes] = await Promise.all([
+            pool.query(staffLikeSql, [like]),
+            pool.query(profileLikeSql, [like])
+        ]);
+        staffRows = staffLikeRes.rows || [];
+        profileRows = profileLikeRes.rows || [];
+    }
 
     const seen = new Set();
     const merged = [];

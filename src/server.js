@@ -250,43 +250,72 @@ const backgroundState = {
 
 let dropsRefreshRunning = false;
 let bannedOnlineInFlight = null; // Promise для дедупликации параллельных запросов
+const BANNED_ONLINE_TTL_MS = 5 * 60 * 1000; // 5 минут
+const BANNED_ONLINE_MAX_STALE_MS = 30 * 60 * 1000; // до 30 минут устаревших данных
+const bannedOnlineCache = {
+    data: null,
+    timestamp: 0
+};
+
+// Прямое получение ленты дропов из Fear API (без записи в БД).
+async function fetchDropsFeed() {
+    return new Promise((resolve) => {
+        const apiUrl = `https://api.fearproject.ru/drops/feed?page=1&limit=100`;
+        const req = https.get(apiUrl, {
+            headers: {
+                'Accept': '*/*',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+                'Origin': 'https://fearproject.ru',
+                'Referer': 'https://fearproject.ru/',
+                ...(FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {})
+            }
+        }, (apiRes) => {
+            let data = '';
+            apiRes.on('data', c => data += c);
+            apiRes.on('error', (err) => {
+                console.warn('[Drops] feed response error:', err && err.message);
+                resolve([]);
+            });
+            apiRes.on('end', () => {
+                try {
+                    if (apiRes.statusCode !== 200) {
+                        console.warn('[Drops] feed HTTP', apiRes.statusCode, data.slice(0, 200));
+                        resolve([]);
+                        return;
+                    }
+                    const parsed = JSON.parse(data);
+                    const drops = Array.isArray(parsed.feed) ? parsed.feed : (Array.isArray(parsed) ? parsed : []);
+                    resolve(drops);
+                } catch (e) {
+                    console.warn('[Drops] feed parse error:', e && e.message);
+                    resolve([]);
+                }
+            });
+        });
+        req.setTimeout(15000, () => { try { req.destroy(); } catch (_) {} resolve([]); });
+        req.on('error', (err) => {
+            console.warn('[Drops] feed request error:', err && err.message);
+            resolve([]);
+        });
+    });
+}
+
 async function refreshDropsCache() {
-    if (dropsRefreshRunning) return;
+    if (dropsRefreshRunning) return 0;
     dropsRefreshRunning = true;
     try {
         // API /drops/feed возвращает только последние 10 записей независимо от page/limit.
         // Берём один feed и сохраняем только новые (ON CONFLICT DO NOTHING).
-        await new Promise((resolve) => {
-            const apiUrl = `https://api.fearproject.ru/drops/feed?page=1&limit=100`;
-            const req = https.get(apiUrl, {
-                headers: {
-                    'Accept': '*/*',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
-                    'Origin': 'https://fearproject.ru',
-                    'Referer': 'https://fearproject.ru/',
-                    ...(FEAR_ACCESS_TOKEN ? { 'Cookie': `access_token=${FEAR_ACCESS_TOKEN}` } : {})
-                }
-            }, (apiRes) => {
-                let data = '';
-                apiRes.on('data', c => data += c);
-                apiRes.on('error', () => resolve());
-                apiRes.on('end', async () => {
-                    try {
-                        const parsed = JSON.parse(data);
-                        const drops = Array.isArray(parsed.feed) ? parsed.feed : [];
-                        if (drops.length && typeof db.saveDrops === 'function') {
-                            const saved = await db.saveDrops(drops);
-                            console.log('[Drops] feed saved:', saved, 'new of', drops.length);
-                        }
-                    } catch (_) {}
-                    resolve();
-                });
-            });
-            req.setTimeout(15000, () => { try { req.destroy(); } catch (_) {} resolve(); });
-            req.on('error', () => resolve());
-        });
+        const drops = await fetchDropsFeed();
+        if (drops.length && typeof db.saveDrops === 'function') {
+            const saved = await db.saveDrops(drops);
+            console.log('[Drops] feed saved:', saved, 'new of', drops.length);
+            return saved;
+        }
+        return 0;
     } catch (e) {
         console.warn('[Drops] refresh error:', e && e.message);
+        return 0;
     } finally {
         dropsRefreshRunning = false;
     }
@@ -2960,7 +2989,7 @@ const server = http.createServer(async (req, res) => {
             sendJson(res, 200, { rows });
         } catch (e) {
             console.error('[Analytics daily] Error:', e?.message || e);
-            sendError(res, 500, 'INTERNAL_ERROR', 'Ошибка базы данных');
+            sendJson(res, 200, { rows: [], error: 'Ошибка базы данных', partial: true });
         }
         return;
     }
@@ -2976,7 +3005,7 @@ const server = http.createServer(async (req, res) => {
             sendJson(res, 200, { rows });
         } catch (e) {
             console.error('[Analytics trend] Error:', e?.message || e);
-            sendError(res, 500, 'INTERNAL_ERROR', 'Ошибка базы данных');
+            sendJson(res, 200, { rows: [], error: 'Ошибка базы данных', partial: true });
         }
         return;
     }
@@ -2992,7 +3021,8 @@ const server = http.createServer(async (req, res) => {
             sendJson(res, 200, { punishments, tickets });
         } catch (e) {
             console.error('[Analytics comparison] Error:', e?.message || e);
-            sendError(res, 500, 'INTERNAL_ERROR', 'Ошибка базы данных');
+            const empty = { current: { bans: 0, mutes: 0, total: 0 }, previous: { bans: 0, mutes: 0, total: 0 } };
+            sendJson(res, 200, { punishments: empty, tickets: { current: 0, previous: 0 }, error: 'Ошибка базы данных', partial: true });
         }
         return;
     }
@@ -3012,7 +3042,7 @@ const server = http.createServer(async (req, res) => {
             sendJson(res, 200, { counts });
         } catch (e) {
             console.error('[Analytics roles] Error:', e?.message || e);
-            sendError(res, 500, 'INTERNAL_ERROR', 'Ошибка базы данных');
+            sendJson(res, 200, { counts: {}, error: 'Ошибка базы данных', partial: true });
         }
         return;
     }
@@ -3081,7 +3111,30 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         try {
-            const rows = await bddStaffPg.searchBddStaff(q);
+            let rows = await bddStaffPg.searchBddStaff(q);
+            // Fallback: если в BDD ничего не найдено, ищем по Discord ID в локальных panel_users.
+            if ((!rows || rows.length === 0) && /^\d{10,}$/.test(q)) {
+                try {
+                    const panelUser = await db.getUserByDiscordId(q);
+                    if (panelUser) {
+                        rows = [{
+                            steamid: panelUser.steamId || '',
+                            group_display_name: '',
+                            group_name: '',
+                            is_frozen: false,
+                            admin_avatar_full: '',
+                            profile_name: panelUser.displayName || panelUser.username || '',
+                            last_activity: null,
+                            discord_id: panelUser.discordId || q,
+                            discord_nickname: panelUser.discordName || '',
+                            ban_is_banned: false,
+                            is_staff: false
+                        }];
+                    }
+                } catch (e) {
+                    console.warn('[bdd-staff/search] panel_user fallback error:', e && e.message);
+                }
+            }
             // Обновляем panel_users discord_id/discord_name по steam_id, если в результатах есть данные.
             if (Array.isArray(rows) && rows.length > 0) {
                 (async () => {
@@ -4300,10 +4353,19 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         try {
+            const now = Date.now();
+            const cacheAge = now - bannedOnlineCache.timestamp;
+
+            // Свежий кэш — отдаём сразу.
+            if (bannedOnlineCache.data && cacheAge < BANNED_ONLINE_TTL_MS) {
+                sendJson(res, 200, bannedOnlineCache.data);
+                return;
+            }
+
             // Дедупликация: параллельные запросы ждут одного и того же результата.
             if (bannedOnlineInFlight) {
-                const cachedResult = await bannedOnlineInFlight;
-                sendJson(res, 200, cachedResult);
+                const inFlightResult = await bannedOnlineInFlight;
+                sendJson(res, 200, inFlightResult);
                 return;
             }
 
@@ -4424,9 +4486,27 @@ const server = http.createServer(async (req, res) => {
                 return { groups: processedGroups };
             })();
 
+            // Stale-while-revalidate: если есть устаревший кэш, отдаём его мгновенно
+            // и обновляем данные в фоне, чтобы следующий запрос получил свежий результат.
+            if (bannedOnlineCache.data && cacheAge < BANNED_ONLINE_MAX_STALE_MS) {
+                sendJson(res, 200, bannedOnlineCache.data);
+                bannedOnlineInFlight = computePromise;
+                computePromise.then((result) => {
+                    bannedOnlineCache.data = result;
+                    bannedOnlineCache.timestamp = Date.now();
+                }).catch((err) => {
+                    console.error('[banned-online] background refresh error:', err);
+                }).finally(() => {
+                    bannedOnlineInFlight = null;
+                });
+                return;
+            }
+
             bannedOnlineInFlight = computePromise;
             try {
                 const result = await computePromise;
+                bannedOnlineCache.data = result;
+                bannedOnlineCache.timestamp = Date.now();
                 sendJson(res, 200, result);
                 return result;
             } finally {
@@ -4434,6 +4514,11 @@ const server = http.createServer(async (req, res) => {
             }
         } catch (err) {
             console.error('[banned-online] error:', err);
+            // Если ошибка при фоновом обновлении, но есть кэш — отдаём его, даже если устарел.
+            if (bannedOnlineCache.data) {
+                sendJson(res, 200, bannedOnlineCache.data);
+                return;
+            }
             sendError(res, 500, 'DB_ERROR', err.message || 'DB error');
         }
         return;
@@ -4462,22 +4547,15 @@ const server = http.createServer(async (req, res) => {
                 ]);
                 result = { drops, total, totalMoney: 0 };
             }
-            // Если база пустая, подтягиваем свежие дропы из Fear API.
+            // Если база пустая (вкладка "Всё время"), подтягиваем свежие дропы из Fear API напрямую
+            // и сохраняем их в БД в фоне, чтобы модальное окно не показывало "Нет данных".
             if (result.total === 0 && safePeriod === 'all') {
-                if (dropsRefreshRunning) {
-                    // Ждём, пока текущий фоновый запрос наполнит таблицу.
-                    await new Promise(r => setTimeout(r, 2000));
-                } else {
-                    await refreshDropsCache();
-                }
-                if (typeof db.getDropsByPeriod === 'function') {
-                    result = await db.getDropsByPeriod(safePeriod, limit, offset);
-                } else {
-                    const [drops, total] = await Promise.all([
-                        db.getDrops(limit, offset),
-                        db.getDropsCount()
-                    ]);
-                    result = { drops, total, totalMoney: 0 };
+                const live = await fetchDropsFeed();
+                if (live.length > 0) {
+                    result = { drops: live.slice(0, limit), total: live.length, totalMoney: 0, period: safePeriod };
+                    if (typeof db.saveDrops === 'function') {
+                        db.saveDrops(live).catch((e) => console.warn('[Drops] background save failed:', e && e.message));
+                    }
                 }
             } else {
                 // В фоне обновляем кэш.

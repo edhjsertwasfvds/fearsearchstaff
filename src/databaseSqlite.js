@@ -842,12 +842,12 @@ function getTicketsMonthComparison() {
 // VDF history helpers (SQLite fallback; shared with checker backend)
 function getVdfHistoryChecks(limit = 100) {
     const rows = db.prepare(`
-        SELECT check_id, filename, MIN(created_at) as created_at,
+        SELECT check_id, MAX(filename) as filename, MIN(created_at) as created_at,
                COUNT(*) as count,
                SUM(CASE WHEN fear_banned OR vac_banned OR yooma_banned THEN 1 ELSE 0 END) as banned_count,
-               source
+               MAX(source) as source
         FROM vdf_history
-        GROUP BY check_id, filename, source
+        GROUP BY check_id
         ORDER BY check_id DESC
         LIMIT ?
     `).all(limit);

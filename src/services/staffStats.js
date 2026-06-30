@@ -235,6 +235,31 @@ async function refreshStaffList() {
     console.log('[Staff] Обновлен staff list:', staffList.length, 'чел.');
 }
 
+async function loadStaffPunishmentsFromDb(staffList) {
+    if (!Array.isArray(staffList) || staffList.length === 0) return;
+    try {
+        const dataBySteamId = { ...(staffPunishmentsCache.dataBySteamId || {}) };
+            for (const s of staffList) {
+                const sid = String(s?.steamid || '');
+                if (!sid) continue;
+                try {
+                    const rows = await db.getFearPunishmentsByAdmin(sid, 10000, 0);
+                    if (Array.isArray(rows) && rows.length > 0) {
+                        dataBySteamId[sid] = rows;
+                        // Не кладём в punishmentsService-кэш, чтобы фоновое обновление всё равно ходило в API.
+                    }
+                } catch (e) {
+                    console.warn('[Staff stats] DB load error for', sid, e?.message || e);
+                }
+            }
+        staffPunishmentsCache.dataBySteamId = dataBySteamId;
+        staffPunishmentsCache.lastUpdated = Date.now();
+        console.log('[Staff stats] Восстановлена статистика из БД для', Object.keys(dataBySteamId).length, 'админов');
+    } catch (e) {
+        console.warn('[Staff stats] DB load error:', e?.message || e);
+    }
+}
+
 async function refreshStaffPunishmentsCache() {
     if (staffPunishmentsCache.loading) return;
     staffPunishmentsCache.loading = true;
@@ -249,7 +274,14 @@ async function refreshStaffPunishmentsCache() {
             return;
         }
 
-        const dataBySteamId = {};
+        // Если кэш пуст, сначала пытаемся восстановить статистику из БД.
+        const cacheEmpty = Object.keys(staffPunishmentsCache.dataBySteamId || {}).length === 0;
+        if (cacheEmpty && typeof db.getFearPunishmentsByAdmin === 'function') {
+            await loadStaffPunishmentsFromDb(staffList);
+        }
+
+        // Начинаем с уже имеющихся данных (БД/кэш), чтобы API-обновление не оставляло пустой кэш на время загрузки.
+        const dataBySteamId = { ...(staffPunishmentsCache.dataBySteamId || {}) };
         let cursor = 0;
         const workerCount = Math.max(1, Math.min(STAFF_STATS_FETCH_CONCURRENCY, staffList.length));
         const workers = Array.from({ length: workerCount }, async () => {
@@ -273,7 +305,10 @@ async function refreshStaffPunishmentsCache() {
                     await savePunishmentsToDb(sid, sName, normalizedList);
                 } catch (e) {
                     console.warn('[Staff stats] Ошибка загрузки наказаний для', sid, e?.message || e);
-                    dataBySteamId[sid] = [];
+                    // Не затираем уже имеющиеся данные из БД при ошибке API.
+                    if (!Array.isArray(dataBySteamId[sid])) {
+                        dataBySteamId[sid] = [];
+                    }
                 }
                 if (PUNISHMENTS_DELAY_MS > 0) await sleep(PUNISHMENTS_DELAY_MS);
             }
@@ -357,6 +392,7 @@ module.exports = {
     STAFF_STATS_REFRESH_INTERVAL_MS,
     refreshStaffList,
     refreshStaffPunishmentsCache,
+    loadStaffPunishmentsFromDb,
     isSteamIdInStaffAdmins,
     isSteamIdStaff
 };
