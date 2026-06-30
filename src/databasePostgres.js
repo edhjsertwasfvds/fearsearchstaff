@@ -1362,8 +1362,8 @@ async function getFearPunishmentsStats(since = 0) {
     const { rows } = await poolQuery(
         `SELECT
             admin_steamid,
-            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) AS bans,
-            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) AS mutes,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) AS bans,
+            COUNT(*) FILTER (WHERE (type = 2 OR punish_type = 2)) AS mutes,
             COUNT(*) AS total
          FROM panel_fear_punishments
          WHERE created >= $1
@@ -1386,8 +1386,8 @@ async function getStaffPunishmentsDaily(days = 7) {
     const since = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
     const { rows } = await poolQuery(
         `SELECT to_timestamp(created)::date as day, admin_steamid, admin_name,
-            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) as bans,
-            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as mutes,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as bans,
+            COUNT(*) FILTER (WHERE (type = 2 OR punish_type = 2)) as mutes,
             COUNT(*) as total
          FROM panel_fear_punishments
          WHERE created >= $1
@@ -1402,8 +1402,8 @@ async function getPunishmentsTrend(days = 30) {
     const since = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
     const { rows } = await poolQuery(
         `SELECT to_timestamp(created)::date as day,
-            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) as bans,
-            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as mutes,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as bans,
+            COUNT(*) FILTER (WHERE (type = 2 OR punish_type = 2)) as mutes,
             COUNT(*) as total
          FROM panel_fear_punishments
          WHERE created >= $1
@@ -1422,8 +1422,8 @@ async function getPunishmentsMonthComparison() {
 
     const { rows: [curr] } = await poolQuery(
         `SELECT
-            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) as bans,
-            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as mutes,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as bans,
+            COUNT(*) FILTER (WHERE (type = 2 OR punish_type = 2)) as mutes,
             COUNT(*) as total
          FROM panel_fear_punishments
          WHERE to_char(to_timestamp(created), 'YYYY-MM') = $1`,
@@ -1432,8 +1432,8 @@ async function getPunishmentsMonthComparison() {
 
     const { rows: [prev] } = await poolQuery(
         `SELECT
-            COUNT(*) FILTER (WHERE (type = 0 OR punish_type = 0)) as bans,
-            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as mutes,
+            COUNT(*) FILTER (WHERE (type = 1 OR punish_type = 1)) as bans,
+            COUNT(*) FILTER (WHERE (type = 2 OR punish_type = 2)) as mutes,
             COUNT(*) as total
          FROM panel_fear_punishments
          WHERE to_char(to_timestamp(created), 'YYYY-MM') = $1`,
@@ -1501,8 +1501,8 @@ async function getVdfHistoryChecks(limit = 100) {
             SELECT check_id,
                    (array_agg(filename ORDER BY id DESC))[1] AS filename,
                    MIN(created_at) AS created_at,
-                   COUNT(*) AS count,
-                   COUNT(*) FILTER (WHERE fear_banned OR vac_banned OR yooma_banned) AS banned_count,
+            COUNT(*) AS count,
+            COUNT(*) FILTER (WHERE fear_banned OR vac_banned OR yooma_banned OR game_bans > 0) AS banned_count,
                    (array_agg(source ORDER BY id DESC))[1] AS source
             FROM vdf_history
             GROUP BY check_id
@@ -1525,7 +1525,7 @@ async function getVdfHistoryBannedByConfigHash(configHash) {
             SELECT steamid, nickname, fear_banned, fear_reason, fear_unban_time,
                    vac_banned, vac_days_ago, yooma_banned, yooma_reason, created_at
             FROM vdf_history
-            WHERE config_hash = $1 AND (fear_banned = TRUE OR vac_banned = TRUE OR yooma_banned = TRUE)
+            WHERE config_hash = $1 AND (fear_banned = TRUE OR vac_banned = TRUE OR yooma_banned = TRUE OR game_bans > 0)
             ORDER BY created_at DESC
         `, [configHash]);
         return rows.map(r => ({
@@ -2012,7 +2012,11 @@ async function getLinkedSteamAccounts(steamId) {
 async function getAllLinkedGroups(limit = 100, offset = 0) {
     try {
         const { rows: groupRows } = await poolQuery(`
-            SELECT ca.config_hash, ch.filename, ch.created_at, COUNT(*)::int AS account_count
+            SELECT ca.config_hash,
+                   ch.filename,
+                   ch.created_at,
+                   COUNT(*)::int AS account_count,
+                   array_agg(ca.steamid) AS steamids
             FROM config_accounts ca
             JOIN config_hashes ch ON ch.config_hash = ca.config_hash
             GROUP BY ca.config_hash, ch.filename, ch.created_at
@@ -2020,20 +2024,13 @@ async function getAllLinkedGroups(limit = 100, offset = 0) {
             ORDER BY ch.created_at DESC
             LIMIT $1 OFFSET $2
         `, [limit, offset]);
-        const result = [];
-        for (const g of groupRows || []) {
-            const { rows: accounts } = await poolQuery(`
-                SELECT steamid FROM config_accounts WHERE config_hash = $1
-            `, [g.config_hash]);
-            result.push({
-                configHash: g.config_hash,
-                filename: g.filename,
-                createdAt: g.created_at ? (g.created_at.toISOString ? g.created_at.toISOString() : String(g.created_at)) : null,
-                accountCount: g.account_count,
-                steamIds: accounts.map(a => a.steamid)
-            });
-        }
-        return result;
+        return (groupRows || []).map(g => ({
+            configHash: g.config_hash,
+            filename: g.filename,
+            createdAt: g.created_at ? (g.created_at.toISOString ? g.created_at.toISOString() : String(g.created_at)) : null,
+            accountCount: g.account_count,
+            steamIds: Array.isArray(g.steamids) ? g.steamids : []
+        }));
     } catch (e) {
         console.error('[panelPg] getAllLinkedGroups error:', e && e.message);
         return [];

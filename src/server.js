@@ -582,6 +582,15 @@ function fetchFearServers(callback) {
     req.on('error', callback);
 }
 
+function fetchFearServersAsync() {
+    return new Promise((resolve, reject) => {
+        fetchFearServers((err, servers) => {
+            if (err) return reject(err);
+            resolve(servers);
+        });
+    });
+}
+
 const mimeTypes = {
     '.html': 'text/html',
     '.css': 'text/css',
@@ -4369,13 +4378,39 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
 
+            const BANNED_ONLINE_HARD_TIMEOUT_MS = 12000; // 12 секунд — быстрее таймаута прокси/браузера
+            const BANNED_ONLINE_MAX_API_CALLS = 100;
+            const BANNED_ONLINE_MAX_GROUPS = 50;
+            const BANNED_ONLINE_CONCURRENCY = 5;
+
             const computePromise = (async () => {
-                const limit = Math.min(200, parseInt(parsedUrl.searchParams.get('limit') || '100', 10) || 100);
-                const groups = await db.getAllLinkedGroups(limit, 0);
-                const cached = getCachedData('players');
+                let cached = getCachedData('players');
+                // Если кэш пуст/устарел — синхронно подтягиваем онлайн-игроков с коротким таймаутом.
+                if (!cached || !Array.isArray(cached)) {
+                    try {
+                        const servers = await Promise.race([
+                            fetchFearServersAsync(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('servers fetch timeout')), 6000))
+                        ]);
+                        setCachedData('players', servers);
+                        cached = servers;
+                    } catch (e) {
+                        console.warn('[banned-online] players fetch failed, using empty cache:', e && e.message);
+                        cached = [];
+                    }
+                }
+
                 const onlineContext = buildOnlinePlayersContext(cached);
                 const onlineSteamIds = onlineContext.steamIds;
                 const playerDataMap = onlineContext.playerDataMap;
+
+                // Если онлайн пуст — сразу возвращаем пустой результат, не гоняем API.
+                if (onlineSteamIds.size === 0) {
+                    return { groups: [] };
+                }
+
+                const limit = Math.min(200, parseInt(parsedUrl.searchParams.get('limit') || '100', 10) || 100);
+                const groups = await db.getAllLinkedGroups(limit, 0);
 
                 // Функция для перепроверки текущего бана на Fear с кэшированием.
                 async function reverifyFearBans(steamId) {
@@ -4385,7 +4420,10 @@ const server = http.createServer(async (req, res) => {
                         if (cachedPunishments) {
                             list = cachedPunishments;
                         } else {
-                            const res = await punishmentsService.fetchPunishmentsForSteamId(steamId, 'player');
+                            const res = await Promise.race([
+                                punishmentsService.fetchPunishmentsForSteamId(steamId, 'player'),
+                                new Promise((_, reject) => setTimeout(() => reject(new Error('punishment fetch timeout')), 4000))
+                            ]);
                             list = Array.isArray(res.punishments) ? res.punishments : [];
                             punishmentsService.setPunishmentsToCache(steamId, 'player', list);
                         }
@@ -4403,7 +4441,12 @@ const server = http.createServer(async (req, res) => {
                     async function worker() {
                         while (i < tasks.length) {
                             const idx = i++;
-                            results[idx] = await tasks[idx]();
+                            try {
+                                results[idx] = await tasks[idx]();
+                            } catch (e) {
+                                console.warn('[banned-online] task error:', e && e.message);
+                                results[idx] = { sid: '', activeBans: [] };
+                            }
                         }
                     }
                     await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
@@ -4412,13 +4455,16 @@ const server = http.createServer(async (req, res) => {
 
                 const processedGroups = [];
                 let totalApiCalls = 0;
-                const maxApiCalls = 200;
+                let groupsProcessed = 0;
 
                 for (const g of groups) {
+                    if (groupsProcessed >= BANNED_ONLINE_MAX_GROUPS) break;
+                    groupsProcessed++;
+
                     const onlineInGroup = (g.steamIds || []).filter(sid => onlineSteamIds.has(String(sid)));
                     if (onlineInGroup.length === 0) continue;
 
-                    // VDF-история: баны для этого конфига.
+                    // VDF-история: баны для этого конфига (включая game_bans).
                     const vdfBanned = await db.getVdfHistoryBannedByConfigHash(g.configHash);
                     const vdfBannedMap = new Map();
                     for (const r of vdfBanned) {
@@ -4430,8 +4476,11 @@ const server = http.createServer(async (req, res) => {
                     const candidates = onlineInGroup.filter(sid => vdfBannedMap.has(String(sid)));
                     if (candidates.length === 0) continue;
 
+                    const remainingCalls = Math.max(0, BANNED_ONLINE_MAX_API_CALLS - totalApiCalls);
+                    if (remainingCalls <= 0) break;
+
                     // Перепроверяем баны на Fear.
-                    const tasks = candidates.slice(0, Math.max(1, maxApiCalls - totalApiCalls)).map(sid => async () => {
+                    const tasks = candidates.slice(0, remainingCalls).map(sid => async () => {
                         totalApiCalls++;
                         const activeBans = await reverifyFearBans(sid);
                         const onlineData = playerDataMap.get(String(sid));
@@ -4443,7 +4492,7 @@ const server = http.createServer(async (req, res) => {
                         };
                     });
                     if (tasks.length === 0) break;
-                    const results = await runWithConcurrency(tasks, 5);
+                    const results = await runWithConcurrency(tasks, BANNED_ONLINE_CONCURRENCY);
 
                     const bannedAccounts = [];
                     let banCount = 0;
@@ -4480,18 +4529,23 @@ const server = http.createServer(async (req, res) => {
                         bannedAccounts
                     });
 
-                    if (totalApiCalls >= maxApiCalls) break;
+                    if (totalApiCalls >= BANNED_ONLINE_MAX_API_CALLS) break;
                 }
 
                 return { groups: processedGroups };
             })();
 
+            const timedComputePromise = Promise.race([
+                computePromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('banned-online hard timeout')), BANNED_ONLINE_HARD_TIMEOUT_MS))
+            ]);
+
             // Stale-while-revalidate: если есть устаревший кэш, отдаём его мгновенно
             // и обновляем данные в фоне, чтобы следующий запрос получил свежий результат.
             if (bannedOnlineCache.data && cacheAge < BANNED_ONLINE_MAX_STALE_MS) {
                 sendJson(res, 200, bannedOnlineCache.data);
-                bannedOnlineInFlight = computePromise;
-                computePromise.then((result) => {
+                bannedOnlineInFlight = timedComputePromise;
+                timedComputePromise.then((result) => {
                     bannedOnlineCache.data = result;
                     bannedOnlineCache.timestamp = Date.now();
                 }).catch((err) => {
@@ -4502,9 +4556,9 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
 
-            bannedOnlineInFlight = computePromise;
+            bannedOnlineInFlight = timedComputePromise;
             try {
-                const result = await computePromise;
+                const result = await timedComputePromise;
                 bannedOnlineCache.data = result;
                 bannedOnlineCache.timestamp = Date.now();
                 sendJson(res, 200, result);
@@ -4519,7 +4573,8 @@ const server = http.createServer(async (req, res) => {
                 sendJson(res, 200, bannedOnlineCache.data);
                 return;
             }
-            sendError(res, 500, 'DB_ERROR', err.message || 'DB error');
+            // В случае таймаута или ошибки — отдаём пустой список, а не 500, чтобы фронт не показывал "Ошибка загрузки".
+            sendJson(res, 200, { groups: [], error: err.message || 'timeout', partial: true });
         }
         return;
     }
@@ -5513,25 +5568,33 @@ function createBackgroundJobsForCycle(cycleNo, dataForChecks) {
     return [...criticalJobs, ...heavyJobs];
 }
 
-function scheduleBackgroundJobs(cycleNo, dataForChecks) {
+async function scheduleBackgroundJobs(cycleNo, dataForChecks) {
     const jobs = createBackgroundJobsForCycle(cycleNo, dataForChecks);
-    if (!jobs.length) return;
-    jobs.forEach((job, idx) => {
+    if (!jobs.length) {
+        backgroundState.cycleRunning = false;
+        return;
+    }
+    // Запускаем job'ы с stagger, но ждём завершения всех перед снятием флага.
+    const promises = jobs.map((job, idx) => new Promise((resolve) => {
         setTimeout(() => {
             try {
                 const ret = job();
-                if (ret && typeof ret.catch === 'function') {
-                    ret.catch((err) => console.error('[Background] Ошибка job:', err?.message || err));
+                if (ret && typeof ret.then === 'function') {
+                    ret.then(resolve).catch((err) => {
+                        console.error('[Background] Ошибка job:', err?.message || err);
+                        resolve();
+                    });
+                } else {
+                    resolve();
                 }
             } catch (err) {
                 console.error('[Background] Ошибка job:', err?.message || err);
+                resolve();
             }
         }, idx * BG_STAGGER_MS);
-    });
-    const releaseAfterMs = (jobs.length * BG_STAGGER_MS) + 1500;
-    setTimeout(() => {
-        backgroundState.cycleRunning = false;
-    }, releaseAfterMs);
+    }));
+    await Promise.all(promises);
+    backgroundState.cycleRunning = false;
 }
 
 // Функция для фоновой загрузки данных
@@ -5580,7 +5643,14 @@ function updateDataInBackground() {
                 
         const dataForChecks = hasValidData ? servers : (prev || servers);
         console.log('[Background] Запуск проверок банов (staggered)...');
-        scheduleBackgroundJobs(currentCycle, dataForChecks);
+        (async () => {
+            try {
+                await scheduleBackgroundJobs(currentCycle, dataForChecks);
+            } catch (err) {
+                console.error('[Background] Ошибка цикла проверок:', err?.message || err);
+                backgroundState.cycleRunning = false;
+            }
+        })();
     });
 }
 
@@ -5640,7 +5710,7 @@ function updateVACBansInBackground(servers) {
             });
             
             const newBanned = allBanData
-                .filter(p => p.NumberOfGameBans && parseInt(p.NumberOfGameBans) > 0);
+                .filter(p => (p.VACBanned && parseInt(p.NumberOfVACBans || 0) > 0) || (p.NumberOfGameBans && parseInt(p.NumberOfGameBans) > 0));
 
             // Мержим с существующим кэшем: оставляем ранее найденных + добавляем новых
             const existing = getCachedData('vacBans');

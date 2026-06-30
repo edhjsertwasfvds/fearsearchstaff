@@ -756,8 +756,8 @@ function getFearPunishmentsStats(since = 0) {
     return db.prepare(
         `SELECT
             admin_steamid,
-            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) AS bans,
-            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) AS mutes,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) AS bans,
+            SUM(CASE WHEN (type = 2 OR punish_type = 2) THEN 1 ELSE 0 END) AS mutes,
             COUNT(*) AS total
          FROM fear_punishments
          WHERE created >= ?
@@ -776,8 +776,8 @@ function getStaffPunishmentsDaily(days = 7) {
     const since = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
     return db.prepare(
         `SELECT date(created, 'unixepoch') as day, admin_steamid, admin_name,
-            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) as bans,
-            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as mutes,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as bans,
+            SUM(CASE WHEN (type = 2 OR punish_type = 2) THEN 1 ELSE 0 END) as mutes,
             COUNT(*) as total
          FROM fear_punishments
          WHERE created >= ?
@@ -790,8 +790,8 @@ function getPunishmentsTrend(days = 30) {
     const since = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
     return db.prepare(
         `SELECT date(created, 'unixepoch') as day,
-            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) as bans,
-            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as mutes,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as bans,
+            SUM(CASE WHEN (type = 2 OR punish_type = 2) THEN 1 ELSE 0 END) as mutes,
             COUNT(*) as total
          FROM fear_punishments
          WHERE created >= ?
@@ -808,8 +808,8 @@ function getPunishmentsMonthComparison() {
 
     const curr = db.prepare(
         `SELECT
-            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) as bans,
-            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as mutes,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as bans,
+            SUM(CASE WHEN (type = 2 OR punish_type = 2) THEN 1 ELSE 0 END) as mutes,
             COUNT(*) as total
          FROM fear_punishments
          WHERE strftime('%Y-%m', created, 'unixepoch') = ?`
@@ -817,8 +817,8 @@ function getPunishmentsMonthComparison() {
 
     const prev = db.prepare(
         `SELECT
-            SUM(CASE WHEN (type = 0 OR punish_type = 0) THEN 1 ELSE 0 END) as bans,
-            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as mutes,
+            SUM(CASE WHEN (type = 1 OR punish_type = 1) THEN 1 ELSE 0 END) as bans,
+            SUM(CASE WHEN (type = 2 OR punish_type = 2) THEN 1 ELSE 0 END) as mutes,
             COUNT(*) as total
          FROM fear_punishments
          WHERE strftime('%Y-%m', created, 'unixepoch') = ?`
@@ -1208,7 +1208,8 @@ function getLinkedSteamAccounts(steamId) {
 function getAllLinkedGroups(limit = 100, offset = 0) {
     try {
         const groupRows = db.prepare(`
-            SELECT ca.config_hash, ch.filename, ch.created_at, COUNT(*) AS account_count
+            SELECT ca.config_hash, ch.filename, ch.created_at, COUNT(*) AS account_count,
+                   group_concat(ca.steamid, ',') AS steamids_csv
             FROM config_accounts ca
             JOIN config_hashes ch ON ch.config_hash = ca.config_hash
             GROUP BY ca.config_hash
@@ -1216,18 +1217,13 @@ function getAllLinkedGroups(limit = 100, offset = 0) {
             ORDER BY ch.created_at DESC
             LIMIT ? OFFSET ?
         `).all(limit, offset);
-        const result = [];
-        for (const g of groupRows || []) {
-            const accounts = db.prepare('SELECT steamid FROM config_accounts WHERE config_hash = ?').all(g.config_hash);
-            result.push({
-                configHash: g.config_hash,
-                filename: g.filename,
-                createdAt: g.created_at ? new Date(Number(g.created_at) * 1000).toISOString() : null,
-                accountCount: g.account_count,
-                steamIds: accounts.map(a => a.steamid)
-            });
-        }
-        return result;
+        return (groupRows || []).map(g => ({
+            configHash: g.config_hash,
+            filename: g.filename,
+            createdAt: g.created_at ? new Date(Number(g.created_at) * 1000).toISOString() : null,
+            accountCount: g.account_count,
+            steamIds: g.steamids_csv ? String(g.steamids_csv).split(',') : []
+        }));
     } catch (e) {
         console.error('[panelSqlite] getAllLinkedGroups error:', e && e.message);
         return [];
