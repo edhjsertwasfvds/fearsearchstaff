@@ -13,6 +13,7 @@ const url = require('url');
 const querystring = require('querystring');
 
 const db = require('./database');
+const { FEAR_ACCESS_TOKEN } = require('./config');
 
 const STEAM_API_KEY = process.env.STEAM_API_KEY || '';
 const FEAR_API_BASE = process.env.FEAR_API_BASE || 'https://api.fearproject.ru';
@@ -188,6 +189,17 @@ async function acquire(sem, fn) {
 const _fearBanCache = new Map();
 const FEAR_BAN_CACHE_TTL = 5 * 60 * 1000;
 
+function fearAuthHeaders() {
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+    };
+    if (FEAR_ACCESS_TOKEN) {
+        headers.Cookie = `access_token=${FEAR_ACCESS_TOKEN}`;
+    }
+    return headers;
+}
+
 async function checkFear(steamid) {
     const now = Date.now();
     const cached = _fearCache.get(steamid);
@@ -196,10 +208,7 @@ async function checkFear(steamid) {
     const profileUrl = `${FEAR_API_BASE}/profile/${steamid}`;
     try {
         const res = await getJson(profileUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json'
-            },
+            headers: fearAuthHeaders(),
             timeout: 5000
         });
         console.log(`[Checker] Fear ${steamid}: status=${res.status}, hasData=${Boolean(res.data)}, url=${profileUrl}`);
@@ -221,10 +230,7 @@ async function checkFearBan(steamid) {
     const banUrl = `${FEAR_API_BASE}/bans/check/${steamid}`;
     try {
         const res = await getJson(banUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json'
-            },
+            headers: fearAuthHeaders(),
             timeout: 5000
         });
         console.log(`[Checker] FearBan ${steamid}: status=${res.status}, hasData=${Boolean(res.data)}, url=${banUrl}`);
