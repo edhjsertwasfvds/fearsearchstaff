@@ -4333,7 +4333,7 @@ const server = http.createServer(async (req, res) => {
         }
         return;
     }
-    if (parsedUrl.pathname.startsWith('/api/linked-accounts/') && req.method === 'GET') {
+    if (parsedUrl.pathname.startsWith('/api/linked-accounts/') && !parsedUrl.pathname.startsWith('/api/linked-accounts/banned-online') && req.method === 'GET') {
         const session = await getSessionFromReq(req);
         if (!session) {
             sendError(res, 401, 'UNAUTHORIZED', 'Не авторизован');
