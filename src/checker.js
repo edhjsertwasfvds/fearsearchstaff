@@ -396,9 +396,9 @@ async function checkAccounts(steamids) {
         const onFear = fear !== null || fearBan !== null || (Array.isArray(fearPunishments) && fearPunishments.length > 0);
 
         // Самый надёжный источник — поиск наказаний /punishments/search.
-        // Если есть активный (1) или истёкший (4) бан — считаем забаненным.
+        // Считаем забаненным только при активном статусе (1). Истёкшие (4) и снятые (2) не считаем.
         const validBans = Array.isArray(fearPunishments)
-            ? fearPunishments.filter(p => [1, 4].includes(Number(p.status || -1)))
+            ? fearPunishments.filter(p => Number(p.status || -1) === 1)
             : [];
         let banInfo = {};
         if (validBans.length > 0) {
@@ -596,7 +596,7 @@ async function handleDebug(req, res, rawUrlPath) {
             checkFearPunishments(steamid)
         ]);
         const validBans = Array.isArray(punishments)
-            ? punishments.filter(p => [1, 4].includes(Number(p.status || -1)))
+            ? punishments.filter(p => Number(p.status || -1) === 1)
             : [];
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
@@ -607,7 +607,7 @@ async function handleDebug(req, res, rawUrlPath) {
             banCheck,
             punishments: {
                 total: Array.isArray(punishments) ? punishments.length : 0,
-                validBans: validBans.length,
+                activeBans: validBans.length,
                 firstBan: validBans[0] || null,
                 all: punishments
             },
