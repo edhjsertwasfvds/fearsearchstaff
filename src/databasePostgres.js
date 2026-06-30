@@ -505,6 +505,10 @@ async function initDatabase() {
         );
         ALTER TABLE vdf_history ADD COLUMN IF NOT EXISTS source VARCHAR(16) DEFAULT 'site';
 
+        -- Migration: старые деплои могут не иметь колонки external_id
+        ALTER TABLE drops ADD COLUMN IF NOT EXISTS external_id BIGINT;
+        ALTER TABLE drops ADD CONSTRAINT IF NOT EXISTS drops_external_id_unique UNIQUE (external_id);
+
         CREATE TABLE IF NOT EXISTS drops (
             id BIGSERIAL PRIMARY KEY,
             external_id BIGINT,

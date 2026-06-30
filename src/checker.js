@@ -187,6 +187,7 @@ async function acquire(sem, fn) {
 }
 
 const _fearBanCache = new Map();
+const _fearPunishCache = new Map();
 const FEAR_BAN_CACHE_TTL = 5 * 60 * 1000;
 
 function fearAuthHeaders() {
@@ -242,6 +243,36 @@ async function checkFearBan(steamid) {
         console.log(`[Checker] FearBan ${steamid}: error ${e.message}, url=${banUrl}`);
     }
     return null;
+}
+
+async function checkFearPunishments(steamid) {
+    const now = Date.now();
+    const cached = _fearPunishCache.get(steamid);
+    if (cached && now - cached.ts < FEAR_BAN_CACHE_TTL) return cached.data;
+
+    const result = [];
+    const limit = 20;
+    const maxPages = 5;
+    for (let page = 1; page <= maxPages; page++) {
+        const qs = '?' + querystring.stringify({ q: steamid, type: 1, page, limit });
+        const url = `${FEAR_API_BASE}/punishments/search${qs}`;
+        try {
+            const res = await getJson(url, {
+                headers: fearAuthHeaders(),
+                timeout: 5000
+            });
+            if (res.status !== 200 || !res.data || !Array.isArray(res.data.punishments)) break;
+            for (const p of res.data.punishments) {
+                if (String(p.steamid || '').trim() === String(steamid)) result.push(p);
+            }
+            if (res.data.punishments.length < limit) break;
+        } catch (e) {
+            console.log(`[Checker] FearPunishments ${steamid}: error ${e.message}, page=${page}`);
+            break;
+        }
+    }
+    _fearPunishCache.set(steamid, { data: result, ts: now });
+    return result;
 }
 
 function mskFromTimestamp(ts) {
@@ -346,9 +377,10 @@ async function checkAccounts(steamids) {
     }
 
     const checkOne = async (sid) => {
-        const [fear, fearBan, yooma] = await Promise.all([
+        const [fear, fearBan, fearPunishments, yooma] = await Promise.all([
             acquire(FEAR_SEM, () => checkFear(sid)),
             acquire(FEAR_SEM, () => checkFearBan(sid)),
+            acquire(FEAR_SEM, () => checkFearPunishments(sid)),
             acquire(YOOMA_SEM, () => checkYooma(sid))
         ]);
         const steamBan = bansMap[sid] || {};
@@ -361,15 +393,31 @@ async function checkAccounts(steamids) {
         const nickname = summary.personaname || sid;
         const avatar = summary.avatarfull || summary.avatar || '';
 
-        const onFear = fear !== null || fearBan !== null;
+        const onFear = fear !== null || fearBan !== null || (Array.isArray(fearPunishments) && fearPunishments.length > 0);
 
-        const profileBanInfo = fear ? (fear.banInfo || {}) : {};
-        const checkBanInfo = fearBan || {};
+        // Самый надёжный источник — поиск наказаний /punishments/search.
+        // Если есть активный (1) или истёкший (4) бан — считаем забаненным.
+        const validBans = Array.isArray(fearPunishments)
+            ? fearPunishments.filter(p => [1, 4].includes(Number(p.status || -1)))
+            : [];
         let banInfo = {};
-        if (checkBanInfo.isBanned || checkBanInfo.is_banned || checkBanInfo.banned) {
-            banInfo = checkBanInfo;
-        } else if (profileBanInfo.isBanned) {
-            banInfo = profileBanInfo;
+        if (validBans.length > 0) {
+            const p = validBans[0];
+            banInfo = {
+                isBanned: true,
+                is_banned: true,
+                banned: true,
+                reason: p.reason || p.ban_reason || p.message || p.comment || p.desc || p.punish_reason || p.text || '',
+                unbanTimestamp: p.expires || p.expires_at || p.unban_time || null
+            };
+        } else {
+            const profileBanInfo = fear ? (fear.banInfo || {}) : {};
+            const checkBanInfo = fearBan || {};
+            if (checkBanInfo.isBanned || checkBanInfo.is_banned || checkBanInfo.banned) {
+                banInfo = checkBanInfo;
+            } else if (profileBanInfo.isBanned) {
+                banInfo = profileBanInfo;
+            }
         }
 
         const fearBanned = Boolean(banInfo.isBanned || banInfo.is_banned || banInfo.banned);
@@ -542,14 +590,31 @@ async function handleDebug(req, res, rawUrlPath) {
     const fearMatch = rawUrlPath.match(/^\/checker\/api\/debug\/fear\/(.+)$/);
     if (fearMatch && req.method === 'GET') {
         const steamid = decodeURIComponent(fearMatch[1]);
-        const data = await checkFear(steamid);
+        const [profile, banCheck, punishments] = await Promise.all([
+            checkFear(steamid),
+            checkFearBan(steamid),
+            checkFearPunishments(steamid)
+        ]);
+        const validBans = Array.isArray(punishments)
+            ? punishments.filter(p => [1, 4].includes(Number(p.status || -1)))
+            : [];
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             steamid,
             fear_api_base: FEAR_API_BASE,
-            found: Boolean(data),
-            profile: data,
-            banInfo: data ? (data.banInfo || null) : null
+            found: Boolean(profile),
+            profile,
+            banCheck,
+            punishments: {
+                total: Array.isArray(punishments) ? punishments.length : 0,
+                validBans: validBans.length,
+                firstBan: validBans[0] || null,
+                all: punishments
+            },
+            banInfo: profile ? (profile.banInfo || null) : null,
+            isBannedByPunishments: validBans.length > 0,
+            isBannedByBanCheck: Boolean(banCheck && (banCheck.isBanned || banCheck.is_banned || banCheck.banned)),
+            isBannedByProfile: Boolean(profile && profile.banInfo && profile.banInfo.isBanned)
         }));
         return;
     }
