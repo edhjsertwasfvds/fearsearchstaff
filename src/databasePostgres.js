@@ -507,7 +507,7 @@ async function initDatabase() {
 
         -- Migration: старые деплои могут не иметь колонки external_id
         ALTER TABLE drops ADD COLUMN IF NOT EXISTS external_id BIGINT;
-        ALTER TABLE drops ADD CONSTRAINT IF NOT EXISTS drops_external_id_unique UNIQUE (external_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_drops_external_id_unique ON drops(external_id);
 
         CREATE TABLE IF NOT EXISTS drops (
             id BIGSERIAL PRIMARY KEY,
