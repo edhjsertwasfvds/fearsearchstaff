@@ -5650,6 +5650,8 @@ function updateDataInBackground() {
                 console.error('[Background] Ошибка цикла проверок:', err?.message || err);
                 backgroundState.cycleRunning = false;
             }
+            // Очистка старых данных — раз в цикл (раз в 5 мин, удалит если есть что)
+            try { await db.cleanupOldData(); } catch (_) {}
         })();
     });
 }

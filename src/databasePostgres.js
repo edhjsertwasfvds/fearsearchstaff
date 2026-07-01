@@ -1863,8 +1863,55 @@ module.exports = {
     saveDrops,
     getDrops,
     getDropsCount,
-    getDropsByPeriod
+    getDropsByPeriod,
+    cleanupOldData
 };
+
+async function cleanupOldData() {
+    const stats = {};
+    try {
+        const nowMs = Date.now();
+        const nowSec = Math.floor(nowMs / 1000);
+
+        // panel_server_activity — 30 дней
+        const cutoff30d = nowSec - 30 * 86400;
+        const r1 = await poolQuery('DELETE FROM panel_server_activity WHERE timestamp < $1', [cutoff30d]);
+        stats.server_activity = r1.rowCount || 0;
+
+        // app_logs — 14 дней
+        const r2 = await poolQuery('DELETE FROM app_logs WHERE created_at < to_timestamp($1)', [cutoff30d]);
+        stats.app_logs = r2.rowCount || 0;
+
+        // vdf_history — 60 дней
+        const cutoff60d = nowSec - 60 * 86400;
+        const r3 = await poolQuery('DELETE FROM vdf_history WHERE created_at < to_timestamp($1)', [cutoff60d]);
+        stats.vdf_history = r3.rowCount || 0;
+
+        // panel_login_logs — 30 дней
+        const cutoffLoginMs = nowMs - 30 * 86400 * 1000;
+        const r4 = await poolQuery('DELETE FROM panel_login_logs WHERE created_at < $1', [cutoffLoginMs]);
+        stats.login_logs = r4.rowCount || 0;
+
+        // vdf_rechecks — 30 дней
+        const r5 = await poolQuery('DELETE FROM vdf_rechecks WHERE requested_at < to_timestamp($1)', [cutoff30d]);
+        stats.vdf_rechecks = r5.rowCount || 0;
+
+        // drops — 90 дней
+        const cutoff90d = nowSec - 90 * 86400;
+        const r6 = await poolQuery('DELETE FROM drops WHERE created_at < to_timestamp($1)', [cutoff90d]);
+        stats.drops = r6.rowCount || 0;
+
+        // panel_bot_tasks — 30 дней
+        const r7 = await poolQuery('DELETE FROM panel_bot_tasks WHERE created_at < $1', [nowMs - 30 * 86400 * 1000]);
+        stats.bot_tasks = r7.rowCount || 0;
+
+        console.log('[DB Cleanup] Removed old data:', JSON.stringify(stats));
+        return stats;
+    } catch (err) {
+        console.error('[DB Cleanup] Error:', err.message);
+        return stats;
+    }
+}
 
 async function saveDrops(drops) {
     if (!Array.isArray(drops) || drops.length === 0) return 0;
