@@ -1,6 +1,6 @@
 """
 Discord-based backup for PostgreSQL database.
-Dumps all tables as JSON, compresses, uploads to Discord.
+Streams dump to disk to avoid memory spikes.
 No external tools needed.
 
 Requires:
@@ -12,12 +12,15 @@ import io
 import gzip
 import json
 import logging
+import tempfile
 import psycopg2
 import psycopg2.extras
 from datetime import datetime, timezone, date
 from decimal import Decimal
 
 logger = logging.getLogger("discord_backup")
+
+SKIP_TABLES = {"kv_store", "leaderboard_cache"}
 
 
 def _get_conn():
@@ -30,7 +33,7 @@ def _get_conn():
             sep = "&" if "?" in url else "?"
             url += f"{sep}sslmode=require"
         conn = psycopg2.connect(url, connect_timeout=30)
-        logger.info(f"[Backup] PostgreSQL подключена")
+        logger.info("[Backup] PostgreSQL подключена")
         return conn
     except Exception as e:
         logger.error(f"[Backup] Ошибка подключения: {e}")
@@ -47,7 +50,8 @@ def _default(obj):
     return str(obj)
 
 
-def create_dump_bytes() -> tuple[bytes, str] | None:
+def _create_streaming_dump() -> tuple[bytes, str] | None:
+    """Потоковый дамп: пишем в файл построчно, сжимаем gzip."""
     conn = _get_conn()
     if not conn:
         return None
@@ -64,46 +68,72 @@ def create_dump_bytes() -> tuple[bytes, str] | None:
             logger.error("[Backup] Таблицы не найдены")
             return None
 
-        logger.info(f"[Backup] Таблиц: {len(tables)}")
-
-        # Служебные таблицы бота — пропускаем (восстанавливаются автоматически)
-        SKIP_TABLES = {"kv_store", "leaderboard_cache"}
-
-        dump = {
-            "created": datetime.now(timezone.utc).isoformat(),
-            "tables": {}
-        }
-
-        total_rows = 0
-        for table in tables:
-            if table in SKIP_TABLES:
-                logger.info(f"[Backup] {table}: ПРОПУСК (служебная)")
-                continue
-            cur.execute(f'SELECT * FROM "{table}"')
-            rows = cur.fetchall()
-            # Convert RealDictRow to plain dicts, strip huge text fields if needed
-            clean_rows = []
-            for r in rows:
-                d = dict(r)
-                # Обрезаем content в config_hashes чтобы не раздувать бэкап
-                if table == "config_hashes" and "content" in d and d["content"]:
-                    d["content"] = d["content"][:100] + "...(truncated)"
-                clean_rows.append(d)
-            dump["tables"][table] = clean_rows
-            total_rows += len(clean_rows)
-            logger.info(f"[Backup] {table}: {len(clean_rows)} строк")
-
-        cur.close()
-
-        json_bytes = json.dumps(dump, ensure_ascii=False, default=_default).encode("utf-8")
-        logger.info(f"[Backup] JSON: {len(json_bytes)} bytes ({len(json_bytes)/1024/1024:.2f}MB), строк: {total_rows}")
-
-        compressed = gzip.compress(json_bytes, compresslevel=6)
-        logger.info(f"[Backup] Сжато: {len(compressed)} bytes ({len(compressed)/1024/1024:.2f}MB)")
+        logger.info(f"[Backup] Таблиц: {len(tables)}, пропуск: {SKIP_TABLES}")
 
         now = datetime.now(timezone.utc)
         filename = f"fearsearch_backup_{now.strftime('%Y-%m-%d_%H-%M')}.json.gz"
-        return compressed, filename
+        tmp_dir = tempfile.mkdtemp(prefix="bck_")
+        gz_path = os.path.join(tmp_dir, filename)
+
+        total_rows = 0
+        with gzip.open(gz_path, "wb", compresslevel=6) as gz:
+            # Header
+            header = json.dumps({
+                "created": now.isoformat(),
+                "version": 1
+            }, ensure_ascii=False) + "\n"
+            gz.write(header.encode("utf-8"))
+
+            for table in tables:
+                if table in SKIP_TABLES:
+                    logger.info(f"[Backup] {table}: ПРОПУСК")
+                    continue
+
+                cur.execute(f'SELECT * FROM "{table}"')
+                cols = [desc[0] for desc in cur.description] if cur.description else []
+
+                # Пишем таблицу построчно — не держим всё в памяти
+                table_header = json.dumps({"table": table, "columns": cols}) + "\n"
+                gz.write(table_header.encode("utf-8"))
+
+                row_count = 0
+                while True:
+                    rows = cur.fetchmany(500)  # по 500 строк за раз
+                    if not rows:
+                        break
+                    for row in rows:
+                        d = dict(row)
+                        # Обрезаем огромные content
+                        if table == "config_hashes" and "content" in d and d["content"] and len(str(d["content"])) > 500:
+                            d["content"] = str(d["content"])[:500] + "...(truncated)"
+                        line = json.dumps(d, ensure_ascii=False, default=_default) + "\n"
+                        gz.write(line.encode("utf-8"))
+                        row_count += 1
+
+                total_rows += row_count
+                logger.info(f"[Backup] {table}: {row_count} строк")
+
+            # Footer
+            footer = json.dumps({"total_rows": total_rows, "tables_done": True}) + "\n"
+            gz.write(footer.encode("utf-8"))
+
+        cur.close()
+
+        # Читаем результат
+        file_size = os.path.getsize(gz_path)
+        logger.info(f"[Backup] Готово: {total_rows} строк, {file_size} bytes ({file_size/1024/1024:.2f}MB)")
+
+        with open(gz_path, "rb") as f:
+            data = f.read()
+
+        # Чистим temp
+        try:
+            os.remove(gz_path)
+            os.rmdir(tmp_dir)
+        except Exception:
+            pass
+
+        return data, filename
 
     except Exception as e:
         logger.error(f"[Backup] Ошибка: {e}")
@@ -113,6 +143,10 @@ def create_dump_bytes() -> tuple[bytes, str] | None:
             conn.close()
         except Exception:
             pass
+
+
+def create_dump_bytes() -> tuple[bytes, str] | None:
+    return _create_streaming_dump()
 
 
 async def upload_backup(channel) -> dict:
