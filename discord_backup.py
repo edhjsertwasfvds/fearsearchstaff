@@ -20,7 +20,7 @@ from decimal import Decimal
 
 logger = logging.getLogger("discord_backup")
 
-SKIP_TABLES = {"kv_store", "leaderboard_cache"}
+SKIP_TABLES = {"kv_store", "leaderboard_cache", "app_logs", "panel_server_activity", "panel_login_logs", "login_history", "panel_sessions"}
 
 
 def _get_conn():
@@ -86,7 +86,14 @@ def _create_streaming_dump() -> tuple[bytes, str] | None:
 
             for table in tables:
                 if table in SKIP_TABLES:
-                    logger.info(f"[Backup] {table}: ПРОПУСК")
+                    logger.info(f"[Backup] {table}: ПРОПУСК (в SKIP_TABLES)")
+                    continue
+
+                cur.execute(f'SELECT COUNT(*) as cnt FROM "{table}"')
+                cnt_row = cur.fetchone()
+                row_count_total = cnt_row['cnt'] if cnt_row else 0
+                if row_count_total == 0:
+                    logger.info(f"[Backup] {table}: ПРОПУСК (пустая)")
                     continue
 
                 cur.execute(f'SELECT * FROM "{table}"')

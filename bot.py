@@ -10714,6 +10714,7 @@ _load_drops()
 @tasks.loop(seconds=30)
 async def drops_loop():
     """Каждые 30 секунд проверяет новые дропы на Fear и логирует их."""
+    global _drops_log, _drops_known_ids
     try:
         async with aiohttp.ClientSession() as session:
             headers = await _fear_headers()
