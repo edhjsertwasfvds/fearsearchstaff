@@ -9307,14 +9307,18 @@ async def on_command_error(ctx, error):
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    """Мгновенный реконнект если бота кикнуло из войса."""
+    """Мгновенный реконнект ТОЛЬКО если бота полностью кикнуло из войса (after.channel = None).
+    Если его просто переместили в другой канал — не трогаем."""
     if member.id != bot.user.id:
         return
     if not VOICE_CHANNEL_ID:
         return
-    # Бот отключился или его переместили — переподключаемся к нужному каналу
-    if after.channel is None or (before.channel and after.channel and before.channel.id != after.channel.id):
-        await asyncio.sleep(1)
+    # Перемещение в другой канал — пофиг, пусть сидит где хотят
+    if before.channel and after.channel and before.channel.id != after.channel.id:
+        return
+    # Полностью отключился — переподключаемся к VOICE_CHANNEL_ID
+    if after.channel is None:
+        await asyncio.sleep(2)
         try:
             vc = bot.get_channel(VOICE_CHANNEL_ID)
             if vc and isinstance(vc, discord.VoiceChannel):
@@ -11371,7 +11375,7 @@ async def before_db_cleanup():
 
 @tasks.loop(seconds=15)
 async def voice_reconnect_loop():
-    """Каждые 15 секунд проверяет, что бот в войс-канале, и переподключается при необходимости."""
+    """Каждые 15 секунд проверяет, что бот в войсе. Только если бот ОТВАЛИЛСЯ completely — переподключает к VOICE_CHANNEL_ID."""
     if not VOICE_CHANNEL_ID:
         return
     try:
@@ -11379,10 +11383,10 @@ async def voice_reconnect_loop():
         if not vc or not isinstance(vc, discord.VoiceChannel):
             return
         guild = vc.guild
-        # Если бот уже подключен к любому войс-каналу — не трогаем его
+        # Если бот подключен к ЛЮБОМУ войс-каналу — он жив, не трогаем
         if guild.voice_client and guild.voice_client.is_connected():
             return
-        # Только если бот не в войсе — подключаемся к VOICE_CHANNEL_ID
+        # Только если бот нигде не в войсе — подключаемся
         await vc.connect(self_deaf=True, self_mute=True)
         _log(f"🔊 [VOICE] Переподключился в #{vc.name}", discord=False)
     except Exception as e:
